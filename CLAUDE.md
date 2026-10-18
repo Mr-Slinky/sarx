@@ -1,11 +1,12 @@
 # CLAUDE.md
 
-This file guides AI agents working in the Sarx repository. The global CLAUDE.md still applies, apart
-from its Java, Maven and Log4j2 sections. Cargo takes the place of Maven here.
+This file guides AI agents working in the Sarx repository. The README states what Sarx is, its design
+decisions, its workspace, how to build it and the conventions that every developer follows, agents
+included. An agent reads it at the start of every session. This file adds the instructions that apply
+to agents alone.
 
-The README states what Sarx is, the planned features, the design decisions, the crate layout and the
-TODO list. Read it at the start of every session, because this file relies on it rather than
-repeating it.
+The global CLAUDE.md still applies, apart from its Java, Maven and Log4j2 sections. The README's test
+conventions take the place of the Java mechanics in its testing standards.
 
 ---
 
@@ -13,52 +14,23 @@ repeating it.
 
 Sarx is a game and a course of study at once, and the second goal weighs as much as the first. The
 developer is building every layer below the gameplay by hand, to understand the whole graphics
-pipeline and the architecture of a game engine. The developer expects the project to run for several
-years.
+pipeline and the architecture of a game engine.
 
-- **Bevy and other game engines are out.** An engine does the work that the developer wants to
-  learn.
-- **Each library is a decision of its own.** Where a library exists for a job, the agent and the
-  developer discuss it and weigh its pros and cons before Sarx takes it on. Three questions decide
-  the outcome:
-  - **Functions or architecture.** A library of separate functions leaves Sarx's design alone. glam
-    is the example, since how it computes a dot product has no bearing on the game. A library that
-    brings its own architecture commits Sarx to someone else's opinions, as an ECS library would.
-  - **What it hides.** A library that hides a part the developer wants to learn and control stays
-    out. An ECS library hides the ECS, for example. wgpu hides the differences between Vulkan, Metal
-    and DirectX, and leaves the pipeline, shaders, buffers and draw calls in the developer's hands.
-  - **Labour.** The volume of work that a library saves counts in its favour. Hand-writing the maths
-    that glam provides would take long enough to stall the project.
+- **Libraries go to discussion first.** An agent raises a library with the developer, and weighs it
+  against the questions in the README, before suggesting that Sarx take it on.
 - **Difficulty is never a con.** The agent never raises how hard something is as a reason against
   building it by hand.
-- **Build to extend, wherever possible.** The agent proposes a small, runnable MVP that teaches a
-  concept, and the developer extends it as the concept lands. Throwaway code is the exception, kept
-  for a piece where building something to extend proves too difficult. The agent judges which kind
-  each piece is, using one test:
+- **Build to extend, wherever possible.** The agent proposes a small, runnable first version that
+  teaches a concept, and the developer extends it as the concept becomes clear. Throwaway code is the
+  exception, kept for a piece where building something to extend proves too difficult. The agent
+  judges which kind each piece is, using one test:
   - **Structure is extended.** Code that other code builds on, such as the render loop, the GPU
-    setup, the ECS and the simulation loop, starts as an MVP and grows from there.
+    setup, the ECS and the simulation loop, starts as a first version and grows from there.
   - **Content can be thrown away.** A small piece that exists only to demonstrate something, such as
-    a test shader or a hard-coded triangle, goes once it has served its purpose.
+    a test shader or a hard-coded triangle, is deleted once it has served its purpose.
 
   The agent says which kind a piece is before the developer builds it. Where the call is unclear,
   the agent discusses it with the developer.
-
----
-
-## Workspace
-
-Sarx is a Cargo workspace. Each crate lives in its own folder under `crates/`, and the root
-`Cargo.toml` picks up every folder there as a member. The commands below run from the repository
-root.
-
-| Task              | Command                             |
-|-------------------|-------------------------------------|
-| Build every crate | `cargo build`                       |
-| Run the game      | `cargo run -p sarx-app`             |
-| Test every crate  | `cargo test`                        |
-| Build one crate   | `cargo build -p <crate>`            |
-| Lint every crate  | `cargo clippy --workspace`          |
-| Add a dependency  | `cargo add -p <crate> <dependency>` |
 
 ---
 
@@ -81,14 +53,14 @@ builds nothing. Building starts only when a message asks for it in plain words, 
 
 ### Areas Open to Agents
 
-Agents have free rein in four areas:
+Agents act without asking in four areas:
 
 1. **Documentation and comments.** Agents write and edit doc comments, inline comments, READMEs and
    anything under `docs/`.
-2. **Concepts.** Agents explain any Rust, graphics, GPU or game-architecture concept the developer
-   is still getting to grips with. The developer knows Java well and some Rust. Graphics programming
-   and game architecture are new, so the agent explains each concept in plain words on first use and
-   ties it to Sarx. A comparison with the Java counterpart often helps. Where the agent draws one, it
+2. **Concepts.** Agents explain any Rust, graphics, GPU or game-architecture concept that the
+   developer is still learning. The developer knows Java well and some Rust. Graphics programming and
+   game architecture are new to the developer. The agent therefore explains each concept in plain
+   words on first use and ties it to Sarx. A comparison with the Java counterpart often helps. Where the agent draws one, it
    also says where the comparison stops holding true.
 3. **One function at a time.** An agent writes a single, clearly defined function or method per
    request. The request states what the function takes, what it returns and what it does. Where any
@@ -100,7 +72,7 @@ Agents have free rein in four areas:
 
 Every other change waits for an explicit instruction from the developer. That includes writing more
 than one function, adding types, modules or crates, restructuring code, adding dependencies and
-changing the logic of code the developer wrote.
+changing the logic of code that the developer wrote.
 
 ### Lifetimes and Smart Pointers
 
@@ -121,54 +93,33 @@ The review exists to improve the developer's Rust and graphics code.
 - A finding can include a short snippet in chat that shows the fix. The developer then makes the
   change in the code.
 - The agent can flag an item marked `pub` that no code outside its crate needs yet. `pub(crate)` is
-  the default until another crate needs the item. This is a decision based on the cost of changing
-  visibility later. Widening `pub(crate)` to `pub` breaks no code, while narrowing `pub` to
+  the default until another crate needs the item. This is a decision, taken because the two
+  directions differ in what they break. Widening `pub(crate)` to `pub` breaks no code, while narrowing `pub` to
   `pub(crate)` breaks every other crate that uses the item.
 
 ### Tests
 
-An agent writes a test only when the developer asks for one. The ideas behind the global testing
-standards carry over to Rust, with Rust's own mechanics in place of the Java ones.
-
-- **Location.** Unit tests go in a `#[cfg(test)] mod tests` block at the end of the file that they
-  test, as is standard in Rust.
-- **Data.** The tests for a function give it standard data, extreme data at the edges of what it
-  accepts, and abnormal data that it must reject.
-- **Cases in a table.** Where the same assertion repeats across inputs, one test covers every input,
-  in place of a copy of the test for each. Rust's built-in test framework has no parameterised
-  tests. The `rstest` crate adds them through `#[rstest]` and `#[case]`, and Sarx takes it on only
-  after a decision, like any other library. Until then, a test loops over an array of cases, and
-  each assertion message states the case that failed.
-- **Arrange, act, assert.** Each test sets up, acts, then asserts, with every assertion at the end.
-- **Naming.** A test name follows the global pattern in snake case, as
-  `{function}_with_{data}_{outcome}`. An example is `height_at_with_point_outside_map_returns_none`.
+An agent writes a test only when the developer asks for one, following the test conventions in the
+README.
 
 ### Decision Records
 
-Each discussion that settles a decision ends in an Architecture Decision Record (ADR), a short
-document that records what the developer decided and why. The agent writes the ADR once the
-discussion closes, and the developer reviews it as any other agent change.
-
-- ADRs live in `docs/adr/`, one file per decision, numbered in order, such as
-  `0001-window-library.md`.
-- Each ADR states its status, then covers four parts: the context, the options weighed with their
-  pros and cons, the decision, and its consequences for Sarx.
-- An accepted ADR stays as written. Where a later discussion changes a decision, a new ADR records
-  the change. The old one is then marked as superseded, with a link to the new one.
+Each discussion that settles a decision ends in an ADR, in the format that the README sets out. The
+agent writes the ADR once the discussion closes, and the developer reviews it as with any other agent
+change.
 
 ### Build Order
 
-The work follows the order in the README's TODO section. First comes a thin path through every
-layer, from the window down to the GPU and back, ending in lit terrain on a phone and a desktop.
-Each layer then widens on its own. The agent proposes work in that order, with each step small
-enough to end in something visible, and says what the developer will understand once it is done.
+The agent proposes work in the order of the README's TODO section, with each step small enough to
+end in something visible. With each proposal, the agent says what the developer will understand once
+the step is done.
 
 ---
 
 ## wgpu and Other Fast-Moving Crates
 
-wgpu changes its API in most major releases, so remembered signatures are often out of date. Before
-writing or reviewing wgpu code, the agent:
+wgpu changes its API in most major releases. As a result, the signatures that an agent remembers
+from training are often out of date. Before writing or reviewing wgpu code, the agent:
 
 1. Reads the wgpu version from `Cargo.lock`.
 2. Checks the real definitions in the crate source under `~/.cargo/registry/src`, which matches that
@@ -176,19 +127,17 @@ writing or reviewing wgpu code, the agent:
 3. Uses docs.rs for that version, the `examples` folder in the wgpu repository, and its
    `CHANGELOG.md` when moving between versions.
 
-winit follows the same pattern and gets the same treatment.
+winit also changes its API between major releases, meaning the agent checks it in the same way.
 
 ---
 
-## Toolchain
+## This Machine
 
-- `rust-toolchain.toml` selects stable Rust with rustfmt, clippy and the `aarch64-linux-android`
-  target. On this Windows machine it resolves to the MSVC toolchain, because the default host is
-  MSVC. The developer's global default toolchain is GNU, which other projects use, so it stays as it
-  is.
-- The MSVC toolchain needs the Visual Studio Build Tools with the C++ workload. The developer
-  installs software through Chocolatey (`choco install visualstudio2022-workload-vctools`), and
-  winget is absent from this machine.
+- On this Windows machine, `rust-toolchain.toml` resolves to the MSVC toolchain, because the default
+  host is MSVC. The developer's global default toolchain stays GNU, since other projects use it.
+- The developer installs software through Chocolatey, the only package manager on this machine. The
+  Build Tools that the README requires install with
+  `choco install visualstudio2022-workload-vctools`.
 
 ---
 
@@ -206,14 +155,14 @@ winit follows the same pattern and gets the same treatment.
   GH_TOKEN=$(gh auth token -u Mr-Slinky) gh <command>
   ```
 
-- Development happens on `dev`. The developer squash-merges finished stages into `main`, and an
-  agent does so only when the developer asks.
+- An agent squash-merges `dev` into `main` only when the developer asks.
 
 ---
 
 ## Commits
 
-Commits follow the Conventional Commits format from the `technical-writing` skill.
+Agents write commit messages in the format that the README sets out, following the
+`technical-writing` skill.
 
 The developer's work and an agent's work go in separate commits. The git author field on each
 commit records whose work it contains:

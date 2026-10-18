@@ -138,14 +138,19 @@ any other library comes in:
 ### Decision Records
 
 An Architecture Decision Record (ADR) is a short document that states what the author decided and
-why. Each decision on a library or on the design gets one.
+why. Each decision on a library or on the design gets one. Sarx writes its ADRs in the
+[MADR](https://adr.github.io/madr/) format, version 4.
 
 - ADRs go in `docs/adr/`, one file per decision, numbered in order, such as
   `0001-window-library.md`.
-- Each ADR states its status, then covers four parts: the context, the options weighed with their
-  pros and cons, the decision, and its consequences for Sarx.
+- Each ADR opens with a YAML block that records its status, its date and the people who made the
+  decision.
+- The sections then follow in MADR's order: the context and problem statement, the decision drivers,
+  the options considered, the decision outcome with its consequences, and the pros and cons of each
+  option.
 - An accepted ADR stays as written. Where a decision changes, a new ADR records the change. The
-  author then marks the old ADR as superseded and links it to the new one.
+  author then sets the old ADR's status to `superseded by ADR-NNNN`, with the new ADR's number in
+  place of `NNNN`.
 
 ### Tests
 
@@ -165,8 +170,8 @@ standard in Rust. Every test follows four conventions:
 
 ### Commits
 
-Commit messages follow the Conventional Commits format, `<type>[scope]: <description>`. The types are
-`feat`, `fix`, `docs`, `style`, `refactor`, `test` and `chore`.
+Commit messages follow the Conventional Commits format, `<type>[scope]: <description>`. The types
+are `feat`, `fix`, `docs`, `style`, `refactor`, `test` and `chore`.
 
 ### Branches
 

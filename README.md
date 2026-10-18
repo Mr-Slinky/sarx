@@ -20,13 +20,28 @@ them.
   without the player directing each step, in the manner of Universim and Spore.
 - **Rival factions.** Other factions compete for the same world. A faction can become an ally as well
   as an enemy.
-- **Possession.** The player takes direct control of a single character to turn a battle, much as
-  some strategy games let the player command a hero such as Alexander the Great. The first version
-  lets the player possess the creature.
+- **Victory.** A player wins a level once their faction is the last one standing, either by allying
+  with every other faction or by conquering them all. Factions are meant to respond to the path the
+  player takes. They might ally with one another against a conqueror, or turn hostile over whom the
+  player has allied with. Either path then grows harder the further the player takes it.
+- **Levels.** A player either configures a level, choosing settings such as the number of factions
+  and the kind of landscape, or picks a pre-made level.
+- **Possession.** The player takes direct control of a single character to turn a battle, as Rise &
+  Fall: Civilizations at War lets the player command a hero such as Alexander the Great. Possession
+  of the creature comes first, and is very likely to be the only form. Possessing villagers or
+  soldiers remains an option for later.
 - **Abilities.** The player casts miracles and spells, drawing on the magic of both Universim and
   Black & White 2.
 - **Cozy play.** Farming, fishing and other gentle activities let a player spend a session tending
   the world rather than fighting over it.
+- **Cozy mode.** A player can switch on a mode in which no faction attacks them and they attack no
+  one, leaving them to manage their civilisation in peace. A player in cozy mode cannot complete the
+  level. A hostile action, a trade or any approach to a possible ally switches cozy mode off. The
+  design also has to stop a player sheltering in cozy mode until their civilisation is large, and
+  two approaches remain open:
+  - The player chooses cozy mode before a level starts, and it stays fixed for that level.
+  - Cozy mode allows only the actions that keep the civilisation going, without new buildings or
+    population growth.
 
 ## Design Decisions
 
@@ -42,8 +57,18 @@ The author has taken the following decisions, and the code follows them as it gr
 - **Central AI.** Planners decide at the level of a group, such as a village assigning six people to
   chop wood. Each villager then carries out a simple task. This means the cost of thinking grows with
   the number of decisions, rather than with the number of villagers.
-- **A hand-built ECS.** The entity component system is written for Sarx. Libraries come in where they
-  provide a broad toolkit, such as glam for vectors and matrices.
+- **One gate for every change.** Every change to the world arrives as a request, a small piece of
+  data stating which actor wants to do what. The player and the AI alike issue requests. A single
+  gate checks each request against the rules of the level before it takes effect. As a result, a
+  rule such as cozy mode becomes one check at the gate.
+- **One level format.** The game loads every level from data in a single format, whatever produced
+  it. A generator produces a level from the player's settings and a seed, and the same settings and
+  seed always give the same level. A separate tool builds a level by hand in that same format, and
+  can also refine a generated one. The game therefore loads a pre-made level and a configured level
+  through the same code.
+- **A hand-built ECS.** The entity component system is written for Sarx.
+- **Libraries by decision.** The author weighs each library on its own before Sarx takes it on, and
+  records the outcome as an Architecture Decision Record (ADR) in `docs/adr/`.
 
 ## Workspace
 
@@ -73,6 +98,30 @@ A developer then builds and runs the game from the repository root:
 ```
 cargo run -p sarx-app
 ```
+
+## TODO
+
+The work starts with a thin path through every layer, ending in something on screen. Each layer then
+grows on its own.
+
+### Foundation
+
+- [ ] Open a window and run the event loop
+- [ ] Clear the screen, then draw a triangle
+- [ ] Run the triangle on an Android phone
+- [ ] Move the triangle from a fixed-step simulation with a minimal ECS
+- [ ] Render a 3D cube with a camera and a depth buffer
+- [ ] Render lit heightmap terrain with a touch and mouse camera
+
+### Afterwards
+
+The order of these follows from what the foundation teaches.
+
+- [ ] Renderer: textures, shadows, water, instancing
+- [ ] ECS: extend the minimal version into the full one
+- [ ] Simulation: villagers, needs, the central AI planner
+- [ ] The hand: picking points on the terrain, grabbing and throwing
+- [ ] Tools: debug overlay, timing, GPU capture
 
 ## Branches
 

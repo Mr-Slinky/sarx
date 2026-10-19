@@ -1445,6 +1445,7 @@ dependencies = [
 name = "sarx-app"
 version = "0.1.0"
 dependencies = [
+ "sarx-render",
  "winit",
 ]
 

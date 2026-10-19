@@ -5,4 +5,5 @@ edition.workspace = true
 publish.workspace = true
 
 [dependencies]
+sarx-render = { version = "0.1.0", path = "../sarx-render" }
 winit = "0.30.13"

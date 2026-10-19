@@ -185,8 +185,9 @@ GPU, ending in lit terrain on screen. The author then extends each layer on its 
 
 ### Foundation
 
-- [ ] Open a window and run the event loop
-- [ ] Clear the screen, then draw a triangle
+- [x] Open a window and run the event loop
+- [x] Clear the screen
+- [ ] Draw a triangle
 - [ ] Run the triangle on an Android phone
 - [ ] Move the triangle from a fixed-step simulation with a minimal ECS
 - [ ] Render a 3D cube with a camera and a depth buffer

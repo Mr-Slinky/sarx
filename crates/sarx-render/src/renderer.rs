@@ -43,7 +43,7 @@ impl Renderer {
     /// Draws one frame, cleared to `CLEAR_COLOUR`, and presents it in the window.
     pub fn render(&mut self) {
         // Gets the next image to draw into, or skips the frame when the surface has none
-        let (frame, suboptimal) = match self.gpu.surface().get_current_texture() {
+        let (frame, suboptimal) = match self.gpu.surface.get_current_texture() {
             CurrentSurfaceTexture::Success(frame) => (frame, false),
             CurrentSurfaceTexture::Suboptimal(frame) => (frame, true),
             CurrentSurfaceTexture::Outdated => {
@@ -62,7 +62,7 @@ impl Renderer {
         let encoder_descriptor = CommandEncoderDescriptor {
             label: Some("Sarx frame"),
         };
-        let mut encoder = self.gpu.device().create_command_encoder(&encoder_descriptor);
+        let mut encoder = self.gpu.device.create_command_encoder(&encoder_descriptor);
         let colour_attachment = RenderPassColorAttachment {
             view: &view,
             depth_slice: None,
@@ -82,7 +82,7 @@ impl Renderer {
         drop(render_pass);
 
         // Sends the recorded commands to the GPU, then shows the finished image
-        let queue = self.gpu.queue();
+        let queue = &self.gpu.queue;
         queue.submit([encoder.finish()]);
         queue.present(frame);
 
@@ -96,7 +96,8 @@ impl Renderer {
 // ========================================================================================== \\
 //                                          Helpers                                           \\
 // ========================================================================================== \\
-pub(crate) struct GpuContext {
+
+struct GpuContext {
     surface: Surface<'static>,
     device: Device,
     queue: Queue,
@@ -110,7 +111,7 @@ impl GpuContext {
 
     /// Connects to a GPU that can draw to `window`, and configures the window's surface at
     /// `width` by `height` pixels.
-    pub(crate) async fn new<W>(window: W, width: u32, height: u32) -> Result<Self, RendererError>
+    async fn new<W>(window: W, width: u32, height: u32) -> Result<Self, RendererError>
     where
         W: HasWindowHandle + HasDisplayHandle + Debug + Clone + Send + Sync + 'static,
     {
@@ -149,29 +150,10 @@ impl GpuContext {
     }
 
     // ====================================================================================== \\
-    //                                        Getters                                         \\
-    // ====================================================================================== \\
-
-    pub(crate) fn surface(&self) -> &Surface<'static> {
-        &self.surface
-    }
-
-    pub(crate) fn device(&self) -> &Device {
-        &self.device
-    }
-
-    pub(crate) fn queue(&self) -> &Queue {
-        &self.queue
-    }
-
-    pub(crate) fn config(&self) -> &SurfaceConfiguration {
-        &self.config
-    }
-
-    // ====================================================================================== \\
     //                                      API Methods                                       \\
     // ====================================================================================== \\
-    pub(crate) fn resize(&mut self, width: u32, height: u32) {
+
+    fn resize(&mut self, width: u32, height: u32) {
         if width == 0 || height == 0 {
             return;
         }
@@ -181,7 +163,7 @@ impl GpuContext {
     }
 
     /// Rebuilds the surface's images from the current configuration.
-    pub(crate) fn reconfigure(&self) {
+    fn reconfigure(&self) {
         self.surface.configure(&self.device, &self.config);
     }
 }

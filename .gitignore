@@ -1,2 +1,195 @@
-/target
-/.idea
+# ========================================================================================== #
+#                                    Operating systems                                       #
+# ========================================================================================== #
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.DocumentRevisions-V100
+.fseventsd
+.Spotlight-V100
+.TemporaryItems
+.Trashes
+.VolumeIcon.icns
+.com.apple.timemachine.donotpresent
+
+# Windows
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
+Desktop.ini
+desktop.ini
+$RECYCLE.BIN/
+*.lnk
+*.stackdump
+
+# Files that a Windows shell redirect to "nul" creates by mistake
+nul
+NUL
+
+# Linux
+*~
+.directory
+.fuse_hidden*
+.nfs*
+.Trash-*
+
+# ========================================================================================== #
+#                                    IDEs and editors                                        #
+# ========================================================================================== #
+
+# IntelliJ IDEA and the other JetBrains IDEs
+.idea/
+*.iml
+*.ipr
+*.iws
+/out/
+.fleet/
+
+# NetBeans
+nbproject/private/
+nbbuild/
+nbdist/
+.nb-gradle/
+nb-configuration.xml
+nbactions.xml
+
+# Eclipse
+.classpath
+.project
+.settings/
+.metadata/
+.factorypath
+.apt_generated/
+.recommenders/
+/bin/
+
+# Visual Studio Code
+.vscode/
+*.code-workspace
+.history/
+
+# Visual Studio
+.vs/
+*.suo
+*.user
+
+# Zed and Sublime Text
+.zed/
+*.sublime-project
+*.sublime-workspace
+
+# Vim and Emacs
+*.swp
+*.swo
+*.swn
+Session.vim
+\#*\#
+.#*
+
+# Claude Code settings that belong to one developer
+.claude/settings.local.json
+
+# ========================================================================================== #
+#                                         Java                                               #
+# ========================================================================================== #
+
+*.class
+hs_err_pid*
+replay_pid*
+
+# Maven
+target/
+pom.xml.tag
+pom.xml.releaseBackup
+pom.xml.versionsBackup
+pom.xml.next
+release.properties
+dependency-reduced-pom.xml
+buildNumber.properties
+.mvn/timing.properties
+.flattened-pom.xml
+
+# Gradle
+.gradle/
+build/
+!gradle/wrapper/gradle-wrapper.jar
+
+# Packaged artefacts, apart from the wrapper JARs that the build needs
+*.jar
+*.war
+*.ear
+*.nar
+!.mvn/wrapper/maven-wrapper.jar
+
+# ========================================================================================== #
+#                                         Rust                                               #
+# ========================================================================================== #
+
+# Cargo writes its output to target/, which the Maven entry above already covers
+**/*.rs.bk
+*.pdb
+
+# ========================================================================================== #
+#                                        Python                                              #
+# ========================================================================================== #
+
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+.python-version
+*.egg-info/
+.eggs/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tox/
+.nox/
+.coverage
+.coverage.*
+htmlcov/
+.ipynb_checkpoints/
+
+# ========================================================================================== #
+#                                        Node.js                                             #
+# ========================================================================================== #
+
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.npm/
+
+# ========================================================================================== #
+#                                 Secrets and signing keys                                   #
+# ========================================================================================== #
+
+.env
+.env.*
+!.env.example
+*.pfx
+*.p12
+*.jks
+*.keystore
+
+# ========================================================================================== #
+#                                 Logs, temporary files and local docs                       #
+# ========================================================================================== #
+
+*.log
+logs/
+*.tmp
+*.temp
+*.bak
+*.orig
+*.rej
+local/
+
+# ========================================================================================== #
+#                                    Project-specific                                        #
+# ========================================================================================== #

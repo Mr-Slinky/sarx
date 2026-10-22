@@ -187,17 +187,31 @@ GPU, ending in lit terrain on screen. The author then extends each layer on its 
 
 - [x] Open a window and run the event loop
 - [x] Clear the screen
-- [ ] Draw a triangle
+- [x] Draw a triangle
 - [ ] Run the triangle on an Android phone
 - [ ] Move the triangle from a fixed-step simulation with a minimal ECS
 - [ ] Render a 3D cube with a camera and a depth buffer
 - [ ] Render lit heightmap terrain with a touch and mouse camera
+
+Two changes wait for the first step that gives a vertex a second attribute, such as a colour for the
+cube or a normal for the lit terrain:
+
+- `Mesh` stores a `Vertex` struct in place of `[f32; 3]`, and `Vertex` takes `#[repr(C)]`. Rust lays
+  out a plain struct in an order of its own choosing, while the vertex buffer layout states a fixed
+  byte offset for each attribute. `#[repr(C)]` keeps the fields in the order written, at offsets that
+  can be worked out by hand.
+- The author weighs `bytemuck` as the way that `Mesh` turns its vertices into bytes. Its derive macro
+  rejects a vertex type that has padding while the code compiles, and its `cast_slice` reads the
+  vertices as bytes without copying them.
 
 ### Later Work
 
 What the foundation teaches decides the order of these items.
 
 - [ ] Renderer: textures, shadows, water, instancing
+  - Instancing opens with a full explanation before any code: how one draw call repeats a mesh, how
+    `VertexStepMode::Instance` moves a second buffer on once per copy, and what the instance range
+    in `draw` controls.
 - [ ] ECS: extend the minimal version into the full one
 - [ ] Simulation: villagers, needs, the central AI planner
 - [ ] The hand: picking points on the terrain, grabbing and throwing

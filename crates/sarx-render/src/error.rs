@@ -14,6 +14,9 @@ pub enum RendererError {
     Device(RequestDeviceError),
     /// The GPU supports no format or present mode for drawing to the window.
     UnsupportedSurface,
+    /// The GPU cannot take the number of samples per pixel that anti-aliasing needs, in the
+    /// surface's format.
+    UnsupportedSampleCount,
 }
 
 impl Display for RendererError {
@@ -23,6 +26,9 @@ impl Display for RendererError {
             Self::Adapter(_) => "failed to find a GPU that can draw to the window",
             Self::Device(_) => "failed to open a device on the GPU",
             Self::UnsupportedSurface => "the GPU supports no format for drawing to the window",
+            Self::UnsupportedSampleCount => {
+                "the GPU cannot anti-alias in the format for drawing to the window"
+            }
         };
         f.write_str(message)
     }
@@ -34,7 +40,7 @@ impl Error for RendererError {
             Self::Surface(error) => Some(error),
             Self::Adapter(error) => Some(error),
             Self::Device(error) => Some(error),
-            Self::UnsupportedSurface => None,
+            Self::UnsupportedSurface | Self::UnsupportedSampleCount => None,
         }
     }
 }

@@ -10,9 +10,10 @@ pub enum RendererError {
     Surface(CreateSurfaceError),
     /// No GPU can draw to the window's surface.
     Adapter(RequestAdapterError),
-    /// The GPU refused to open a device with the limits that phones support.
+    /// The GPU refused to open a device within wgpu's limits for OpenGL ES 3.1 devices.
     Device(RequestDeviceError),
-    /// The GPU supports no format or present mode for drawing to the window.
+    /// The GPU supports no format or present mode for drawing to the window, or the window's new
+    /// surface lacks the format that the pipeline was built for.
     UnsupportedSurface,
     /// The GPU cannot take the number of samples per pixel that anti-aliasing needs, in the
     /// surface's format.
@@ -25,7 +26,7 @@ impl Display for RendererError {
             Self::Surface(_) => "failed to create a surface for the window",
             Self::Adapter(_) => "failed to find a GPU that can draw to the window",
             Self::Device(_) => "failed to open a device on the GPU",
-            Self::UnsupportedSurface => "the GPU supports no format for drawing to the window",
+            Self::UnsupportedSurface => "the GPU offers no format in which the renderer can draw to the window",
             Self::UnsupportedSampleCount => {
                 "the GPU cannot anti-alias in the format for drawing to the window"
             }

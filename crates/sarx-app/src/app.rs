@@ -9,9 +9,15 @@ use winit::window::{Window, WindowId};
 
 use crate::executor::block_on;
 
+/// Sarx's window and renderer, together with the methods that winit calls for each event.
+///
+/// `App::default()` sets both fields to `None`. The first call to `resumed` then creates the
+/// window and the renderer.
 #[derive(Default)]
 pub(crate) struct App {
+    /// The window, shared through an `Arc` with the renderer's surface.
     window: Option<Arc<Window>>,
+    /// The renderer, or `None` before the first `resumed` and where its setup failed.
     renderer: Option<Renderer>,
 }
 
@@ -26,6 +32,9 @@ impl App {
 }
 
 impl ApplicationHandler for App {
+    /// Creates the window and the renderer on the first call, and gives the renderer a new
+    /// surface on every later call. Panics where the window cannot be created, and ends the
+    /// event loop where the renderer cannot be set up or given its new surface.
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         // Gives the renderer a new surface for the window on every call after the first, since
         // Android destroys the surface each time the app is suspended
@@ -43,7 +52,7 @@ impl ApplicationHandler for App {
             return;
         }
 
-        // Avoids two windows being created, by creating one only on the FIRST call
+        // Creates the window and the renderer on the first call, while no window exists yet
         if self.window.is_none() {
             let attributes = Window::default_attributes().with_title("Sarx");
             let window = event_loop
@@ -65,6 +74,7 @@ impl ApplicationHandler for App {
         }
     }
 
+    /// Drops the renderer's surface while the app is in the background.
     fn suspended(&mut self, _: &ActiveEventLoop) {
         // Drops the renderer's surface, since Android destroys it while the app is suspended
         if let Some(renderer) = self.renderer.as_mut() {
@@ -72,6 +82,8 @@ impl ApplicationHandler for App {
         }
     }
 
+    /// Ends the program when the player closes the window, passes resizes and redraws to the
+    /// renderer, and prints every other event.
     fn window_event(
         &mut self,
         event_loop: &ActiveEventLoop,

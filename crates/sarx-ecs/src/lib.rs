@@ -1,3 +1,7 @@
+//! The crate for Sarx's entity component system. By design, the system represents each game
+//! object as an entity and stores its data in components. The crate contains only the `add`
+//! function that `cargo new` generates.
+
 pub fn add(left: u64, right: u64) -> u64 {
     left + right
 }

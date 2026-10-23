@@ -1,5 +1,10 @@
 # Sarx
 
+[![Rust](https://img.shields.io/badge/Rust-2024_Edition-orange.svg)](https://www.rust-lang.org/)
+[![wgpu](https://img.shields.io/badge/wgpu-30.0.1-blue.svg)](https://wgpu.rs/)
+[![winit](https://img.shields.io/badge/winit-0.30.13-blue.svg)](https://github.com/rust-windowing/winit)
+![License](https://img.shields.io/badge/License-Proprietary-red.svg)
+
 Sarx is a god game for phones and desktops, written in Rust on top of wgpu. The player guides a
 civilisation on a flat world, trains a creature, and competes with rival factions for the land. It
 draws on Black & White 2 for the creature, the god's hand and the choice between good and evil, and on
@@ -37,7 +42,7 @@ towards.
 - **Cosy mode.** A player can switch on a mode in which no faction attacks them and they attack no
   one, leaving them to manage their civilisation in peace. A player in cosy mode cannot complete the
   level. A hostile action, a trade or any approach to a possible ally switches cosy mode off. The
-  design also has to stop a player from staying in cosy mode until their civilisation is large (or 
+  design also has to stop a player from staying in cosy mode until their civilisation is large (or
   similar exploits). Two approaches remain open:
   - The player chooses cosy mode before a level starts, and it stays fixed for that level.
   - Cosy mode allows only the actions that keep the civilisation going, without new buildings or

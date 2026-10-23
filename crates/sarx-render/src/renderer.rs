@@ -25,8 +25,9 @@ use crate::mesh::Mesh;
 ///
 /// A caller creates a `Renderer` with `new` once the window exists, then calls `render` each time
 /// the window needs redrawing. The caller passes each new window size to `resize`. It also calls
-/// `suspend` when the app loses its window and `resume` when the app gets one back, as happens on
-/// Android each time the app leaves the screen and returns.
+/// `suspend` when the app loses its window and `resume` when the app gets one back. A platform with
+/// an app lifecycle, such as a phone, does this each time the app leaves the screen and returns.
+/// Windows never does, and the two methods keep a later port open.
 pub struct Renderer {
     /// The connection to the GPU, and the surface for the window.
     gpu: GpuContext,
@@ -205,8 +206,9 @@ impl GpuContext {
     where
         W: HasWindowHandle + HasDisplayHandle + Debug + Clone + Send + Sync + 'static,
     {
-        // Creates the wgpu instance, giving it the window's display connection, which the OpenGL
-        // ES backend needs to present frames
+        // Creates the wgpu instance, giving it the window's display connection. Only the OpenGL
+        // backend uses it, to present frames, and DirectX 12 and Vulkan ignore it. Passing it keeps
+        // a later port open
         let display = Box::new(window.clone());
         let instance = Instance::new(InstanceDescriptor::new_with_display_handle(display));
         let surface = instance.create_surface(window)?;
@@ -218,11 +220,11 @@ impl GpuContext {
         };
         let adapter = instance.request_adapter(&adapter_options).await?;
 
-        // Opens the device and its queue, within the limits that wgpu guarantees on every OpenGL
-        // ES 3.1 device
+        // Opens the device and its queue, within the WebGPU standard's baseline limits, which the
+        // integrated GPU in a mid-level laptop meets
         let device_descriptor = DeviceDescriptor {
             label: Some("Sarx device"),
-            required_limits: Limits::downlevel_defaults(),
+            required_limits: Limits::default(),
             ..Default::default()
         };
         let (device, queue) = adapter.request_device(&device_descriptor).await?;

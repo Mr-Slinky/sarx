@@ -36,8 +36,9 @@ impl ApplicationHandler for App {
     /// surface on every later call. Panics where the window cannot be created, and ends the
     /// event loop where the renderer cannot be set up or given its new surface.
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
-        // Gives the renderer a new surface for the window on every call after the first, since
-        // Android destroys the surface each time the app is suspended
+        // Gives the renderer a new surface for the window on every call after the first. Only a
+        // platform with an app lifecycle, such as a phone, calls `resumed` again, and it destroys
+        // the surface each time the app is suspended
         if let (Some(window), Some(renderer)) = (&self.window, self.renderer.as_mut()) {
             let size = window.inner_size();
             let window_handle = Arc::clone(window);
@@ -74,9 +75,10 @@ impl ApplicationHandler for App {
         }
     }
 
-    /// Drops the renderer's surface while the app is in the background.
+    /// Drops the renderer's surface while the app is suspended. winit calls this only on a platform
+    /// with an app lifecycle, such as a phone, and never on Windows, even for a minimised window.
     fn suspended(&mut self, _: &ActiveEventLoop) {
-        // Drops the renderer's surface, since Android destroys it while the app is suspended
+        // Drops the renderer's surface, since the platform destroys it while the app is suspended
         if let Some(renderer) = self.renderer.as_mut() {
             renderer.suspend();
         }

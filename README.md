@@ -3,9 +3,10 @@
 [![Rust](https://img.shields.io/badge/Rust-2024_Edition-orange.svg)](https://www.rust-lang.org/)
 [![wgpu](https://img.shields.io/badge/wgpu-30.0.1-blue.svg)](https://wgpu.rs/)
 [![winit](https://img.shields.io/badge/winit-0.30.13-blue.svg)](https://github.com/rust-windowing/winit)
+[![Platform](https://img.shields.io/badge/Platform-Windows-blue.svg)](https://www.microsoft.com/windows)
 ![License](https://img.shields.io/badge/License-Proprietary-red.svg)
 
-Sarx is a god game for phones and desktops, written in Rust on top of wgpu. The player guides a
+Sarx is a god game for Windows, written in Rust on top of wgpu. The player guides a
 civilisation on a flat world, trains a creature, and competes with rival factions for the land. It
 draws on Black & White 2 for the creature, the god's hand and the choice between good and evil, and on
 Universim and Spore for a civilisation that advances on its own.
@@ -54,11 +55,12 @@ The author has taken the following decisions and writes the code to follow them.
 
 - **A flat world.** The land is a flat heightmap, meaning a grid of terrain heights, as in Black &
   White 2.
-- **Mobile first.** The renderer requests only the GPU limits that phones support. A desktop build
-  then runs within those same limits.
+- **Windows first.** Sarx is built and tested on Windows, and runs in full on a mid-level laptop. The
+  renderer requests the WebGPU standard's baseline limits, which the laptop's integrated GPU meets.
+  A port to another platform stays possible, as ADR 0003 sets out.
 - **Simulation apart from rendering.** The simulation advances in fixed steps, at the same rate on
   every device. The renderer draws the latest state as often as the screen allows. As a result, a
-  phone that slows down when it gets hot plays the same game as a fast desktop.
+  laptop with a 60 Hz screen plays the same game as a desktop with a 144 Hz monitor.
 - **Central AI.** Planners decide at the level of a group, such as a village assigning six people to
   chop wood. Each villager then carries out a simple task. This means the planning work grows with the
   number of decisions, rather than with the number of villagers.
@@ -99,9 +101,8 @@ The author adds crates as the project needs them.
 
 ## Building
 
-The `rust-toolchain.toml` file selects the stable Rust toolchain, together with rustfmt, clippy and
-the `aarch64-linux-android` target. Rustup installs these automatically the first time Cargo runs
-inside the repository.
+The `rust-toolchain.toml` file selects the stable Rust toolchain, together with rustfmt and clippy.
+Rustup installs these automatically the first time Cargo runs inside the repository.
 
 On Windows, the toolchain is the MSVC one, which links with Microsoft's tools. A Windows machine
 therefore needs the Visual Studio Build Tools, with the "Desktop development with C++" workload,
@@ -153,9 +154,8 @@ why. Each decision on a library or on the design gets one. Sarx writes its ADRs 
 - The sections then follow in MADR's order: the context and problem statement, the decision drivers,
   the options considered, the decision outcome with its consequences, and the pros and cons of each
   option.
-- An accepted ADR stays as written. Where a decision changes, a new ADR records the change. The
-  author then sets the old ADR's status to `superseded by ADR-NNNN`, with the new ADR's number in
-  place of `NNNN`.
+- Each ADR records the current decision. Where a decision changes, the author rewrites its ADR in
+  place and updates its date, and git keeps the earlier versions.
 
 ### Tests
 
@@ -193,10 +193,11 @@ GPU, ending in lit terrain on screen. The author then extends each layer on its 
 - [x] Open a window and run the event loop
 - [x] Clear the screen
 - [x] Draw a triangle
-- [ ] Run the triangle on an Android phone
+- [x] Rebuild the surface when the app suspends and resumes
+- [ ] Recreate the surface when wgpu reports it lost
 - [ ] Move the triangle from a fixed-step simulation with a minimal ECS
 - [ ] Render a 3D cube with a camera and a depth buffer
-- [ ] Render lit heightmap terrain with a touch and mouse camera
+- [ ] Render lit heightmap terrain with a mouse and keyboard camera
 
 Two changes wait for the first step that gives a vertex a second attribute, such as a colour for the
 cube or a normal for the lit terrain:

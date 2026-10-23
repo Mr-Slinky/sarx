@@ -10,7 +10,7 @@ pub enum RendererError {
     Surface(CreateSurfaceError),
     /// No GPU can draw to the window's surface.
     Adapter(RequestAdapterError),
-    /// The GPU refused to open a device within wgpu's limits for OpenGL ES 3.1 devices.
+    /// The GPU refused to open a device within the WebGPU standard's baseline limits.
     Device(RequestDeviceError),
     /// The GPU supports no format or present mode for drawing to the window, or the window's new
     /// surface lacks the format that the pipeline was built for.

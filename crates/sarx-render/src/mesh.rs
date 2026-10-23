@@ -18,9 +18,9 @@ impl Mesh {
     pub(crate) fn triangle() -> Self {
         Self {
             vertices: vec![
-                [ 0.0,  0.5, 0.0],
-                [-0.5, -0.5, 0.0],
-                [ 0.5, -0.5, 0.0],
+                [ 0.0,  0.5, 0.0], // top corner
+                [-0.5, -0.5, 0.0], // bottom left corner
+                [ 0.5, -0.5, 0.0], // bottom right corner
             ],
         }
     }

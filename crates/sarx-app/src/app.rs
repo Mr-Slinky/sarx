@@ -15,8 +15,34 @@ pub(crate) struct App {
     renderer: Option<Renderer>,
 }
 
+impl App {
+    /// Prints `error` to standard error, followed by the error that caused it, where there is one.
+    fn print_error(error: &dyn Error) {
+        eprintln!("Error: {error}");
+        if let Some(cause) = error.source() {
+            eprintln!("Caused by: {cause}");
+        }
+    }
+}
+
 impl ApplicationHandler for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+        // Gives the renderer a new surface for the window on every call after the first, since
+        // Android destroys the surface each time the app is suspended
+        if let (Some(window), Some(renderer)) = (&self.window, self.renderer.as_mut()) {
+            let size = window.inner_size();
+            let window_handle = Arc::clone(window);
+            match renderer.resume(window_handle, size.width, size.height) {
+                // Draws a first frame, since the new surface starts out empty
+                Ok(()) => window.request_redraw(),
+                Err(error) => {
+                    Self::print_error(&error);
+                    event_loop.exit();
+                }
+            }
+            return;
+        }
+
         // Avoids two windows being created, by creating one only on the FIRST call
         if self.window.is_none() {
             let attributes = Window::default_attributes().with_title("Sarx");
@@ -31,16 +57,19 @@ impl ApplicationHandler for App {
             match block_on(renderer_setup) {
                 Ok(renderer) => self.renderer = Some(renderer),
                 Err(error) => {
-                    eprintln!("Error: {error}");
-                    if let Some(cause) = error.source() {
-                        eprintln!("Caused by: {cause}");
-                    }
+                    Self::print_error(&error);
                     event_loop.exit();
                 }
             }
             self.window = Some(window);
         }
-        // TODO: create the surface for the window, every time
+    }
+
+    fn suspended(&mut self, _: &ActiveEventLoop) {
+        // Drops the renderer's surface, since Android destroys it while the app is suspended
+        if let Some(renderer) = self.renderer.as_mut() {
+            renderer.suspend();
+        }
     }
 
     fn window_event(

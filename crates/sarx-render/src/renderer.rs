@@ -1,17 +1,17 @@
 use std::borrow::Cow;
 use std::fmt::Debug;
-
+use std::sync::Arc;
 use wgpu::rwh::{HasDisplayHandle, HasWindowHandle};
 use wgpu::util::{BufferInitDescriptor, DeviceExt};
 use wgpu::{
     Adapter, BlendState, Buffer, BufferUsages, Color, ColorTargetState, ColorWrites,
-    CommandEncoderDescriptor, CurrentSurfaceTexture, Device, DeviceDescriptor, Extent3d,
-    FragmentState, Instance, InstanceDescriptor, Limits, LoadOp, MultisampleState, Operations,
-    PrimitiveState, PrimitiveTopology, Queue, RenderPassColorAttachment, RenderPassDescriptor,
-    RenderPipeline, RenderPipelineDescriptor, RequestAdapterOptions, ShaderModule,
-    ShaderModuleDescriptor, ShaderSource, StoreOp, Surface, SurfaceConfiguration,
-    TextureDescriptor, TextureDimension, TextureFormat, TextureUsages, TextureView,
-    TextureViewDescriptor, VertexState,
+    CommandEncoderDescriptor, CurrentSurfaceTexture, Device, DeviceDescriptor,
+    DisplayAndWindowHandle, Extent3d, FragmentState, Instance, InstanceDescriptor, Limits, LoadOp,
+    MultisampleState, Operations, PrimitiveState, PrimitiveTopology, Queue,
+    RenderPassColorAttachment, RenderPassDescriptor, RenderPipeline, RenderPipelineDescriptor,
+    RequestAdapterOptions, ShaderModule, ShaderModuleDescriptor, ShaderSource, StoreOp, Surface,
+    SurfaceConfiguration, TextureDescriptor, TextureDimension, TextureFormat, TextureUsages,
+    TextureView, TextureViewDescriptor, VertexState,
 };
 
 use crate::RendererError;
@@ -100,27 +100,31 @@ impl Renderer {
 
     /// Draws one frame, the triangle over a `CLEAR_COLOUR` background, and presents it in the
     /// window. Skips the frame while the app is suspended, or while the surface has no texture
-    /// to hand out.
-    pub fn render(&mut self) {
+    /// to hand out. Where wgpu reports the surface lost, creates a new one for the same window
+    /// and skips the frame.
+    ///
+    /// Returns a `RendererError` where wgpu reports the surface lost and cannot create a new one,
+    /// or where the GPU cannot draw to the new one in the format that the pipeline was built for.
+    pub fn render(&mut self) -> Result<(), RendererError> {
         // Skips the frame while the app is suspended and has no surface to draw into
         let Some(surface_context) = &self.gpu.surface_context else {
-            return;
+            return Ok(());
         };
 
         // Gets the surface's next texture to draw into. Reconfigures the surface when it is
-        // outdated, and skips the frame whenever no texture comes back
+        // outdated, creates a new surface when it is lost, and skips the frame whenever no
+        // texture comes back
         let (frame, suboptimal) = match surface_context.surface.get_current_texture() {
             CurrentSurfaceTexture::Success(frame) => (frame, false),
             CurrentSurfaceTexture::Suboptimal(frame) => (frame, true),
             CurrentSurfaceTexture::Outdated => {
                 self.gpu.reconfigure();
-                return;
+                return Ok(());
             }
-            // TODO: recreate the surface on Lost
+            CurrentSurfaceTexture::Lost => return self.gpu.recreate(),
             CurrentSurfaceTexture::Timeout
             | CurrentSurfaceTexture::Occluded
-            | CurrentSurfaceTexture::Lost
-            | CurrentSurfaceTexture::Validation => return,
+            | CurrentSurfaceTexture::Validation => return Ok(()),
         };
         // Creates a view of the whole surface texture, the form in which a render pass takes it
         let view = frame.texture.create_view(&TextureViewDescriptor::default());
@@ -167,6 +171,7 @@ impl Renderer {
         if suboptimal {
             self.gpu.reconfigure();
         }
+        Ok(())
     }
 }
 
@@ -199,19 +204,19 @@ impl GpuContext {
     // ====================================================================================== \\
     //                                      Constructors                                      \\
     // ====================================================================================== \\
-
     /// Connects to a GPU that can draw to `window`, and configures the window's surface at
     /// `width` by `height` pixels.
     async fn new<W>(window: W, width: u32, height: u32) -> Result<Self, RendererError>
     where
-        W: HasWindowHandle + HasDisplayHandle + Debug + Clone + Send + Sync + 'static,
+        W: DisplayAndWindowHandle + Debug + Clone + Send + Sync + 'static,
     {
         // Creates the wgpu instance, giving it the window's display connection. Only the OpenGL
         // backend uses it, to present frames, and DirectX 12 and Vulkan ignore it. Passing it keeps
         // a later port open
         let display = Box::new(window.clone());
         let instance = Instance::new(InstanceDescriptor::new_with_display_handle(display));
-        let surface = instance.create_surface(window)?;
+        let window = Arc::new(window);
+        let surface = instance.create_surface(Arc::clone(&window))?;
 
         // Chooses a GPU that can draw to the surface
         let adapter_options = RequestAdapterOptions {
@@ -244,7 +249,7 @@ impl GpuContext {
         }
 
         // Configures the surface and creates the texture that frames draw into
-        let surface_context = SurfaceContext::new(surface, &device, config);
+        let surface_context = SurfaceContext::new(window, surface, &device, config);
 
         Ok(Self {
             surface_context: Some(surface_context),
@@ -259,7 +264,6 @@ impl GpuContext {
     // ====================================================================================== \\
     //                                      API Methods                                       \\
     // ====================================================================================== \\
-
     /// Resizes the surface and the multisampled texture to `width` by `height` pixels, while a
     /// surface exists. A width or height of zero leaves both as they are, since
     /// `Surface::configure` panics on a width or height of zero.
@@ -279,6 +283,21 @@ impl GpuContext {
         }
     }
 
+    fn recreate(&mut self) -> Result<(), RendererError> {
+        let Some(old) = self.surface_context.take() else {
+            return Ok(());
+        };
+
+        let window = Arc::clone(&old.window);
+        let width = old.config.width;
+        let height = old.config.height;
+        drop(old);
+
+        let surface_context = self.create_surface_context(window, width, height)?;
+        self.surface_context = Some(surface_context);
+        Ok(())
+    }
+
     /// Drops the surface, its configuration and the multisampled texture.
     fn suspend(&mut self) {
         self.surface_context = None;
@@ -291,25 +310,14 @@ impl GpuContext {
     /// `RendererError::UnsupportedSurface` where the GPU cannot draw to it in that format.
     fn resume<W>(&mut self, window: W, width: u32, height: u32) -> Result<(), RendererError>
     where
-        W: HasWindowHandle + HasDisplayHandle + Send + Sync + 'static,
+        W: DisplayAndWindowHandle + Send + Sync + 'static,
     {
         // Drops any surface still held, since a driver can refuse a second surface on one window
         self.surface_context = None;
 
-        // Creates the surface, and checks that it can take the format that the pipeline is built
-        // for
-        let surface = self.instance.create_surface(window)?;
-        let capabilities = surface.get_capabilities(&self.adapter);
-        if !capabilities.formats.contains(&self.format) {
-            return Err(RendererError::UnsupportedSurface);
-        }
+        let window: Arc<dyn DisplayAndWindowHandle> = Arc::new(window);
 
-        // Configures the surface at the window's size, in the pipeline's format
-        let mut config = surface
-            .get_default_config(&self.adapter, width, height)
-            .ok_or(RendererError::UnsupportedSurface)?;
-        config.format = self.format;
-        let surface_context = SurfaceContext::new(surface, &self.device, config);
+        let surface_context = self.create_surface_context(window, width, height)?;
         self.surface_context = Some(surface_context);
         Ok(())
     }
@@ -386,7 +394,6 @@ impl GpuContext {
     // ====================================================================================== \\
     //                                     Helper Methods                                     \\
     // ====================================================================================== \\
-
     /// Creates a texture the size and format of the surface, storing `SAMPLE_COUNT` samples per
     /// pixel, and returns a view of it for a render pass to draw into.
     fn create_msaa_view(device: &Device, config: &SurfaceConfiguration) -> TextureView {
@@ -408,11 +415,32 @@ impl GpuContext {
         let texture = device.create_texture(&descriptor);
         texture.create_view(&TextureViewDescriptor::default())
     }
+
+    fn create_surface_context(
+        &self,
+        window: Arc<dyn DisplayAndWindowHandle>,
+        width: u32,
+        height: u32,
+    ) -> Result<SurfaceContext, RendererError> {
+        let surface = self.instance.create_surface(Arc::clone(&window))?;
+        let caps = surface.get_capabilities(&self.adapter);
+        if !caps.formats.contains(&self.format) {
+            return Err(RendererError::UnsupportedSurface);
+        }
+
+        let mut config = surface
+            .get_default_config(&self.adapter, width, height)
+            .ok_or(RendererError::UnsupportedSurface)?;
+        config.format = self.format;
+
+        Ok(SurfaceContext::new(window, surface, &self.device, config))
+    }
 }
 
 /// The parts of the renderer that belong to one window, which are replaced together whenever the
 /// window is.
 struct SurfaceContext {
+    window: Arc<dyn DisplayAndWindowHandle>,
     /// Hands out the textures that frames draw into, and shows each finished one in the window.
     surface: Surface<'static>,
     /// The size and format of the surface's textures.
@@ -425,10 +453,16 @@ struct SurfaceContext {
 impl SurfaceContext {
     /// Configures `surface` with `config`, and creates a multisampled texture of the same size
     /// and format.
-    fn new(surface: Surface<'static>, device: &Device, config: SurfaceConfiguration) -> Self {
+    fn new(
+        window: Arc<dyn DisplayAndWindowHandle>,
+        surface: Surface<'static>,
+        device: &Device,
+        config: SurfaceConfiguration,
+    ) -> Self {
         surface.configure(device, &config);
         let msaa_view = GpuContext::create_msaa_view(device, &config);
         Self {
+            window,
             surface,
             config,
             msaa_view,

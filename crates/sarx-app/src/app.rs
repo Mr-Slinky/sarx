@@ -75,17 +75,9 @@ impl ApplicationHandler for App {
         }
     }
 
-    /// Drops the renderer's surface while the app is suspended. winit calls this only on a platform
-    /// with an app lifecycle, such as a phone, and never on Windows, even for a minimised window.
-    fn suspended(&mut self, _: &ActiveEventLoop) {
-        // Drops the renderer's surface, since the platform destroys it while the app is suspended
-        if let Some(renderer) = self.renderer.as_mut() {
-            renderer.suspend();
-        }
-    }
-
     /// Ends the program when the player closes the window, passes resizes and redraws to the
-    /// renderer, and prints every other event.
+    /// renderer, and prints every other event. Also ends the program where the renderer loses
+    /// its surface and cannot create a new one.
     fn window_event(
         &mut self,
         event_loop: &ActiveEventLoop,
@@ -100,8 +92,11 @@ impl ApplicationHandler for App {
                 }
             }
             WindowEvent::RedrawRequested => {
-                if let Some(renderer) = self.renderer.as_mut() {
-                    renderer.render();
+                if let Some(renderer) = self.renderer.as_mut()
+                    && let Err(error) = renderer.render()
+                {
+                    Self::print_error(&error);
+                    event_loop.exit();
                 }
             }
             other => println!("{other:?}"),
@@ -109,6 +104,15 @@ impl ApplicationHandler for App {
             //  WindowEvent::KeyboardInput { event, .. } => input.record_key(event),
             //  _ => {}
             //  etc...
+        }
+    }
+
+    /// Drops the renderer's surface while the app is suspended. winit calls this only on a platform
+    /// with an app lifecycle, such as a phone, and never on Windows, even for a minimised window.
+    fn suspended(&mut self, _: &ActiveEventLoop) {
+        // Drops the renderer's surface, since the platform destroys it while the app is suspended
+        if let Some(renderer) = self.renderer.as_mut() {
+            renderer.suspend();
         }
     }
 }

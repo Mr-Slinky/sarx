@@ -194,7 +194,7 @@ GPU, ending in lit terrain on screen. The author then extends each layer on its 
 - [x] Clear the screen
 - [x] Draw a triangle
 - [x] Rebuild the surface when the app suspends and resumes
-- [ ] Recreate the surface when wgpu reports it lost
+- [x] Recreate the surface when wgpu reports it lost
 - [ ] Move the triangle from a fixed-step simulation with a minimal ECS
 - [ ] Render a 3D cube with a camera and a depth buffer
 - [ ] Render lit heightmap terrain with a mouse and keyboard camera

@@ -1,49 +1,78 @@
 # CLAUDE.md
 
-This file guides AI agents working in the Sarx repository. The README states what Sarx is, its design
-decisions, its workspace, how to build it and the conventions that every developer follows, agents
-included. An agent reads it at the start of every session. This file adds the instructions that apply
-to agents alone.
+This file guides AI agents that work in this repository. It builds on the README, which an agent
+reads at the start of every session.
 
-The global CLAUDE.md still applies, apart from its Java, Maven and Log4j2 sections. The README's test
-conventions take the place of the Java mechanics in its testing standards.
+The README covers four things: what Sarx is, its workspace, how to build it, and the conventions that
+every developer follows. Agents count as developers there, and follow those conventions too.
+
+The README also has a Design Decisions section, which lists every decision record. Each decision is
+stated in its own record alone.
+
+This file adds the instructions that apply to agents alone.
+
+A global CLAUDE.md applies here as well. It applies in full, apart from the parts that concern only
+Java, Maven or Log4j2. Some of its Maven practices have a Cargo counterpart. Where one does, an agent
+follows the Cargo counterpart.
+
+The global file and a more local file can disagree. Where they do, the more local file wins, in the
+way that a more specific CSS rule overrides a general one. This file and the README are both more
+local than the global file. Therefore, they take precedence over it. For example, the test
+conventions in the README take the place of the JUnit mechanics in the global file.
 
 ---
 
 ## The Two Goals
 
-Sarx is a game and a course of study at once, and the second goal weighs as much as the first. The
-developer is building every layer below the gameplay by hand, to understand the whole graphics
-pipeline and the architecture of a game engine.
+Sarx has two goals, and the developer gives them equal weight.
 
-- **Libraries go to discussion first.** An agent raises a library with the developer, and weighs it
-  against the questions in the README, before suggesting that Sarx take it on.
+The first goal is the game itself. The second is learning. The developer is building every layer
+below the gameplay by hand. Through that work, the developer means to understand the whole graphics
+pipeline, along with the architecture of a game engine.
+
+Three rules for agents follow from the second goal.
+
+- **Libraries go to discussion first.** An agent raises a library with the developer before
+  suggesting that Sarx take it on. In that discussion, the agent weighs the library against the
+  questions in the README.
 - **Difficulty is never a con.** The agent never raises how hard something is as a reason against
   building it by hand.
-- **Build to extend, wherever possible.** The agent proposes a small, runnable first version that
-  teaches a concept, and the developer extends it as the concept becomes clear. Throwaway code is the
-  exception, kept for a piece where building something to extend proves too difficult. The agent
-  judges which kind each piece is, using one test:
-  - **Structure is extended.** Code that other code builds on, such as the render loop, the GPU
-    setup, the ECS and the simulation loop, starts as a first version and grows from there.
-  - **Content can be thrown away.** A small piece that exists only to demonstrate something, such as
-    a test shader or a hard-coded triangle, is deleted once it has served its purpose.
+- **Build properly from the start.** The agent never proposes a version of a piece that is meant to
+  be thrown away later. Instead, the developer judges each piece as the work reaches it. Two kinds of
+  piece guide that judgement:
+  - **Structure is built properly from its first version.** Structure is code that other code builds
+    on. The render loop, the GPU setup, the ECS and the simulation loop are all structure. Code of
+    this kind is expensive to throw away.
 
-  The agent says which kind a piece is before the developer builds it. Where the call is unclear,
-  the agent discusses it with the developer.
+    The ECS is the heart of the whole system. Its first version follows the design that Sarx keeps.
+    Later work extends that design rather than replacing it.
+  - **Content can be thrown away.** Content is a small piece that exists only to demonstrate
+    something, such as a test shader or a hard-coded triangle. Content is quick to delete. Whether
+    it survives makes no difference to what the developer learns. The architecture built around it
+    stays either way.
+
+  Where the agent is unsure which kind a piece is, it asks the developer.
 
 ---
 
 ## Working with the Developer
 
-The developer wants to understand and own every line of Sarx. The developer writes the code, and AI
-agents help with that understanding and act as peer reviewers.
+The developer wants to understand and own every line of Sarx. For that reason, the developer writes
+the code. AI agents help the developer understand it, and they review it as a peer would.
 
 ### Discussion and Instructions
 
-A message that discusses an idea, a design or a problem gets a reply in conversation, and the agent
-builds nothing. Building starts only when a message asks for it in plain words, such as "write",
-"implement", "fix" or "commit". Where a message could be either, the agent treats it as discussion.
+The developer sends two kinds of message, discussion and instruction. The agent answers each kind
+differently.
+
+A message that discusses an idea, a design or a problem is discussion. The agent replies in
+conversation and builds nothing.
+
+A message that asks for building in plain words is an instruction. Words such as "write",
+"implement", "fix" and "commit" mark one. Building starts only then.
+
+Where a message could be either, the agent treats it as discussion. The table below sorts three
+example messages.
 
 | Message                                                  | Treat as    |
 |----------------------------------------------------------|-------------|
@@ -53,32 +82,43 @@ builds nothing. Building starts only when a message asks for it in plain words, 
 
 ### Areas Open to Agents
 
-Agents act without asking in four areas:
+Four areas are open to agents. In the first two, an agent acts on its own initiative. In the other
+two, it acts once the developer asks:
 
 1. **Documentation and comments.** Agents write and edit doc comments, inline comments, READMEs and
    anything under `docs/`.
 2. **Concepts.** Agents explain any Rust, graphics, GPU or game-architecture concept that the
-   developer is still learning. The developer knows Java well and some Rust. Graphics programming and
-   game architecture are new to the developer. The agent therefore explains each concept in plain
-   words on first use and ties it to Sarx. A comparison with the Java counterpart often helps. Where the agent draws one, it
-   also says where the comparison stops holding true.
+   developer is still learning.
+
+   The developer knows Java well, and knows some Rust. Graphics programming and game architecture are
+   new to the developer. The agent therefore explains each concept in plain words, the first time
+   that it comes up. It also ties the concept to Sarx.
+
+   A comparison with the Java counterpart often helps. Where the agent draws one, it also says where
+   the comparison stops holding true.
 3. **One function at a time.** An agent writes a single, clearly defined function or method per
    request. The request states what the function takes, what it returns and what it does. Where any
    of those is unclear, the agent asks first. After writing the function, the agent explains the
-   concepts it relies on, then stops.
+   concepts that it relies on, then stops.
 4. **Git.** Agents write every commit message, the developer's included. An agent commits its own
-   changes once the developer has reviewed them, as the Commits section sets out. It commits the
-   developer's work, pushes and pulls each time the developer asks.
+   changes once the developer has reviewed them and says to commit. Each time the developer asks, it
+   also commits the developer's work, and pushes and pulls.
 
-Every other change waits for an explicit instruction from the developer. That includes writing more
-than one function, adding types, modules or crates, restructuring code, adding dependencies and
-changing the logic of code that the developer wrote.
+Every other change waits for an explicit instruction from the developer. That covers the following:
+
+- writing more than one function
+- adding types, modules or crates
+- restructuring code
+- adding dependencies
+- changing the logic of code that the developer wrote
 
 ### Lifetimes and Smart Pointers
 
-Lifetimes and smart pointers are the developer's weakest areas of Rust. Whenever code that the agent
-writes, reviews or discusses uses one of them, the agent explains it at that point, in plain words
-and in terms of the code in front of the developer. This covers:
+Lifetimes and smart pointers are the developer's weakest areas of Rust. The agent therefore explains
+each one wherever it appears in code that the agent writes, reviews or discusses. The explanation
+comes at that point, in plain words. It works from the code in front of the developer.
+
+The rule covers two kinds of feature:
 
 - lifetime annotations, such as the `'a` in `fn first<'a>(items: &'a [Item]) -> &'a Item`
 - smart pointers, such as `Box<T>`, `Arc<T>` and `Cow<'a, T>`, along with the others of their kind
@@ -88,31 +128,35 @@ and in terms of the code in front of the developer. This covers:
 The review exists to improve the developer's Rust and graphics code.
 
 - The agent orders findings by importance: bugs first, then non-idiomatic Rust, then style.
-- Each finding states the problem and the reason behind it, such as ownership, borrowing,
+- Each finding states the problem and the reason behind it. The reason might be ownership, borrowing,
   lifetimes, a standard-library idiom or a rule of the GPU pipeline.
 - A finding can include a short snippet in chat that shows the fix. The developer then makes the
   change in the code.
-- The agent can flag an item marked `pub` that no code outside its crate needs yet. `pub(crate)` is
-  the default until another crate needs the item. This is a decision, taken because the two
-  directions differ in what they break. Widening `pub(crate)` to `pub` breaks no code, while narrowing `pub` to
-  `pub(crate)` breaks every other crate that uses the item.
+- Sarx makes an item `pub(crate)` until another crate needs it. This is a decision, taken because the
+  two directions differ. Widening `pub(crate)` to `pub` breaks no code. Narrowing `pub` to
+  `pub(crate)` breaks every other crate that uses the item. The agent can therefore flag an item
+  marked `pub` that no code outside its crate needs yet.
 
 ### Tests
 
-An agent writes a test only when the developer asks for one, following the test conventions in the
-README.
+An agent writes a test only when the developer asks for one. The test follows the test conventions
+in the README.
 
 ### Decision Records
 
-Each discussion that settles a decision ends in an ADR, in the format that the README sets out. The
-agent writes the ADR once the discussion closes, and the developer reviews it as with any other agent
-change.
+A discussion that settles a decision ends in an ADR. Once the discussion closes, the agent writes the
+ADR in the format that the README sets out. The agent then adds a row for it to the table in the
+Design Decisions section of the README. The developer reviews the ADR and the row, as with any other
+change that an agent makes.
+
+Before proposing or reviewing work, the agent reads the ADRs that the work touches. A proposal that
+conflicts with an ADR goes to the developer as a discussion about changing that ADR.
 
 ### Build Order
 
-The agent proposes work in the order of the README's TODO section, with each step small enough to
-end in something visible. With each proposal, the agent says what the developer will understand once
-the step is done.
+The agent proposes work in the order of the TODO section in the README. Each step that it proposes is
+small enough to end in something visible. With each proposal, the agent also says what the developer
+will understand once that step is done.
 
 ---
 
@@ -122,34 +166,44 @@ wgpu changes its API in most major releases. As a result, the signatures that an
 from training are often out of date. Before writing or reviewing wgpu code, the agent:
 
 1. Reads the wgpu version from `Cargo.lock`.
-2. Checks the real definitions in the crate source under `~/.cargo/registry/src`, which matches that
-   version exactly.
-3. Uses docs.rs for that version, the `examples` folder in the wgpu repository, and its
-   `CHANGELOG.md` when moving between versions.
+2. Checks the real definitions in the crate source under `~/.cargo/registry/src`. That source
+   matches the version exactly.
+3. Reads docs.rs for that version. It also reads the `examples` folder in the wgpu repository, at the
+   tag for that version.
 
-winit also changes its API between major releases, meaning the agent checks it in the same way.
+When moving from one version to another, the agent also reads `CHANGELOG.md` in the wgpu repository.
+
+winit, the window library, has the same problem. It also changes its API in its breaking releases.
+For a crate below version 1.0, Cargo treats a change in the second number as a breaking release. A
+move from 0.29 to 0.30 is one such change. The agent therefore checks winit in the same way as wgpu.
 
 ---
 
 ## This Machine
 
-- On this Windows machine, `rust-toolchain.toml` resolves to the MSVC toolchain, because the default
-  host is MSVC. The developer's global default toolchain stays GNU, since other projects use it.
-- The developer installs software through Chocolatey, the only package manager on this machine. The
-  Build Tools that the README requires install with
+Two facts about this machine affect how an agent builds Sarx.
+
+- The default host here is MSVC. As a result, `rust-toolchain.toml` resolves to the MSVC toolchain.
+  The global default toolchain of the developer stays GNU, because other projects use it.
+- The only package manager here is Chocolatey, and the developer installs software through it. The
+  developer installs the Build Tools that the README requires with
   `choco install visualstudio2022-workload-vctools`.
 
 ---
 
 ## Git and GitHub
 
-- The repository is private, at `github.com/Mr-Slinky/sarx`, owned by the Mr-Slinky account like
-  everything under `C:\Repos\personal`.
-- The `origin` remote uses the `github-personal` SSH alias, which authenticates as Mr-Slinky. Commits
-  pick up the personal identity automatically.
-- The active `gh` account on this machine is ITAnywhere-Developer, a work account. For a `gh` command
-  against this repository, the agent passes Mr-Slinky's token for that command alone, leaving the
-  active account as it is:
+The repository belongs to the developer's personal GitHub account. On this machine, however, `gh`
+signs in to a work account by default. The points below set out how an agent works with both.
+
+- The repository is private, at `github.com/Mr-Slinky/sarx`. Like everything under
+  `C:\Repos\personal`, it is owned by the Mr-Slinky account.
+- The `origin` remote uses the `github-personal` SSH alias, which authenticates as Mr-Slinky.
+- `~/.gitconfig` loads `~/.gitconfig-personal` for every repository under `C:\Repos\personal`.
+  Commits in this repository therefore take their author name and email from that file.
+- The active `gh` account is ITAnywhere-Developer, the work account. A `gh` command against this
+  repository needs Mr-Slinky instead. The agent passes the token for Mr-Slinky to that one command,
+  leaving the active account as it is:
 
   ```bash
   GH_TOKEN=$(gh auth token -u Mr-Slinky) gh <command>
@@ -173,16 +227,17 @@ commit records whose work it contains:
 | An agent's      | `Claude <noreply@anthropic.com>`       |
 
 An agent commits its own changes only after the developer has reviewed them and says to commit.
-Until then, the agent reports that the change is ready for review and stops. At commit time, the
-agent stages only the files it changed, each by name, meaning each commit contains one person's
-work. It also sets the author explicitly:
+Until then, the agent reports that the change is ready for review, and stops.
+
+At commit time, the agent stages only the files that it changed, each one by name. Each commit then
+contains one person's work. The agent also sets the author explicitly, as below:
 
 ```
 git commit --author="Claude <noreply@anthropic.com>" -m "docs: explain the fixed simulation step"
 ```
 
-Git then records Claude as the author and the developer as the committer. `git log --author=Claude`
-lists every agent commit.
+Git then records Claude as the author, and the developer as the committer. As a result,
+`git log --author=Claude` lists every agent commit.
 
 A review suggestion that the developer applies in the code is the developer's work. As such, it
 goes in a developer commit.

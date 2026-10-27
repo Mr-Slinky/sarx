@@ -1,3 +1,14 @@
+//! The [`Renderer`] draws frames on the screen.
+//!
+//! To do that, it needs two things.
+//!
+//! The first is a connection to the GPU. The renderer opens it once, when it is created, and keeps
+//! it for as long as the renderer exists. A [`GpuContext`] stores it.
+//!
+//! The second is a surface. A surface is the part of a window that the GPU draws into. Unlike the
+//! connection, a surface can be lost and replaced while the program runs. A [`SurfaceContext`]
+//! stores it.
+
 use std::borrow::Cow;
 use std::fmt::Debug;
 use std::sync::Arc;
@@ -21,28 +32,49 @@ use crate::mesh::Mesh;
 //                                         Public API                                         \\
 // ========================================================================================== \\
 
-/// Draws frames on the GPU into one window.
+/// Draws frames into one window.
 ///
-/// A caller creates a `Renderer` with `new` once the window exists, then calls `render` each time
-/// the window needs redrawing. The caller passes each new window size to `resize`. It also calls
-/// `suspend` when the app loses its window and `resume` when the app gets one back. A platform with
-/// an app lifecycle, such as a phone, does this each time the app leaves the screen and returns.
-/// Windows never does, and the two methods keep a later port open.
+/// A caller creates a `Renderer` with `new` once the window exists. From then on, the caller calls
+/// `render` each time the window needs redrawing. It also passes each new window size to `resize`.
+///
+/// Two more methods serve a platform that can take the window away from a running app, such as a
+/// phone. The caller calls `suspend` when the app loses its window. It calls `resume` when the app
+/// gets a window back. winit never takes the window away on Windows, meaning these two methods run
+/// only on another platform.
+///
+/// # Examples
+///
+/// The example creates a renderer, then hands it the two window events that concern it.
+///
+/// ```ignore
+/// // Creates the renderer once the window exists
+/// let size = window.inner_size();
+/// let renderer_setup = Renderer::new(Arc::clone(&window), size.width, size.height);
+/// let mut renderer = block_on(renderer_setup)?;
+///
+/// // Passes each new window size to `resize`, and calls `render` each time the window needs
+/// // redrawing
+/// match event {
+///     WindowEvent::Resized(size) => renderer.resize(size.width, size.height),
+///     WindowEvent::RedrawRequested => renderer.render()?,
+///     _ => {}
+/// }
+/// ```
 pub struct Renderer {
-    /// The connection to the GPU, and the surface for the window.
+    /// The connection to the GPU. It also stores the surface for the window.
     gpu: GpuContext,
-    /// The triangle's vertices, copied into GPU memory.
+    /// The vertices of the triangle, copied into GPU memory.
     vertex_buffer: Buffer,
-    /// The number of vertices in `vertex_buffer`, which `render` passes to each draw call. `new`
-    /// copies it from the mesh before dropping the mesh.
+    /// The number of vertices in `vertex_buffer`. `render` passes it to each draw call. `new`
+    /// copies it from the mesh before the mesh is dropped.
     vertex_count: u32,
-    /// The GPU's settings for drawing the triangle, from reading its vertices to writing its
-    /// colour.
+    /// The pipeline that draws the triangle. A pipeline is the set of settings that the GPU follows
+    /// to draw, from reading each vertex to writing each pixel's colour.
     pipeline: RenderPipeline,
 }
 
 impl Renderer {
-    /// The colour that every frame starts from, a dark blue.
+    /// The dark blue that fills each frame before the renderer draws the triangle.
     const CLEAR_COLOUR: Color = Color {
         r: 0.1,
         g: 0.2,
@@ -50,12 +82,35 @@ impl Renderer {
         a: 1.0,
     };
 
-    /// Connects to a GPU that can draw to `window` at `width` by `height` pixels, copies the
-    /// triangle into GPU memory, and builds the pipeline that draws it.
+    /// Creates a renderer that draws into `window`, at `width` by `height` pixels.
     ///
-    /// Returns a `RendererError` where wgpu cannot create a surface for the window, where no GPU
-    /// can draw to it, where the GPU refuses the device or the surface, or where the GPU cannot
-    /// anti-alias in the surface's format.
+    /// Setting up takes three steps. `new` first connects to a GPU that can draw to the window. It
+    /// then copies the triangle into GPU memory. Last, it builds the pipeline, which is the set of
+    /// settings that the GPU follows to draw the triangle.
+    ///
+    /// # Errors
+    ///
+    /// Returns a `RendererError` in each of these cases:
+    ///
+    /// - wgpu cannot create a surface for the window.
+    /// - No GPU can draw to that surface.
+    /// - The GPU refuses to open a device.
+    /// - The GPU offers no pixel format in which it can draw to the surface.
+    /// - The GPU cannot anti-alias in the surface's pixel format. Anti-aliasing smooths the jagged
+    ///   edges of a shape.
+    ///
+    /// # Examples
+    ///
+    /// The example creates a renderer for a winit window, at the window's current size.
+    ///
+    /// ```ignore
+    /// // Creates a renderer that draws into the window at its current size
+    /// let size = window.inner_size();
+    /// let renderer_setup = Renderer::new(Arc::clone(&window), size.width, size.height);
+    ///
+    /// // Waits for the setup to finish, since `new` returns a future
+    /// let renderer = block_on(renderer_setup)?;
+    /// ```
     pub async fn new<W>(window: W, width: u32, height: u32) -> Result<Self, RendererError>
     where
         W: HasWindowHandle + HasDisplayHandle + Debug + Clone + Send + Sync + 'static,
@@ -74,23 +129,67 @@ impl Renderer {
         })
     }
 
-    /// Resizes the textures that each frame draws into, to `width` by `height` pixels. A width or
-    /// height of zero, which a minimised window reports, leaves the sizes as they are.
+    /// Changes the size at which the renderer draws each frame, to `width` by `height` pixels.
+    ///
+    /// A width or height of zero leaves the size as it is.
+    ///
+    /// # Examples
+    ///
+    /// A minimised window typically reports a size of zero, which the renderer ignores.
+    ///
+    /// ```ignore
+    /// renderer.resize(1920, 1080); // draws each later frame at 1920 by 1080
+    /// renderer.resize(0, 0);       // leaves the size at 1920 by 1080
+    /// ```
     pub fn resize(&mut self, width: u32, height: u32) {
         self.gpu.resize(width, height);
     }
 
-    /// Drops the window's surface, for when the app is suspended and loses its window. `render`
-    /// skips every frame until `resume` gives the renderer a window again.
+    /// Drops the surface, for a caller whose app has lost its window.
+    ///
+    /// From then on, `render` skips every frame. It draws again once `resume` gives the renderer a
+    /// new surface.
+    ///
+    /// # Examples
+    ///
+    /// After `suspend`, each call to `render` skips the frame.
+    ///
+    /// ```ignore
+    /// // Drops the surface when the app loses its window
+    /// renderer.suspend();
+    ///
+    /// // Skips the frame and returns `Ok(())`
+    /// renderer.render()?;
+    /// ```
     pub fn suspend(&mut self) {
         self.gpu.suspend();
     }
 
-    /// Creates a surface for `window` at `width` by `height` pixels, for when the app resumes,
-    /// and draws into it from then on.
+    /// Creates a new surface for `window`, at `width` by `height` pixels.
     ///
-    /// Returns a `RendererError` where wgpu cannot create the surface, or where the GPU cannot
-    /// draw to it in the format that the pipeline was built for.
+    /// A caller calls `resume` when the app gets its window back. `render` draws into the new
+    /// surface from then on.
+    ///
+    /// # Errors
+    ///
+    /// Returns a `RendererError` in each of these cases:
+    ///
+    /// - wgpu cannot create the surface.
+    /// - The GPU cannot draw to the surface in the pixel format that the pipeline was built for.
+    ///
+    /// # Examples
+    ///
+    /// When the app gets its window back, the caller gives the renderer a new surface, then asks
+    /// for a frame.
+    ///
+    /// ```ignore
+    /// // Creates a new surface for the window, at the window's current size
+    /// let size = window.inner_size();
+    /// renderer.resume(Arc::clone(&window), size.width, size.height)?;
+    ///
+    /// // Asks winit for a frame, which `render` draws into the new surface
+    /// window.request_redraw();
+    /// ```
     pub fn resume<W>(&mut self, window: W, width: u32, height: u32) -> Result<(), RendererError>
     where
         W: HasWindowHandle + HasDisplayHandle + Send + Sync + 'static,
@@ -98,22 +197,47 @@ impl Renderer {
         self.gpu.resume(window, width, height)
     }
 
-    /// Draws one frame, the triangle over a `CLEAR_COLOUR` background, and presents it in the
-    /// window. Skips the frame while the app is suspended, or while the surface has no texture
-    /// to hand out. Where wgpu reports the surface lost, creates a new one for the same window
-    /// and skips the frame.
+    /// Draws one frame and shows it in the window.
     ///
-    /// Returns a `RendererError` where wgpu reports the surface lost and cannot create a new one,
-    /// or where the GPU cannot draw to the new one in the format that the pipeline was built for.
+    /// Each frame shows an orange triangle over a dark blue background.
+    ///
+    /// Some calls skip the frame. While the app is suspended, no surface exists. As a result,
+    /// `render` returns at once.
+    ///
+    /// Each frame is drawn into a texture, which is an image in GPU memory. The surface hands out
+    /// one texture for each frame. Where the surface has no texture ready, `render` skips the
+    /// frame. Where wgpu reports the surface lost, `render` creates a new surface for the same
+    /// window, then skips the frame.
+    ///
+    /// # Errors
+    ///
+    /// Returns a `RendererError` after wgpu reports the surface lost, in each of these cases:
+    ///
+    /// - wgpu cannot create the new surface.
+    /// - The GPU cannot draw to the new surface in the pixel format that the pipeline was built
+    ///   for.
+    ///
+    /// # Examples
+    ///
+    /// A caller draws a frame each time winit asks for one. The example ends the program where
+    /// `render` returns an error.
+    ///
+    /// ```ignore
+    /// // Draws one frame and shows it in the window
+    /// if let Err(error) = renderer.render() {
+    ///     // Ends the program, since the renderer has lost its surface for good
+    ///     eprintln!("Error: {error}");
+    ///     event_loop.exit();
+    /// }
+    /// ```
     pub fn render(&mut self) -> Result<(), RendererError> {
-        // Skips the frame while the app is suspended and has no surface to draw into
+        // Returns at once while the app is suspended, since no surface exists then
         let Some(surface_context) = &self.gpu.surface_context else {
             return Ok(());
         };
 
-        // Gets the surface's next texture to draw into. Reconfigures the surface when it is
-        // outdated, creates a new surface when it is lost, and skips the frame whenever no
-        // texture comes back
+        // Gets the next texture from the surface, and skips the frame where none comes back.
+        // Before skipping, reconfigures an outdated surface and replaces a lost one
         let (frame, suboptimal) = match surface_context.surface.get_current_texture() {
             CurrentSurfaceTexture::Success(frame) => (frame, false),
             CurrentSurfaceTexture::Suboptimal(frame) => (frame, true),
@@ -126,24 +250,26 @@ impl Renderer {
             | CurrentSurfaceTexture::Occluded
             | CurrentSurfaceTexture::Validation => return Ok(()),
         };
-        // Creates a view of the whole surface texture, the form in which a render pass takes it
+        // Creates a view of the whole texture, since a render pass draws into a texture through a
+        // view
         let view = frame.texture.create_view(&TextureViewDescriptor::default());
 
-        // Creates the command encoder that records this frame's commands for the GPU
+        // Creates the command encoder, which records this frame's commands for the GPU to run
         let encoder_descriptor = CommandEncoderDescriptor {
             label: Some("Sarx frame"),
         };
         let mut encoder = self.gpu.device.create_command_encoder(&encoder_descriptor);
 
-        // Points the pass at the multisampled texture, which the pass clears and draws into. The
-        // pass then averages each pixel's samples into the surface texture
+        // Points the pass at the multisampled texture, which stores several samples for each
+        // pixel. The pass clears that texture and draws into it. It then averages each pixel's
+        // samples into the surface texture, thereby smoothing the triangle's edges
         let colour_attachment = RenderPassColorAttachment {
             view: &surface_context.msaa_view,
             depth_slice: None,
             resolve_target: Some(&view),
             ops: Operations {
                 load: LoadOp::Clear(Self::CLEAR_COLOUR),
-                // Throws the samples away once averaged, skipping a write to memory
+                // Discards the samples once the pass has averaged them, skipping a write to memory
                 store: StoreOp::Discard,
             },
         };
@@ -152,22 +278,25 @@ impl Renderer {
             color_attachments: &[Some(colour_attachment)],
             ..Default::default()
         };
-        // Records a render pass that draws the triangle into the colour attachment
+        // Records a render pass, which is one batch of draws into the colour attachment. This pass
+        // draws the triangle
         let mut render_pass = encoder.begin_render_pass(&pass_descriptor);
         render_pass.set_pipeline(&self.pipeline);
         render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
         // Runs the pipeline over every vertex in the buffer, drawing one copy of the mesh
         render_pass.draw(0..self.vertex_count, 0..1);
-        // Ends the pass, which hands the encoder back for `finish`
+        // Ends the pass, which releases its borrow of the encoder. `finish` can then take the
+        // encoder
         drop(render_pass);
 
-        // Sends the recorded commands to the GPU, then presents the frame's texture in the window
+        // Sends the recorded commands to the GPU, then shows the frame's texture in the window
         let queue = &self.gpu.queue;
         queue.submit([encoder.finish()]);
         queue.present(frame);
 
-        // Reconfigures the surface after `present` has taken the frame, since `configure` panics
-        // while a texture from the surface is still alive
+        // Reconfigures a suboptimal surface, whose textures no longer match the window. This
+        // waits until `present` has taken the frame, since `configure` panics while a texture
+        // from the surface is still alive
         if suboptimal {
             self.gpu.reconfigure();
         }
@@ -179,40 +308,69 @@ impl Renderer {
 //                                          Helpers                                           \\
 // ========================================================================================== \\
 
-/// The wgpu objects that connect Sarx to one GPU and to the window that it draws into.
+/// The connection to one GPU, together with the surface that the GPU draws into.
+///
+/// The connection lasts as long as the renderer. The surface is dropped while the app is
+/// suspended, leaving `surface_context` as `None`.
 struct GpuContext {
-    /// The surface and the parts built to match it, or `None` while the app is suspended and
-    /// has no window to draw into.
+    /// The surface and the parts built to match it. It is `None` while the app is suspended.
     surface_context: Option<SurfaceContext>,
     /// The wgpu instance, which creates each surface. `new` also uses it to find the adapter.
     instance: Instance,
-    /// The GPU that Sarx draws with.
+    /// The GPU that the renderer draws with. wgpu calls a GPU an adapter.
     adapter: Adapter,
-    /// The connection to the adapter, which creates buffers, textures, shaders and pipelines.
+    /// The open connection to the adapter. The device creates every buffer, texture, shader and
+    /// pipeline.
     device: Device,
     /// The queue that sends recorded commands to the GPU.
     queue: Queue,
-    /// The pixel format of the first surface. `create_pipeline` builds the pipeline for it, and
-    /// `resume` therefore configures every later surface with it.
+    /// The pixel format of the first surface. A pixel format sets how each pixel's colour is laid
+    /// out in memory. `create_pipeline` builds the pipeline for this format. Every later surface
+    /// therefore takes the same format.
     format: TextureFormat,
 }
 
 impl GpuContext {
-    /// How many points per pixel the GPU tests for coverage, for anti-aliasing.
+    /// The number of samples that the GPU takes for each pixel.
+    ///
+    /// A sample tests whether a shape covers one point inside the pixel. The GPU averages the
+    /// samples into the pixel's colour, which smooths the jagged edges of a shape. This smoothing
+    /// is called anti-aliasing.
     const SAMPLE_COUNT: u32 = 4;
 
     // ====================================================================================== \\
     //                                      Constructors                                      \\
     // ====================================================================================== \\
-    /// Connects to a GPU that can draw to `window`, and configures the window's surface at
-    /// `width` by `height` pixels.
+    /// Connects to a GPU that can draw to `window`.
+    ///
+    /// It also configures the window's surface at `width` by `height` pixels.
+    ///
+    /// # Errors
+    ///
+    /// Returns a `RendererError` in each of these cases:
+    ///
+    /// - wgpu cannot create a surface for the window.
+    /// - No GPU can draw to that surface.
+    /// - The GPU refuses to open a device.
+    /// - The GPU offers no pixel format in which it can draw to the surface.
+    /// - The GPU cannot anti-alias in the surface's pixel format.
+    ///
+    /// # Examples
+    ///
+    /// The example connects to a GPU for a window of 1280 by 720 pixels.
+    ///
+    /// ```ignore
+    /// // Connects to a GPU, and configures the window's surface at 1280 by 720 pixels
+    /// let gpu = GpuContext::new(window, 1280, 720).await?;
+    /// ```
     async fn new<W>(window: W, width: u32, height: u32) -> Result<Self, RendererError>
     where
         W: DisplayAndWindowHandle + Debug + Clone + Send + Sync + 'static,
     {
-        // Creates the wgpu instance, giving it the window's display connection. Only the OpenGL
-        // backend uses it, to present frames, and DirectX 12 and Vulkan ignore it. Passing it keeps
-        // a later port open
+        // Creates the wgpu instance, and gives it the window's display handle. wgpu uses the
+        // display handle only when it draws through OpenGL, where it needs the handle to show
+        // frames. DirectX 12 and Vulkan leave it unused. This is a decision, taken to keep a port
+        // to an OpenGL device possible
         let display = Box::new(window.clone());
         let instance = Instance::new(InstanceDescriptor::new_with_display_handle(display));
         let window = Arc::new(window);
@@ -225,8 +383,8 @@ impl GpuContext {
         };
         let adapter = instance.request_adapter(&adapter_options).await?;
 
-        // Opens the device and its queue, within the WebGPU standard's baseline limits, which the
-        // integrated GPU in a mid-level laptop meets
+        // Opens the device and its queue, within the WebGPU baseline limits that ADR 0003 settles
+        // on
         let device_descriptor = DeviceDescriptor {
             label: Some("Sarx device"),
             required_limits: Limits::default(),
@@ -234,21 +392,21 @@ impl GpuContext {
         };
         let (device, queue) = adapter.request_device(&device_descriptor).await?;
 
-        // Chooses the surface's configuration: its preferred format and present mode, at the
-        // window's size
+        // Gets the surface's default configuration at the window's size, in the surface's
+        // preferred pixel format
         let config = surface
             .get_default_config(&adapter, width, height)
             .ok_or(RendererError::UnsupportedSurface)?;
         let format = config.format;
 
-        // Checks that the GPU can anti-alias in the surface's format
+        // Checks that the GPU can anti-alias in the surface's pixel format
         let format_features = adapter.get_texture_format_features(format);
         let flags = format_features.flags;
         if !flags.sample_count_supported(Self::SAMPLE_COUNT) {
             return Err(RendererError::UnsupportedSampleCount);
         }
 
-        // Configures the surface and creates the texture that frames draw into
+        // Configures the surface, and creates the multisampled texture that frames draw into
         let surface_context = SurfaceContext::new(window, surface, &device, config);
 
         Ok(Self {
@@ -264,9 +422,20 @@ impl GpuContext {
     // ====================================================================================== \\
     //                                      API Methods                                       \\
     // ====================================================================================== \\
-    /// Resizes the surface and the multisampled texture to `width` by `height` pixels, while a
-    /// surface exists. A width or height of zero leaves both as they are, since
-    /// `Surface::configure` panics on a width or height of zero.
+    /// Resizes the surface and the multisampled texture to `width` by `height` pixels.
+    ///
+    /// While the app is suspended, no surface exists, and `resize` returns at once. A width or
+    /// height of zero also leaves both as they are, since `Surface::configure` panics on a size of
+    /// zero.
+    ///
+    /// # Examples
+    ///
+    /// A minimised window typically reports a size of zero, which `resize` ignores.
+    ///
+    /// ```ignore
+    /// gpu.resize(1920, 1080); // resizes both to 1920 by 1080
+    /// gpu.resize(0, 0);       // leaves both as they are, at 1920 by 1080
+    /// ```
     fn resize(&mut self, width: u32, height: u32) {
         if width == 0 || height == 0 {
             return;
@@ -277,12 +446,43 @@ impl GpuContext {
     }
 
     /// Rebuilds the surface's textures from the current configuration, while a surface exists.
+    ///
+    /// # Examples
+    ///
+    /// `render` calls it when wgpu reports the surface outdated, meaning the surface's textures no
+    /// longer match the window.
+    ///
+    /// ```ignore
+    /// // Rebuilds the surface's textures, then skips the frame
+    /// CurrentSurfaceTexture::Outdated => {
+    ///     self.gpu.reconfigure();
+    ///     return Ok(());
+    /// }
+    /// ```
     fn reconfigure(&self) {
         if let Some(surface_context) = &self.surface_context {
             surface_context.reconfigure(&self.device);
         }
     }
 
+    /// Replaces a lost surface with a new one for the same window, at the same size.
+    ///
+    /// While the app is suspended, no surface exists, and `recreate` returns `Ok(())` at once.
+    ///
+    /// # Errors
+    ///
+    /// Returns `RendererError::Surface` where wgpu cannot create the new surface. Returns
+    /// `RendererError::UnsupportedSurface` where the GPU cannot draw to the new surface in the
+    /// pixel format that the pipeline was built for.
+    ///
+    /// # Examples
+    ///
+    /// `render` calls it when wgpu reports the surface lost.
+    ///
+    /// ```ignore
+    /// // Replaces the lost surface with a new one, then skips the frame
+    /// CurrentSurfaceTexture::Lost => return self.gpu.recreate(),
+    /// ```
     fn recreate(&mut self) -> Result<(), RendererError> {
         let Some(old) = self.surface_context.take() else {
             return Ok(());
@@ -299,20 +499,43 @@ impl GpuContext {
     }
 
     /// Drops the surface, its configuration and the multisampled texture.
+    ///
+    /// # Examples
+    ///
+    /// The renderer calls it when the app loses its window.
+    ///
+    /// ```ignore
+    /// // Drops the surface, its configuration and the multisampled texture
+    /// gpu.suspend();
+    /// ```
     fn suspend(&mut self) {
         self.surface_context = None;
     }
 
-    /// Creates a surface for `window` at `width` by `height` pixels, in the format that the
-    /// pipeline is built for.
+    /// Creates a surface for `window` at `width` by `height` pixels.
     ///
-    /// Returns `RendererError::Surface` where wgpu cannot create the surface, and
-    /// `RendererError::UnsupportedSurface` where the GPU cannot draw to it in that format.
+    /// The surface takes the pixel format that the pipeline is built for.
+    ///
+    /// # Errors
+    ///
+    /// Returns `RendererError::Surface` where wgpu cannot create the surface. Returns
+    /// `RendererError::UnsupportedSurface` where the GPU cannot draw to the surface in that pixel
+    /// format.
+    ///
+    /// # Examples
+    ///
+    /// The renderer calls it when the app gets its window back.
+    ///
+    /// ```ignore
+    /// // Creates a surface for the window at 1280 by 720 pixels
+    /// gpu.resume(window, 1280, 720)?;
+    /// ```
     fn resume<W>(&mut self, window: W, width: u32, height: u32) -> Result<(), RendererError>
     where
         W: DisplayAndWindowHandle + Send + Sync + 'static,
     {
-        // Drops any surface still held, since a driver can refuse a second surface on one window
+        // Drops the old surface first, where one exists, since Vulkan can refuse a second surface
+        // for a window that already has one
         self.surface_context = None;
 
         let window: Arc<dyn DisplayAndWindowHandle> = Arc::new(window);
@@ -322,8 +545,23 @@ impl GpuContext {
         Ok(())
     }
 
-    /// Copies the vertices of `mesh` into a new buffer in GPU memory, marked for use as a vertex
-    /// buffer in a draw.
+    /// Copies the vertices of `mesh` into a new vertex buffer, and returns the buffer.
+    ///
+    /// A buffer is a block of GPU memory. A vertex buffer is a buffer that a draw reads its
+    /// vertices from.
+    ///
+    /// # Examples
+    ///
+    /// The example copies the triangle into a vertex buffer, then hands the buffer to a render
+    /// pass.
+    ///
+    /// ```ignore
+    /// // Copies the vertices of the triangle into a new vertex buffer, then binds the buffer to
+    /// // vertex buffer slot 0
+    /// let mesh = Mesh::triangle();
+    /// let vertex_buffer = gpu.create_vertex_buffer(&mesh);
+    /// render_pass.set_vertex_buffer(0, vertex_buffer.slice(..));
+    /// ```
     fn create_vertex_buffer(&self, mesh: &Mesh) -> Buffer {
         let contents = mesh.to_bytes(); // flattens the mesh into a vector of bytes
         let descriptor = BufferInitDescriptor {
@@ -334,7 +572,23 @@ impl GpuContext {
         self.device.create_buffer_init(&descriptor)
     }
 
-    /// Hands the WGSL code in `source` to the device, which checks it and compiles it for the GPU.
+    /// Compiles the WGSL code in `source` into a shader for the GPU.
+    ///
+    /// A shader is a small program that the GPU runs, once for each vertex or once for each pixel.
+    /// WGSL is the language that WebGPU shaders are written in. The device checks the code before
+    /// compiling it.
+    ///
+    /// `label` identifies the shader in wgpu's error messages and in GPU debugging tools.
+    ///
+    /// # Examples
+    ///
+    /// The example compiles the shader file that the build embeds in the binary.
+    ///
+    /// ```ignore
+    /// // Embeds the shader file in the binary as a string, then compiles it into a shader
+    /// let shader_source = include_str!("../shaders/flat_colour.wgsl");
+    /// let shader = gpu.create_shader("Flat colour shader", shader_source);
+    /// ```
     fn create_shader(&self, label: &str, source: &str) -> ShaderModule {
         let descriptor = ShaderModuleDescriptor {
             label: Some(label),
@@ -343,8 +597,22 @@ impl GpuContext {
         self.device.create_shader_module(descriptor)
     }
 
-    /// Builds the pipeline that draws a `Mesh` in one flat colour, from the `vs_main` and
-    /// `fs_main` functions in `shader`, into textures in the surface's format.
+    /// Builds the pipeline that draws a `Mesh` in one flat colour.
+    ///
+    /// The pipeline runs two functions from `shader`. `vs_main` runs once for each vertex, and
+    /// places the vertex in the window. `fs_main` runs once for each pixel that the mesh covers,
+    /// and returns the pixel's colour. The pipeline writes into textures in the surface's pixel
+    /// format, taking `SAMPLE_COUNT` samples for each pixel.
+    ///
+    /// # Examples
+    ///
+    /// The example builds the pipeline, then hands it to a render pass.
+    ///
+    /// ```ignore
+    /// // Builds the pipeline, then selects it for the draws that follow in the render pass
+    /// let pipeline = gpu.create_pipeline(&shader);
+    /// render_pass.set_pipeline(&pipeline);
+    /// ```
     fn create_pipeline(&self, shader: &ShaderModule) -> RenderPipeline {
         // Reads each vertex from buffer slot 0 through `Mesh::LAYOUT`, and passes it to `vs_main`
         let vertex_buffers = [Some(Mesh::LAYOUT)];
@@ -394,8 +662,20 @@ impl GpuContext {
     // ====================================================================================== \\
     //                                     Helper Methods                                     \\
     // ====================================================================================== \\
-    /// Creates a texture the size and format of the surface, storing `SAMPLE_COUNT` samples per
-    /// pixel, and returns a view of it for a render pass to draw into.
+    /// Creates a multisampled texture to match the surface, and returns a view of it.
+    ///
+    /// The texture has the size and pixel format of the surface. It stores `SAMPLE_COUNT` samples
+    /// for each pixel. A render pass draws into the texture through the returned view.
+    ///
+    /// # Examples
+    ///
+    /// `SurfaceContext::new` calls it once it has configured the surface.
+    ///
+    /// ```ignore
+    /// // Configures the surface, then creates a multisampled texture to match it
+    /// surface.configure(device, &config);
+    /// let msaa_view = GpuContext::create_msaa_view(device, &config);
+    /// ```
     fn create_msaa_view(device: &Device, config: &SurfaceConfiguration) -> TextureView {
         let size = Extent3d {
             width: config.width,
@@ -416,6 +696,26 @@ impl GpuContext {
         texture.create_view(&TextureViewDescriptor::default())
     }
 
+    /// Creates a `SurfaceContext` for `window`, at `width` by `height` pixels.
+    ///
+    /// It creates the surface first. It then configures the surface in the pixel format that the
+    /// pipeline was built for. Last, it creates a multisampled texture to match the surface.
+    ///
+    /// # Errors
+    ///
+    /// Returns `RendererError::Surface` where wgpu cannot create the surface. Returns
+    /// `RendererError::UnsupportedSurface` where the GPU cannot draw to the surface in that pixel
+    /// format.
+    ///
+    /// # Examples
+    ///
+    /// `recreate` and `resume` both call it to replace the surface context.
+    ///
+    /// ```ignore
+    /// // Creates a surface context for the window, then stores it in place of the old one
+    /// let surface_context = self.create_surface_context(window, width, height)?;
+    /// self.surface_context = Some(surface_context);
+    /// ```
     fn create_surface_context(
         &self,
         window: Arc<dyn DisplayAndWindowHandle>,
@@ -437,22 +737,38 @@ impl GpuContext {
     }
 }
 
-/// The parts of the renderer that belong to one window, which are replaced together whenever the
-/// window is.
+/// The surface for one window, together with the parts built to match it.
+///
+/// The renderer replaces all of these parts together, whenever it replaces the surface.
 struct SurfaceContext {
+    /// The window that the surface belongs to. `GpuContext::recreate` creates a new surface for
+    /// it when wgpu reports the surface lost.
     window: Arc<dyn DisplayAndWindowHandle>,
-    /// Hands out the textures that frames draw into, and shows each finished one in the window.
+    /// The surface, which hands out one texture for each frame to draw into. It shows each
+    /// finished texture in the window.
     surface: Surface<'static>,
-    /// The size and format of the surface's textures.
+    /// The size and pixel format of the surface's textures.
     config: SurfaceConfiguration,
-    /// A view of the multisampled texture that each frame draws into, before the GPU averages
-    /// each pixel's samples into the surface texture.
+    /// A view of the multisampled texture. Each frame draws into this texture first. The GPU then
+    /// averages each pixel's samples into the surface texture.
     msaa_view: TextureView,
 }
 
 impl SurfaceContext {
     /// Configures `surface` with `config`, and creates a multisampled texture of the same size
-    /// and format.
+    /// and pixel format.
+    ///
+    /// # Examples
+    ///
+    /// The example builds a surface context from the surface's default configuration.
+    ///
+    /// ```ignore
+    /// // Configures a new surface at the window's size, in its preferred pixel format
+    /// let config = surface
+    ///     .get_default_config(&adapter, width, height)
+    ///     .ok_or(RendererError::UnsupportedSurface)?;
+    /// let surface_context = SurfaceContext::new(window, surface, &device, config);
+    /// ```
     fn new(
         window: Arc<dyn DisplayAndWindowHandle>,
         surface: Surface<'static>,
@@ -469,8 +785,18 @@ impl SurfaceContext {
         }
     }
 
-    /// Reconfigures the surface at `width` by `height` pixels, and replaces the multisampled
-    /// texture with one of the new size.
+    /// Reconfigures the surface at `width` by `height` pixels.
+    ///
+    /// It also replaces the multisampled texture with one of the new size.
+    ///
+    /// # Examples
+    ///
+    /// The example resizes both for a window of 1920 by 1080 pixels.
+    ///
+    /// ```ignore
+    /// // Reconfigures the surface at 1920 by 1080 pixels, and replaces the multisampled texture
+    /// surface_context.resize(&device, 1920, 1080);
+    /// ```
     fn resize(&mut self, device: &Device, width: u32, height: u32) {
         self.config.width = width;
         self.config.height = height;
@@ -481,6 +807,17 @@ impl SurfaceContext {
     }
 
     /// Rebuilds the surface's textures from the current configuration.
+    ///
+    /// # Examples
+    ///
+    /// `resize` stores the new size in the configuration, then calls `reconfigure`.
+    ///
+    /// ```ignore
+    /// // Stores a new size, then rebuilds the surface's textures at that size
+    /// self.config.width = width;
+    /// self.config.height = height;
+    /// self.reconfigure(device);
+    /// ```
     fn reconfigure(&self, device: &Device) {
         self.surface.configure(device, &self.config);
     }

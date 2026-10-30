@@ -1,9 +1,10 @@
 //! The entity component system.
 
+mod component;
 mod entity;
+
 /*
 mod archetype;
-mod component;
 mod query;
 mod world;
 */

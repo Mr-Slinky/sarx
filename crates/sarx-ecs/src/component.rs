@@ -109,13 +109,27 @@ impl ComponentVec {
         }
         self.len = last;
     }
-
 }
 
 impl Drop for ComponentVec {
     /// Drops every component, then frees the whole block.
     fn drop(&mut self) {
-        
+        if let Some(drop_value) = self.info.drop {
+            for row in 0..self.len {
+                unsafe {
+                    drop_value(self.pointer_at(row));
+                }
+            }
+        }
+
+        let layout_non_empty = self.info.layout.size() != 0;
+        let cap_non_empty = self.capacity != 0;
+        if layout_non_empty && cap_non_empty {
+            let layout = array_layout(self.info.layout, self.capacity);
+            unsafe {
+                alloc::dealloc(self.data.as_ptr(), layout);
+            }
+        }
     }
 }
 

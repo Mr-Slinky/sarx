@@ -63,7 +63,7 @@ impl ComponentVec {
             // takes at least four bytes, one for each of its four rows
             unsafe { alloc::alloc(new_layout) }
         } else {
-            let old_layout = array_layout(self.info.layout, new_capacity);
+            let old_layout = array_layout(self.info.layout, self.capacity);
             // SAFETY: `realloc` has four requirements, and each one holds here.
             //
             // - The global allocator allocated the block. The capacity is above zero, meaning an

@@ -22,6 +22,21 @@
 //! Safety section that lists what its caller must guarantee. One of those guarantees is that the
 //! bytes belong to the component type that the vector stores.
 //!
+//! # Pointer validity
+//!
+//! A caller reaches a component through the raw pointer that [`ComponentVec::data`] or
+//! [`ComponentVec::ptr_at`] returns. That pointer stops being valid when the vector grows its
+//! block, even where the block stays at the same address. Using the pointer after that point is
+//! undefined behaviour.
+//!
+//! The vector grows where [`ComponentVec::push`] finds the block full.
+//! [`ComponentVec::move_component`] pushes onto its target, meaning it can grow the target too.
+//!
+//! A raw pointer has no lifetime, meaning the compiler accepts code that keeps one across a push.
+//! The caller MUST guarantee that it uses no pointer from before a push. To reach the component
+//! again, the caller requests a new pointer by index, since components keep their indices when the
+//! vector grows.
+//!
 //! # Examples
 //!
 //! The example moves one `Position` component from one vector to another, as the ECS does when an
@@ -41,31 +56,31 @@
 //! let mut source = ComponentVec::new(info);
 //! let mut target = ComponentVec::new(source.info());
 //!
-//! // Allocates a block with room for four components
-//! source.grow();
-//!
-//! // Pushes three components, which the vector copies in as bytes
+//! // Pushes three components, which the vector copies in as bytes and then owns. `ManuallyDrop`
+//! // stops each original from being dropped at the end of its loop iteration
 //! let positions = [
 //!     Position { x: 1.0, y: 1.0 },
 //!     Position { x: 2.0, y: 2.0 },
 //!     Position { x: 3.0, y: 3.0 },
 //! ];
 //! for position in positions {
-//!     let bytes = ptr::from_ref(&position).cast::<u8>();
+//!     let position = ManuallyDrop::new(position);
+//!     let bytes = ptr::from_ref(&*position).cast::<u8>();
 //!     unsafe { source.push(bytes) };
 //! }
 //!
 //! // Moves the component at index 0 to `target`, and fills index 0 with the last component
 //! unsafe { source.move_component(0, &mut target) };
 //!
-//! // Reads the components back, through `data` at index 0 of `source` and `ptr_at` elsewhere
-//! let first = unsafe { source.data().cast::<Position>().read() };
-//! let second = unsafe { source.ptr_at(1).cast::<Position>().read() };
-//! let moved = unsafe { target.ptr_at(0).cast::<Position>().read() };
+//! // Borrows the components, through `data` at index 0 of `source` and `ptr_at` elsewhere. The
+//! // vectors keep ownership of them
+//! let first = unsafe { source.data().cast::<Position>().as_ref() };
+//! let second = unsafe { &*source.ptr_at(1).cast::<Position>() };
+//! let moved = unsafe { &*target.ptr_at(0).cast::<Position>() };
 //!
-//! assert_eq!(first, Position { x: 3.0, y: 3.0 });
-//! assert_eq!(second, Position { x: 2.0, y: 2.0 });
-//! assert_eq!(moved, Position { x: 1.0, y: 1.0 });
+//! assert_eq!(*first, Position { x: 3.0, y: 3.0 });
+//! assert_eq!(*second, Position { x: 2.0, y: 2.0 });
+//! assert_eq!(*moved, Position { x: 1.0, y: 1.0 });
 //! ```
 
 use std::alloc::{self, Layout};
@@ -88,19 +103,20 @@ use std::{mem, ptr};
 ///
 /// # Examples
 ///
-/// The example creates a vector for `f32`, pushes one component, then reads it back.
+/// The example creates a vector for `f32`, pushes one component, then borrows it.
 ///
 /// ```ignore
 /// // Creates an empty vector for `f32` components
 /// let mut components = ComponentVec::new(ComponentInfo::of::<f32>());
 ///
-/// // Pushes one component, which the vector copies in as bytes
+/// // Pushes one component, which the vector copies in as bytes. `f32` is `Copy` and has no
+/// // clean-up code, meaning `value` needs no `ManuallyDrop`
 /// let value = 1.5_f32;
 /// let bytes = ptr::from_ref(&value).cast::<u8>();
 /// unsafe { components.push(bytes) };
 ///
-/// // Reads index 0 back as an `f32`
-/// let stored = unsafe { components.ptr_at(0).cast::<f32>().read() };
+/// // Borrows index 0 as an `f32`
+/// let stored = unsafe { &*components.ptr_at(0).cast::<f32>() };
 /// ```
 pub(crate) struct ComponentVec {
     info: ComponentInfo, // describes the component type that the vector stores
@@ -148,8 +164,7 @@ impl ComponentVec {
     /// type that is never null.
     ///
     /// The pointer is always aligned for the component type. Until the vector allocates a block, no
-    /// memory lies behind it. Once a block exists, [`grow`](Self::grow) can move it, which
-    /// invalidates the pointer.
+    /// memory lies behind it. The pointer stops being valid when [`grow`](Self::grow) runs.
     pub(crate) fn data(&self) -> NonNull<u8> {
         self.data
     }
@@ -160,8 +175,13 @@ impl ComponentVec {
     /// returns that address as a `NonNull`.
     ///
     /// The method performs no bounds check, meaning the pointer can lie past the end of the block.
-    /// A caller reads through the pointer only where `index` is below the length.
-    /// [`grow`](Self::grow) can move the block, which invalidates the pointer.
+    /// A caller reads through the pointer only where `index` is below the length. The pointer stops
+    /// being valid when [`grow`](Self::grow) runs.
+    ///
+    /// A caller looks at a component by borrowing it through the pointer. The pointer method `read`
+    /// makes a bitwise copy, and the vector still owns the original. Where the type has clean-up
+    /// code and the copy gets dropped, the vector later drops the original as well, which is
+    /// undefined behaviour.
     pub(crate) fn ptr_at(&self, index: usize) -> *mut u8 {
         let offset = index * self.info.layout.size();
         self.data.as_ptr().wrapping_add(offset)
@@ -169,15 +189,22 @@ impl ComponentVec {
 
     /// Doubles the capacity, or sets it to 4 components where the capacity is 0.
     ///
-    /// A caller calls this method only for a component type above size zero. The components keep
-    /// their indices. The block can move to a new address, which invalidates every pointer that
-    /// [`data`](Self::data) and [`ptr_at`](Self::ptr_at) returned earlier.
+    /// The components keep their indices. Every pointer that [`data`](Self::data) and
+    /// [`ptr_at`](Self::ptr_at) returned earlier stops being valid, even where the block stays at
+    /// the same address. Using one of those pointers afterwards is undefined behaviour.
     ///
     /// # Panics
     ///
-    /// Panics where the new block would exceed `isize::MAX` bytes. The program aborts where the
-    /// allocator cannot supply the block.
-    pub(crate) fn grow(&mut self) {
+    /// Panics where the component type has a size of zero, or where the new block would exceed
+    /// `isize::MAX` bytes. The program aborts where the allocator cannot supply the block.
+    fn grow(&mut self) {
+        // Keeps a type of size zero away from the allocator, which requires a size above zero
+        assert_ne!(
+            self.info.layout.size(),
+            0,
+            "a component type of size zero never needs a block"
+        );
+
         let new_capacity = if self.capacity == 0 {
             4
         } else {
@@ -186,16 +213,14 @@ impl ComponentVec {
         let new_layout = array_layout(self.info.layout, new_capacity);
 
         let new_data = if self.capacity == 0 {
-            // SAFETY: `alloc` requires a layout with a size above zero. This branch runs only at a
-            // capacity of 0. `new` gives a component type of size zero a capacity of `usize::MAX`
-            // instead, meaning the type here takes at least one byte. `new_layout` therefore
-            // takes at least four bytes, one for each of its four components
+            // SAFETY: `alloc` requires a layout with a size above zero. The assert above means the
+            // type takes at least one byte. `new_layout` therefore takes at least four bytes, one
+            // for each of its four components
             unsafe { alloc::alloc(new_layout) }
         } else {
             let old_layout = array_layout(self.info.layout, self.capacity);
-            // SAFETY: `realloc` has four requirements, and the call meets each one. `push`, the
-            // only caller of `grow`, calls it once the block is full. A type of size zero never
-            // fills its capacity of `usize::MAX`, meaning the type here takes at least one byte.
+            // SAFETY: `realloc` has four requirements, and the call meets each one. The assert above
+            // means the type takes at least one byte.
             //
             // - The global allocator allocated the block. The capacity is above zero, meaning an
             //   earlier call to `grow` allocated it.
@@ -250,7 +275,15 @@ impl ComponentVec {
     ///
     /// - `index` is below the length of `self`.
     /// - `target` stores the same component type as `self`.
+    ///
+    /// A debug build panics where either guarantee fails. A release build skips both checks.
     pub(crate) unsafe fn move_component(&mut self, index: usize, target: &mut ComponentVec) {
+        debug_assert!(index < self.len, "the index must be below the length");
+        debug_assert_eq!(
+            self.info.type_id, target.info.type_id,
+            "both vectors must store the same component type"
+        );
+
         // SAFETY: `push` requires a live component of the type in `target`, and the caller
         // guarantees both. Both references are exclusive, which makes `target` a separate vector.
         // As a result, the pointer lies outside its block. The fill below overwrites the original,

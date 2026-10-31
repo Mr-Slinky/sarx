@@ -216,7 +216,7 @@ signs in to a work account by default. The points below set out how an agent wor
 ## Commits
 
 Agents write commit messages in the format that the README sets out, following the
-`technical-writing` skill.
+`prose` skill.
 
 The developer's work and an agent's work go in separate commits. The git author field on each
 commit records whose work it contains:

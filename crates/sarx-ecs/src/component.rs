@@ -440,6 +440,10 @@ impl ComponentInfo {
             drop,
         }
     }
+
+    pub(crate) fn type_id(self) -> TypeId {
+        self.type_id
+    }
 }
 
 // ========================================================================================== \\

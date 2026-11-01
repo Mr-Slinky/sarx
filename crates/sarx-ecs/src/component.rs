@@ -350,6 +350,14 @@ impl Drop for ComponentVec {
     }
 }
 
+// SAFETY: `ComponentInfo::of` is the only way to build a `ComponentInfo`, and it requires
+// `T: Send + Sync`. Every component in the vector can therefore move between threads, and be read
+// from several threads at the same time. Changing a component or the vector requires `&mut`, or an
+// `unsafe` call whose caller MUST guarantee that nothing else accesses that component
+unsafe impl Send for ComponentVec {}
+// SAFETY: as for `Send` above
+unsafe impl Sync for ComponentVec {}
+
 /// Describes a component type to code that knows the type only at run time.
 ///
 /// # Examples
@@ -363,12 +371,12 @@ impl Drop for ComponentVec {
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct ComponentInfo {
     /// Identifies the component type.
-    pub(crate) type_id: TypeId,
+    type_id: TypeId,
     /// Defines the size and alignment of one component.
-    pub(crate) layout: Layout,
+    layout: Layout,
     /// Stores the function that runs the clean-up code of the component at the given address. The
     /// field is `None` where the type has no clean-up code.
-    pub(crate) drop: Option<unsafe fn(*mut u8)>,
+    drop: Option<unsafe fn(*mut u8)>,
 }
 
 impl ComponentInfo {
@@ -376,7 +384,7 @@ impl ComponentInfo {
     ///
     /// The bound `T: 'static` means that `T` contains no borrowed references that could expire. A
     /// vector can then keep a `T` for as long as it needs. `TypeId::of` requires the same bound.
-    pub(crate) fn of<T: 'static>() -> Self {
+    pub(crate) fn of<T: Send + Sync + 'static>() -> Self {
         let drop = if mem::needs_drop::<T>() {
             Some(drop_value::<T> as unsafe fn(*mut u8))
         } else {

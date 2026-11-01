@@ -240,6 +240,12 @@ impl ComponentVec {
     ///
     /// The vector grows its block where the block is full. It then owns the component.
     ///
+    /// # Panics
+    ///
+    /// Panics where the vector is full and a larger block would exceed `isize::MAX` bytes. A vector
+    /// for a type of size zero panics once it stores `usize::MAX` components. The program aborts
+    /// where the allocator cannot supply the larger block.
+    ///
     /// # Safety
     ///
     /// The caller must guarantee three things:
@@ -268,6 +274,11 @@ impl ComponentVec {
     /// was last now lives at `index`, meaning the caller updates the recorded location of its
     /// entity. Where `index` is the last index, no other component moves, and the caller updates no
     /// other entity.
+    ///
+    /// # Panics
+    ///
+    /// Panics where [`push`](Self::push) panics on `target`. The program aborts where the allocator
+    /// cannot supply a larger block for `target`.
     ///
     /// # Safety
     ///

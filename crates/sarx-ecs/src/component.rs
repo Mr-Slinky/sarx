@@ -473,3 +473,562 @@ fn array_layout(item: Layout, count: usize) -> Layout {
         .expect("the block cannot exceed isize::MAX bytes");
     Layout::from_size_align(size, item.align()).expect("the block cannot exceed isize::MAX bytes")
 }
+
+// ========================================================================================== \\
+//                                           Tests                                            \\
+// ========================================================================================== \\
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::thread;
+
+    /// Adds 1 to a shared counter when dropped, which shows how many times clean-up code ran.
+    struct DropCounter {
+        drops: Arc<AtomicUsize>,
+    }
+
+    impl Drop for DropCounter {
+        fn drop(&mut self) {
+            self.drops.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    /// Checks that size, alignment and clean-up are recorded separately, since each can vary alone
+    #[test]
+    fn of_with_standard_and_extreme_types_returns_layout_and_drop_function() {
+        // Defines a type of size zero that has clean-up code
+        #[allow(dead_code)]
+        struct DropOnly;
+        impl Drop for DropOnly {
+            fn drop(&mut self) {}
+        }
+
+        // Defines a type with a larger alignment than its one byte of data needs
+        #[allow(dead_code)]
+        #[repr(align(64))]
+        struct Aligned(u8);
+
+        // Builds one description per type, beside the size, alignment and clean-up it should report
+        let cases = [
+            ("f32", ComponentInfo::of::<f32>(), 4, 4, false),
+            (
+                "String",
+                ComponentInfo::of::<String>(),
+                size_of::<String>(),
+                align_of::<String>(),
+                true,
+            ),
+            ("()", ComponentInfo::of::<()>(), 0, 1, false),
+            ("DropOnly", ComponentInfo::of::<DropOnly>(), 0, 1, true),
+            ("Aligned", ComponentInfo::of::<Aligned>(), 64, 64, false),
+        ];
+
+        for (name, info, size, alignment, has_drop) in cases {
+            assert_eq!(info.layout.size(), size, "size of {name}");
+            assert_eq!(info.layout.align(), alignment, "alignment of {name}");
+            assert_eq!(info.drop.is_some(), has_drop, "drop function of {name}");
+        }
+    }
+
+    /// Checks that a vector can tell two types apart when their bytes look identical
+    #[test]
+    fn of_with_same_layout_types_returns_different_type_ids() {
+        // Defines two separate types with identical fields
+        #[allow(dead_code)]
+        struct Health(u32);
+        #[allow(dead_code)]
+        struct Armour(u32);
+
+        let health = ComponentInfo::of::<Health>();
+        let armour = ComponentInfo::of::<Armour>();
+
+        assert_eq!(health.layout, armour.layout, "layouts should match");
+        assert_ne!(health.type_id, armour.type_id, "type IDs should differ");
+    }
+
+    /// Checks the starting state that a vector has before it allocates any memory
+    #[test]
+    fn new_with_standard_types_returns_empty_vector_with_aligned_pointer() {
+        let cases = [
+            ("u8", ComponentInfo::of::<u8>()),
+            ("f32", ComponentInfo::of::<f32>()),
+            ("u64", ComponentInfo::of::<u64>()),
+        ];
+
+        for (name, info) in cases {
+            let components = ComponentVec::new(info);
+
+            let address = components.data().as_ptr().addr();
+            let remainder = address % info.layout.align();
+
+            assert_eq!(components.len, 0, "length for {name}");
+            assert_eq!(components.capacity, 0, "capacity for {name}");
+            assert_eq!(remainder, 0, "pointer alignment for {name}");
+        }
+    }
+
+    /// Checks that a vector with no block of memory can still be viewed safely
+    #[test]
+    fn as_slice_with_empty_vector_returns_empty_slice() {
+        let components = ComponentVec::new(ComponentInfo::of::<f32>());
+        let slice = components.as_slice::<f32>();
+
+        assert!(slice.is_empty(), "slice should have no components");
+    }
+
+    /// Checks that a component survives being stored as bytes and read back as its own type
+    #[test]
+    fn push_typed_with_one_value_stores_value_for_as_slice() {
+        let mut components = ComponentVec::new(ComponentInfo::of::<f32>());
+
+        components.push_typed(1.5_f32);
+
+        assert_eq!(components.as_slice::<f32>(), [1.5]);
+    }
+
+    /// Checks that the raw route hands ownership of a heap-owning component to the vector
+    #[test]
+    fn push_with_manually_dropped_string_stores_value_for_as_slice() {
+        let mut components = ComponentVec::new(ComponentInfo::of::<String>());
+        let value = ManuallyDrop::new(String::from("villager"));
+        let bytes = ptr::from_ref(&*value).cast::<u8>();
+
+        // SAFETY: `push` requires a live `String` outside the block that nothing drops afterwards.
+        // `value` lies on the stack, and `ManuallyDrop` stops it from being dropped
+        unsafe { components.push(bytes) };
+
+        assert_eq!(components.as_slice::<String>(), ["villager"]);
+    }
+
+    /// Checks that components are spaced one component size apart, starting at `data`
+    #[test]
+    fn ptr_at_with_standard_and_extreme_indices_returns_offset_address() {
+        let components = ComponentVec::new(ComponentInfo::of::<u32>());
+        let start = components.data().as_ptr().addr();
+
+        // Pairs each index with its expected distance in bytes from the start of the block
+        let cases = [(0, 0), (1, 4), (5, 20)];
+
+        for (index, offset) in cases {
+            let address = components.ptr_at(index).addr();
+
+            assert_eq!(address, start + offset, "address at index {index}");
+        }
+    }
+
+    /// Checks that a change reaches the stored component, and leaves its neighbours alone
+    #[test]
+    fn as_mut_slice_with_changed_value_updates_only_that_component() {
+        let mut components = ComponentVec::new(ComponentInfo::of::<u32>());
+        components.push_typed(1_u32);
+        components.push_typed(2_u32);
+        components.push_typed(3_u32);
+
+        components.as_mut_slice::<u32>()[1] = 20;
+
+        assert_eq!(components.as_slice::<u32>(), [1, 20, 3]);
+    }
+
+    /// Checks that the block starts at 4 components, then doubles only once it is full
+    #[test]
+    fn push_typed_with_increasing_counts_returns_expected_capacity() {
+        // Pairs each number of pushes with the capacity that it should produce
+        let cases = [(1_u32, 4), (4, 4), (5, 8), (8, 8), (9, 16)];
+
+        for (count, capacity) in cases {
+            let mut components = ComponentVec::new(ComponentInfo::of::<u32>());
+
+            for value in 0..count {
+                components.push_typed(value);
+            }
+
+            assert_eq!(
+                components.capacity, capacity,
+                "capacity after {count} pushes"
+            );
+        }
+    }
+
+    /// Checks that moving to a larger block keeps every component at its index
+    #[test]
+    fn push_typed_with_growth_keeps_values_in_order() {
+        let mut components = ComponentVec::new(ComponentInfo::of::<u32>());
+
+        // Pushes 9 components, which makes the block grow from 4 to 8, then from 8 to 16
+        for value in 0..9_u32 {
+            components.push_typed(value);
+        }
+
+        assert_eq!(components.as_slice::<u32>(), [0, 1, 2, 3, 4, 5, 6, 7, 8]);
+    }
+
+    /// Checks that heap memory owned by a component stays reachable after its block moves
+    #[test]
+    fn push_typed_with_growth_keeps_strings_readable() {
+        let names = ["Ada", "Bo", "Cy", "Dee", "Eli"];
+        let mut components = ComponentVec::new(ComponentInfo::of::<String>());
+
+        // Pushes 5 components, which makes the block grow from 4 to 8
+        for name in names {
+            components.push_typed(String::from(name));
+        }
+
+        assert_eq!(components.as_slice::<String>(), names);
+    }
+
+    /// Checks that dropping a vector runs the clean-up code once for each component it stores
+    #[test]
+    fn drop_with_varying_counts_drops_each_component_once() {
+        let cases = [0, 1, 5];
+
+        for count in cases {
+            let drops = Arc::new(AtomicUsize::new(0));
+            let mut components = ComponentVec::new(ComponentInfo::of::<DropCounter>());
+            for _ in 0..count {
+                components.push_typed(DropCounter {
+                    drops: Arc::clone(&drops),
+                });
+            }
+
+            drop(components);
+
+            assert_eq!(drops.load(Ordering::Relaxed), count, "drops for {count}");
+        }
+    }
+
+    /// Checks that moving to a larger block leaves every component alive
+    #[test]
+    fn push_typed_with_growth_drops_no_components() {
+        let drops = Arc::new(AtomicUsize::new(0));
+        let mut components = ComponentVec::new(ComponentInfo::of::<DropCounter>());
+
+        // Pushes 9 components, which makes the block grow from 4 to 8, then from 8 to 16
+        for _ in 0..9 {
+            components.push_typed(DropCounter {
+                drops: Arc::clone(&drops),
+            });
+        }
+
+        assert_eq!(drops.load(Ordering::Relaxed), 0, "drops while the vector is alive");
+    }
+
+    /// Checks the swap and pop: the middle component moves across, and the last one fills its gap
+    #[test]
+    fn move_component_with_middle_index_fills_gap_with_last_component() {
+        let mut source = ComponentVec::new(ComponentInfo::of::<u32>());
+        source.push_typed(10_u32);
+        source.push_typed(20_u32);
+        source.push_typed(30_u32);
+        source.push_typed(40_u32);
+
+        let mut target = ComponentVec::new(source.info());
+
+        // SAFETY: `move_component` requires an index below the length and a target of the same
+        // type. Index 1 is below the length of 4, and `target` uses the same `ComponentInfo`
+        unsafe { source.move_component(1, &mut target) };
+
+        assert_eq!(source.as_slice::<u32>(), [10, 40, 30], "source after the move");
+        assert_eq!(target.as_slice::<u32>(), [20], "target after the move");
+    }
+
+    /// Checks that moving the final component only pops it, since no gap is left to fill
+    #[test]
+    fn move_component_with_last_index_leaves_other_components_in_place() {
+        // Lists the starting components, the index to move, and the components that should remain
+        let cases: [(&[u32], usize, &[u32]); 3] = [
+            (&[10, 20, 30], 2, &[10, 20]),
+            (&[10], 0, &[]),
+            (
+                &[10, 20, 30, 40, 50, 60, 70, 80, 90],
+                8,
+                &[10, 20, 30, 40, 50, 60, 70, 80],
+            ),
+        ];
+
+        for (values, index, remaining) in cases {
+            let mut source = ComponentVec::new(ComponentInfo::of::<u32>());
+            for &value in values {
+                source.push_typed(value);
+            }
+
+            let mut target = ComponentVec::new(source.info());
+
+            // SAFETY: `move_component` requires an index below the length and a target of the same
+            // type. Each case gives its last index, and `target` uses the same `ComponentInfo`
+            unsafe { source.move_component(index, &mut target) };
+
+            assert_eq!(source.as_slice::<u32>(), remaining, "source for {values:?}");
+            assert_eq!(target.as_slice::<u32>(), [values[index]], "target for {values:?}");
+        }
+    }
+
+    /// Checks that a move into a full target grows the target and keeps what it already stored
+    #[test]
+    fn move_component_with_full_target_grows_target() {
+        let mut source = ComponentVec::new(ComponentInfo::of::<u32>());
+        source.push_typed(50_u32);
+
+        let mut target = ComponentVec::new(source.info());
+        for value in [10_u32, 20, 30, 40] {
+            target.push_typed(value);
+        }
+
+        // SAFETY: `move_component` requires an index below the length and a target of the same
+        // type. Index 0 is below the length of 1, and `target` uses the same `ComponentInfo`
+        unsafe { source.move_component(0, &mut target) };
+
+        assert_eq!(target.capacity, 8, "target capacity after the move");
+        assert_eq!(target.as_slice::<u32>(), [10, 20, 30, 40, 50], "target after the move");
+    }
+
+    /// Checks that a move passes ownership on (two vectors never clean up one component)
+    #[test]
+    fn move_component_with_drop_counters_drops_each_component_once() {
+        let drops = Arc::new(AtomicUsize::new(0));
+        let mut source = ComponentVec::new(ComponentInfo::of::<DropCounter>());
+        for _ in 0..5 {
+            source.push_typed(DropCounter {
+                drops: Arc::clone(&drops),
+            });
+        }
+
+        let mut target = ComponentVec::new(source.info());
+
+        // SAFETY: `move_component` requires an index below the length and a target of the same
+        // type. Index 1 is below the length of 5, index 3 is below the length of 4, and `target`
+        // uses the same `ComponentInfo`
+        unsafe {
+            source.move_component(1, &mut target); // fills the gap with the last component
+            source.move_component(3, &mut target); // moves the last component, leaving no gap
+        }
+        let drops_after_moves = drops.load(Ordering::Relaxed);
+
+        drop(source);
+        drop(target);
+        let drops_after_vectors = drops.load(Ordering::Relaxed);
+
+        assert_eq!(drops_after_moves, 0, "drops caused by the moves");
+        assert_eq!(drops_after_vectors, 5, "drops after both vectors are gone");
+    }
+
+    /// Checks that a type taking no memory is still counted, and never needs a block
+    #[test]
+    fn push_typed_with_zero_size_type_counts_without_allocating() {
+        let mut components = ComponentVec::new(ComponentInfo::of::<()>());
+        let start = components.data();
+
+        for _ in 0..5 {
+            components.push_typed(());
+        }
+
+        assert_eq!(components.as_slice::<()>().len(), 5, "number of components");
+        assert_eq!(components.capacity, usize::MAX, "capacity");
+        assert_eq!(components.data(), start, "pointer to the block");
+    }
+
+    /// Checks that a type taking no memory still has its clean-up code run for each component
+    #[test]
+    fn drop_with_zero_size_drop_type_drops_each_component_once() {
+        // Counts the drops outside the type, since a type of size zero has no room for a counter
+        static DROPS: AtomicUsize = AtomicUsize::new(0);
+
+        struct Marker;
+        impl Drop for Marker {
+            fn drop(&mut self) {
+                DROPS.fetch_add(1, Ordering::Relaxed);
+            }
+        }
+
+        let mut components = ComponentVec::new(ComponentInfo::of::<Marker>());
+        for _ in 0..3 {
+            components.push_typed(Marker);
+        }
+
+        drop(components);
+
+        assert_eq!(DROPS.load(Ordering::Relaxed), 3);
+    }
+
+    /// Checks that a vector of a type that takes no memory stops at its limit, rather than allocating
+    #[test]
+    #[should_panic(expected = "a component type of size zero never needs a block")]
+    fn push_typed_with_full_zero_size_vector_panics() {
+        let mut components = ComponentVec::new(ComponentInfo::of::<()>());
+
+        // Sets the length by hand, since pushing `usize::MAX` components would take too long
+        components.len = usize::MAX;
+
+        components.push_typed(());
+    }
+
+    /// Checks that a type with a large alignment stays aligned at every index as the block grows
+    #[test]
+    fn push_typed_with_large_alignment_keeps_every_component_aligned() {
+        #[repr(align(64))]
+        struct Aligned(u8);
+
+        let mut components = ComponentVec::new(ComponentInfo::of::<Aligned>());
+
+        // Pushes 9 components, which makes the block grow from 4 to 8, then from 8 to 16
+        for value in 0..9_u8 {
+            components.push_typed(Aligned(value));
+        }
+
+        let remainders: Vec<usize> = (0..9)
+            .map(|index| components.ptr_at(index).addr() % 64)
+            .collect();
+        let values: Vec<u8> = components
+            .as_slice::<Aligned>()
+            .iter()
+            .map(|component| component.0)
+            .collect();
+
+        assert_eq!(remainders, [0; 9], "remainder of each address divided by 64");
+        assert_eq!(values, [0, 1, 2, 3, 4, 5, 6, 7, 8], "stored values");
+    }
+
+    /// Checks that a value of another type cannot enter the vector, even at the same size
+    #[test]
+    #[should_panic(expected = "the vector stores a different component type")]
+    fn push_typed_with_wrong_type_panics() {
+        let mut components = ComponentVec::new(ComponentInfo::of::<u32>());
+
+        components.push_typed(1.5_f32);
+    }
+
+    /// Checks that stored bytes cannot be read as another type, even at the same size
+    #[test]
+    #[should_panic(expected = "the vector stores a different component type")]
+    fn as_slice_with_wrong_type_panics() {
+        let components = ComponentVec::new(ComponentInfo::of::<u32>());
+
+        components.as_slice::<f32>();
+    }
+
+    /// Checks that stored bytes cannot be changed as another type, even at the same size
+    #[test]
+    #[should_panic(expected = "the vector stores a different component type")]
+    fn as_mut_slice_with_wrong_type_panics() {
+        let mut components = ComponentVec::new(ComponentInfo::of::<u32>());
+
+        components.as_mut_slice::<f32>();
+    }
+
+    /// Checks that a debug build catches an index that would read past the last component
+    #[test]
+    #[cfg(debug_assertions)]
+    #[should_panic(expected = "the index must be below the length")]
+    fn move_component_with_out_of_range_index_panics_in_debug_build() {
+        let mut source = ComponentVec::new(ComponentInfo::of::<u32>());
+        source.push_typed(10_u32);
+
+        let mut target = ComponentVec::new(source.info());
+
+        // SAFETY: this call breaks the index requirement on purpose. The `debug_assert` in
+        // `move_component` panics before any memory is read
+        unsafe { source.move_component(1, &mut target) };
+    }
+
+    /// Checks that a debug build catches a move between columns of different types
+    #[test]
+    #[cfg(debug_assertions)]
+    #[should_panic(expected = "both vectors must store the same component type")]
+    fn move_component_with_mismatched_target_panics_in_debug_build() {
+        let mut source = ComponentVec::new(ComponentInfo::of::<u32>());
+        source.push_typed(10_u32);
+
+        let mut target = ComponentVec::new(ComponentInfo::of::<f32>());
+
+        // SAFETY: this call breaks the type requirement on purpose. The `debug_assert_eq` in
+        // `move_component` panics before any memory is read
+        unsafe { source.move_component(0, &mut target) };
+    }
+
+    /// Checks the size calculation for an ordinary block, and for the largest block allowed
+    #[test]
+    fn array_layout_with_standard_and_extreme_counts_returns_block_layout() {
+        let limit = isize::MAX as usize;
+
+        // Lists the component layout, the count, and the block size and alignment it should give
+        let cases = [
+            (Layout::new::<u32>(), 3, 12, 4),
+            (Layout::new::<u8>(), limit, limit, 1),
+        ];
+
+        for (item, count, size, alignment) in cases {
+            let layout = array_layout(item, count);
+
+            assert_eq!(layout.size(), size, "size for count {count}");
+            assert_eq!(layout.align(), alignment, "alignment for count {count}");
+        }
+    }
+
+    /// Checks the limit when the block size is too large for `usize` to represent
+    #[test]
+    #[should_panic(expected = "the block cannot exceed isize::MAX bytes")]
+    fn array_layout_with_overflowing_size_panics() {
+        array_layout(Layout::new::<u64>(), usize::MAX);
+    }
+
+    /// Checks the limit when the block size fits in `usize`, but passes the largest size allowed
+    #[test]
+    #[should_panic(expected = "the block cannot exceed isize::MAX bytes")]
+    fn array_layout_with_size_above_limit_panics() {
+        let count = isize::MAX as usize + 1;
+
+        array_layout(Layout::new::<u8>(), count);
+    }
+
+    /// Checks that threads can read one vector together, and that a vector can move to a thread
+    #[test]
+    fn as_slice_with_several_threads_returns_same_components() {
+        let mut components = ComponentVec::new(ComponentInfo::of::<u32>());
+        for value in [1_u32, 2, 3, 4] {
+            components.push_typed(value);
+        }
+
+        // Adds up the components, borrowing the vector rather than taking ownership of it
+        let read_total = || components.as_slice::<u32>().iter().sum::<u32>();
+
+        let shared_totals = thread::scope(|scope| {
+            let handles = [scope.spawn(read_total), scope.spawn(read_total)];
+            handles.map(|handle| handle.join().unwrap())
+        });
+
+        let moved_total = thread::spawn(move || components.as_slice::<u32>().iter().sum::<u32>())
+            .join()
+            .unwrap();
+
+        assert_eq!(shared_totals, [10, 10], "totals from the shared vector");
+        assert_eq!(moved_total, 10, "total from the moved vector");
+    }
+
+    /// Checks that a whole entity can change table, with its columns staying in step row by row
+    #[test]
+    fn move_component_with_two_columns_keeps_rows_together() {
+        let mut source_health = ComponentVec::new(ComponentInfo::of::<u32>());
+        let mut source_names = ComponentVec::new(ComponentInfo::of::<String>());
+        for (health, name) in [(10_u32, "Ada"), (20, "Bo"), (30, "Cy")] {
+            source_health.push_typed(health);
+            source_names.push_typed(String::from(name));
+        }
+
+        let mut target_health = ComponentVec::new(source_health.info());
+        let mut target_names = ComponentVec::new(source_names.info());
+
+        // SAFETY: `move_component` requires an index below the length and a target of the same
+        // type. Index 0 is below the length of 3, and each target uses its source's `ComponentInfo`
+        unsafe {
+            source_health.move_component(0, &mut target_health);
+            source_names.move_component(0, &mut target_names);
+        }
+
+        assert_eq!(source_health.as_slice::<u32>(), [30, 20], "source health");
+        assert_eq!(source_names.as_slice::<String>(), ["Cy", "Bo"], "source names");
+        assert_eq!(target_health.as_slice::<u32>(), [10], "target health");
+        assert_eq!(target_names.as_slice::<String>(), ["Ada"], "target names");
+    }
+}

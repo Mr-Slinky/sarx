@@ -85,9 +85,9 @@
 
 use std::alloc::{self, Layout};
 use std::any::TypeId;
+use std::mem::ManuallyDrop;
 use std::ptr::NonNull;
-use std::{mem, ptr};
-
+use std::{mem, ptr, slice};
 // ========================================================================================== \\
 //                                         Public API                                         \\
 // ========================================================================================== \\
@@ -265,6 +265,49 @@ impl ComponentVec {
         // covers zero bytes and touches no memory
         unsafe { ptr::copy_nonoverlapping(value, end, self.info.layout.size()) }
         self.len += 1;
+    }
+
+    pub(crate) fn push_typed<T: 'static>(&mut self, value: T) {
+        assert_eq!(
+            self.info.type_id,
+            TypeId::of::<T>(),
+            "the vector stores a different component type"
+        );
+
+        let value = ManuallyDrop::new(value);
+        let bytes = ptr::from_ref(&*value).cast::<u8>();
+        // SAFETY: `push` requires a live component of the stored type (outside the block) that nothing
+        // drops afterwards. The assert confirms the type. `value` lies on the stack, and
+        // `ManuallyDrop` stops it from being dropped here
+        unsafe { self.push(bytes) }
+    }
+
+    /// Returns every component in the vector as a slice of `T`
+    pub(crate) fn as_slice<T: 'static>(&self) -> &[T] {
+        assert_eq!(
+            self.info.type_id,
+            TypeId::of::<T>(),
+            "the vector stores a different component type"
+        );
+
+        // SAFETY: `from_raw_parts` requires an aligned pointer to `len` live values of `T`. The assert
+        // confirms the type, `data` is always aligned, and every index below `len` stores a live
+        // component. An empty vector gives an empty slice, which reads no memory
+        unsafe { slice::from_raw_parts(self.data.as_ptr().cast::<T>(), self.len) }
+    }
+
+    /// Returns every component in the vector as a slice of `T`, for changing.
+    pub(crate) fn as_mut_slice<T: 'static>(&mut self) -> &mut [T] {
+        assert_eq!(
+            self.info.type_id,
+            TypeId::of::<T>(),
+            "the vector stores a different component type"
+        );
+
+        // SAFETY: `from_raw_parts_mut` has the same requirements as `from_raw_parts` in `as_slice`,
+        // which hold here for the same reasons. It also requires that nothing else accesses those
+        // components while the slice exists, and the borrow of `&mut self` guarantees that
+        unsafe { slice::from_raw_parts_mut(self.data.as_ptr().cast::<T>(), self.len) }
     }
 
     /// Moves the component at `index` onto the end of `target`, then fills `index` with the last

@@ -434,7 +434,7 @@ impl ComponentVec {
     }
 
     // Swap and pop
-    pub(crate) fn remove_component(&mut self, index: usize) {
+    pub(crate) fn swap_remove(&mut self, index: usize) {
         assert!(index < self.len, "the index must be below the length");
 
         // Swaps the component to the end, where the shorter length puts it out of the vector's reach

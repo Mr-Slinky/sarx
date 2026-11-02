@@ -76,6 +76,14 @@ impl Archetype {
         self.entities.push(entity);
     }
 
+    pub(crate) fn remove_entity(&mut self, row: usize) -> Option<Entity> {
+        for components in &mut self.components {
+            components.swap_remove(row);
+        }
+        self.entities.swap_remove(row);
+        self.entities.get(row).copied()
+    }
+
     /// Moves the entity in `row` to a new row at the end of `target`. Pops and swaps afterwards
     pub(crate) unsafe fn move_entity(
         &mut self,

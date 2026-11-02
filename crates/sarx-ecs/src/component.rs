@@ -432,6 +432,29 @@ impl ComponentVec {
         }
         self.len = last;
     }
+
+    // Swap and pop
+    pub(crate) fn remove_component(&mut self, index: usize) {
+        assert!(index < self.len, "the index must be below the length");
+
+        // Swaps the component to the end, where the shorter length puts it out of the vector's reach
+        let last_idx = self.len - 1;
+        if index != last_idx {
+            let size = self.info.layout.size();
+            // SAFETY: `swap_nonoverlapping` requires two valid ranges that do not overlap. `index` and
+            // `last_idx` are different indices below the length, meaning each range lies inside the block,
+            // apart from the other. For a type of size zero, each range covers zero bytes
+            unsafe { ptr::swap_nonoverlapping(self.ptr_at(index), self.ptr_at(last_idx), size) };
+        }
+        self.len = last_idx;
+
+        if let Some(drop_component) = self.info.drop {
+            // SAFETY: `drop_component` requires a live, aligned component that nothing uses afterwards.
+            // Address `last_idx` stores the live component from `index`, and is aligned like every other
+            // index. The length now excludes it, meaning the vector never reaches it again
+            unsafe { drop_component(self.ptr_at(last_idx)) };
+        }
+    }
 }
 
 impl Drop for ComponentVec {

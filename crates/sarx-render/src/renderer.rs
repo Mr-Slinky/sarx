@@ -13,7 +13,6 @@ use std::borrow::Cow;
 use std::fmt::Debug;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use wgpu::rwh::{HasDisplayHandle, HasWindowHandle};
 use wgpu::util::{BufferInitDescriptor, DeviceExt};
 use wgpu::{
     Adapter, BlendState, Buffer, BufferUsages, Color, ColorTargetState, ColorWrites,
@@ -32,6 +31,10 @@ use crate::mesh::Mesh;
 // ========================================================================================== \\
 //                                         Public API                                         \\
 // ========================================================================================== \\
+
+pub trait RenderWindow: DisplayAndWindowHandle + Debug + 'static {}
+
+impl<W> RenderWindow for W where W: DisplayAndWindowHandle + Debug + 'static {}
 
 /// Draws frames into one window.
 ///
@@ -112,9 +115,9 @@ impl Renderer {
     /// // Waits for the setup to finish, since `new` returns a future
     /// let renderer = block_on(renderer_setup)?;
     /// ```
-    pub async fn new<W>(window: W, width: u32, height: u32) -> Result<Self, RendererError>
+    pub async fn new<W>(window: Arc<W>, width: u32, height: u32) -> Result<Self, RendererError>
     where
-        W: HasWindowHandle + HasDisplayHandle + Debug + Clone + Send + Sync + 'static,
+        W: RenderWindow,
     {
         let gpu = GpuContext::new(window, width, height).await?;
         let mesh = Mesh::triangle();
@@ -191,9 +194,9 @@ impl Renderer {
     /// // Asks winit for a frame, which `render` draws into the new surface
     /// window.request_redraw();
     /// ```
-    pub fn resume<W>(&mut self, window: W, width: u32, height: u32) -> Result<(), RendererError>
+    pub fn resume<W>(&mut self, window: Arc<W>, width: u32, height: u32) -> Result<(), RendererError>
     where
-        W: HasWindowHandle + HasDisplayHandle + Send + Sync + 'static,
+        W: RenderWindow,
     {
         self.gpu.resume(window, width, height)
     }
@@ -380,17 +383,15 @@ impl GpuContext {
     /// // Connects to a GPU, and configures the window's surface at 1280 by 720 pixels
     /// let gpu = GpuContext::new(window, 1280, 720).await?;
     /// ```
-    async fn new<W>(window: W, width: u32, height: u32) -> Result<Self, RendererError>
+    async fn new<W>(window: Arc<W>, width: u32, height: u32) -> Result<Self, RendererError>
     where
-        W: DisplayAndWindowHandle + Debug + Clone + Send + Sync + 'static,
+        W: RenderWindow,
     {
-        // Creates the wgpu instance, and gives it the window's display handle. wgpu uses the
-        // display handle only when it draws through OpenGL, where it needs the handle to show
-        // frames. DirectX 12 and Vulkan leave it unused. This is a decision, taken to keep a port
-        // to an OpenGL device possible
-        let display = Box::new(window.clone());
+        // Makes a second owner of the window, boxed, for the instance to keep as its display handle
+        let display = Box::new(Arc::clone(&window));
+        // Creates the wgpu instance, and gives it that display handle
         let instance = Instance::new(InstanceDescriptor::new_with_display_handle(display));
-        let window = Arc::new(window);
+        // Creates the surface, which keeps a third owner of the window
         let surface = instance.create_surface(Arc::clone(&window))?;
 
         // Chooses a GPU that can draw to the surface
@@ -400,8 +401,7 @@ impl GpuContext {
         };
         let adapter = instance.request_adapter(&adapter_options).await?;
 
-        // Opens the device and its queue, within the WebGPU baseline limits that ADR 0003 settles
-        // on
+        // Opens the device and its queue, within the WebGPU baseline limits that ADR 0003 settles on
         let device_descriptor = DeviceDescriptor {
             label: Some("Sarx device"),
             required_limits: Limits::default(),
@@ -564,17 +564,16 @@ impl GpuContext {
     /// // Creates a surface for the window at 1280 by 720 pixels
     /// gpu.resume(window, 1280, 720)?;
     /// ```
-    fn resume<W>(&mut self, window: W, width: u32, height: u32) -> Result<(), RendererError>
+    fn resume<W>(&mut self, window: Arc<W>, width: u32, height: u32) -> Result<(), RendererError>
     where
-        W: DisplayAndWindowHandle + Send + Sync + 'static,
+        W: RenderWindow
     {
-        // Drops the old surface first, where one exists, since Vulkan can refuse a second surface
+        // Drops the old surface first (where one exists) since Vulkan can refuse a second surface
         // for a window that already has one
         self.surface_context = None;
-
-        let window: Arc<dyn DisplayAndWindowHandle> = Arc::new(window);
-
+        // Creates the new surface context, which turns `window` into an `Arc<dyn DisplayAndWindowHandle>`
         let surface_context = self.create_surface_context(window, width, height)?;
+        // Stores the new surface context, which `render` draws into from then on
         self.surface_context = Some(surface_context);
         Ok(())
     }

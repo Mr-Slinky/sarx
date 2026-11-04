@@ -392,11 +392,17 @@ impl GpuContext {
         };
         let (device, queue) = adapter.request_device(&device_descriptor).await?;
 
-        // Gets the surface's default configuration at the window's size, in the surface's
-        // preferred pixel format
-        let config = surface
+        // Gets the surface's default configuration at the window's size
+        let mut config = surface
             .get_default_config(&adapter, width, height)
             .ok_or(RendererError::UnsupportedSurface)?;
+        // Lists every pixel format that the GPU can draw to the surface in
+        let caps = surface.get_capabilities(&adapter);
+        // Finds the first sRGB format in that list, or `None` where the list has none
+        let srgb_format = caps.formats.iter().copied().find(|format| format.is_srgb());
+        // Uses the sRGB format, and keeps the default format where the list has none
+        config.format = srgb_format.unwrap_or(config.format);
+        // Records the chosen format, which the pipeline and every later surface take
         let format = config.format;
 
         // Checks that the GPU can anti-alias in the surface's pixel format

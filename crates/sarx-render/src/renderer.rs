@@ -12,6 +12,7 @@
 use std::borrow::Cow;
 use std::fmt::Debug;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use wgpu::rwh::{HasDisplayHandle, HasWindowHandle};
 use wgpu::util::{BufferInitDescriptor, DeviceExt};
 use wgpu::{
@@ -211,6 +212,12 @@ impl Renderer {
     ///
     /// # Errors
     ///
+    /// Returns `RendererError::DeviceLost` once the connection to the GPU has died. Every later
+    /// call returns it too, since nothing made from the dead connection works again.
+    ///
+    /// Returns `RendererError::Validation` where wgpu rejects a call as invalid while handing out
+    /// the frame's texture. That points to a bug in the renderer.
+    ///
     /// Returns a `RendererError` after wgpu reports the surface lost, in each of these cases:
     ///
     /// - wgpu cannot create the new surface.
@@ -235,6 +242,12 @@ impl Renderer {
         let Some(surface_context) = &self.gpu.surface_context else {
             return Ok(());
         };
+        // Returns an error once the connection to the GPU has died. The check comes before the
+        // surface's texture is requested, since a dead connection also reports the surface lost,
+        // and `recreate` would then build a new surface on that dead connection
+        if self.gpu.device_lost.load(Ordering::Relaxed) {
+            return Err(RendererError::DeviceLost);
+        }
 
         // Gets the next texture from the surface, and skips the frame where none comes back.
         // Before skipping, reconfigures an outdated surface and replaces a lost one
@@ -246,9 +259,9 @@ impl Renderer {
                 return Ok(());
             }
             CurrentSurfaceTexture::Lost => return self.gpu.recreate(),
-            CurrentSurfaceTexture::Timeout
-            | CurrentSurfaceTexture::Occluded
-            | CurrentSurfaceTexture::Validation => return Ok(()),
+            CurrentSurfaceTexture::Timeout | CurrentSurfaceTexture::Occluded => return Ok(()),
+            // Returns an error rather than skipping the frame, since a skip would hide the bug
+            CurrentSurfaceTexture::Validation => return Err(RendererError::Validation),
         };
         // Creates a view of the whole texture, since a render pass draws into a texture through a
         // view
@@ -328,6 +341,10 @@ struct GpuContext {
     /// out in memory. `create_pipeline` builds the pipeline for this format. Every later surface
     /// therefore takes the same format.
     format: TextureFormat,
+    /// Stores `true` once the connection to the GPU has died, for example after a driver reset.
+    /// wgpu sets it from the device-lost callback, which can run on another thread. The `Arc`
+    /// shares the flag between this struct and that callback.
+    device_lost: Arc<AtomicBool>,
 }
 
 impl GpuContext {
@@ -392,6 +409,16 @@ impl GpuContext {
         };
         let (device, queue) = adapter.request_device(&device_descriptor).await?;
 
+        // Creates a flag to record a lost device, and gives the callback its own handle to it.
+        // `move` hands that handle to the callback, which owns it from then on, as `'static`
+        // requires
+        let device_lost = Arc::new(AtomicBool::new(false));
+        let callback_flag = Arc::clone(&device_lost);
+        // Sets the flag when the device dies. `Relaxed` suffices, since no other data depends on it
+        device.set_device_lost_callback(move |_reason, _message| {
+            callback_flag.store(true, Ordering::Relaxed);
+        });
+
         // Gets the surface's default configuration at the window's size
         let mut config = surface
             .get_default_config(&adapter, width, height)
@@ -422,6 +449,7 @@ impl GpuContext {
             device,
             queue,
             format,
+            device_lost,
         })
     }
 

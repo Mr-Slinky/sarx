@@ -1,11 +1,12 @@
-//! The error that the renderer returns when it cannot set up the GPU for a window.
+//! The error that the renderer returns when it cannot set up the GPU for a window, or cannot keep
+//! drawing to it.
 
 use std::error::Error;
 use std::fmt::{self, Display, Formatter};
 
 use wgpu::{CreateSurfaceError, RequestAdapterError, RequestDeviceError};
 
-/// A failure to set up the GPU for a window.
+/// A failure to set up the GPU for a window, or to keep drawing to it.
 ///
 /// [`Renderer::new`](crate::Renderer::new), [`Renderer::resume`](crate::Renderer::resume) and
 /// [`Renderer::render`](crate::Renderer::render) return it.
@@ -51,6 +52,8 @@ pub enum RendererError {
     /// for each pixel. In the surface's pixel format, this GPU cannot take the number of samples
     /// that the renderer asks for.
     UnsupportedSampleCount,
+    DeviceLost,
+    Validation,
 }
 
 impl Display for RendererError {
@@ -80,6 +83,8 @@ impl Display for RendererError {
             Self::UnsupportedSampleCount => {
                 "the GPU cannot anti-alias in the format for drawing to the window"
             }
+            Self::DeviceLost => "the connection to the GPU has died",
+            Self::Validation => "wgpu rejected a call as invalid while preparing a frame",
         };
         f.write_str(message)
     }
@@ -108,7 +113,10 @@ impl Error for RendererError {
             Self::Surface(error) => Some(error),
             Self::Adapter(error) => Some(error),
             Self::Device(error) => Some(error),
-            Self::UnsupportedSurface | Self::UnsupportedSampleCount => None,
+            Self::UnsupportedSurface
+            | Self::UnsupportedSampleCount
+            | Self::DeviceLost
+            | Self::Validation => None,
         }
     }
 }

@@ -3,7 +3,7 @@
 //! By design, the simulation advances the world in fixed steps of time. Each step updates the game
 //! state alone. Drawing that state is the job of `sarx-render`.
 //!
-//! For now, the crate's one function is the `add` function that `cargo new` generates.
+//! For now, the one function here is the `add` function that `cargo new` generates.
 
 /// Returns the sum of `left` and `right`.
 ///

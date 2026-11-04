@@ -15,16 +15,17 @@ The layout of the components in memory decides how fast the systems run. The rea
 CPU reads memory.
 
 The CPU reads memory in 64-byte blocks, called cache lines. It keeps recently read lines in a small,
-fast memory, called the cache. As rough figures, a read from the cache takes about 1 nanosecond. A
-read from main memory takes about 100.
+fast memory, called the cache. A read from the cache takes about 1 nanosecond. A read from main
+memory takes about 100 nanoseconds.
 
 The CPU also fetches lines ahead of time. When a loop walks forward through memory in order, the CPU
 fetches the next lines before the loop asks for them. A loop that reads an array from start to finish
 therefore rarely waits on main memory. A loop that jumps between scattered addresses waits on almost
 every read.
 
-Data-oriented design builds on these facts. It lays data out in the order in which the hot loops
-read it. A hot loop is a loop that runs often enough to decide the speed of the program.
+Data-oriented design builds on these facts. A hot loop is a loop that runs often enough to decide
+the speed of the program. Data-oriented design lays data out in the order in which the hot loops
+read it.
 
 In Sarx, the hot loops are the systems that run on every step over thousands of entities. Movement
 and the physics engine are two of them. Each of these systems reads several components of each
@@ -80,13 +81,13 @@ A system that moves hungry villagers towards food walks the second table alone. 
 `Position` and `Hungry` columns in order.
 
 Sparse sets, a second way to store components, remain open as a later extension. The developer
-would add them for one component type at a time. They add them only where a measurement shows that
+would add them for one component type at a time. They would add them only where a measurement shows that
 moving entities between tables has become the slow part of a step.
 
 ### Consequences
 
 - Good, because every query reads its tables in order. Row by row, the columns of a table line up
-  on the same entity. A query therefore looks nothing up.
+  on the same entity. A query therefore does not look anything up.
 - Good, because every query that a system writes reads in order, whichever component types it asks
   for.
 - Good, because the developer learns how a type that is known only at run time is laid out in
@@ -143,15 +144,15 @@ EnTT, a widely used C++ ECS, appears to store its components this way.
   that, those lookups land at scattered addresses.
 - Bad, because the fix for those lookups has a limit. EnTT calls the fix a group, and a group keeps a
   chosen set of stores in the same order. As far as the author knows, a component type belongs to
-  one group at most. As a
-  result, only the queries chosen ahead of time read in order.
+  one group at most. As a result, only the queries chosen ahead of time read in order.
 
 ### Archetypes, with Sparse-Set Storage as an Option for Each Component Type
 
 The ECS stores components in archetype tables. A component type can choose a sparse set instead. The
 ECS of Bevy appears to work this way.
 
-- Good, because a component that entities gain and lose often moves no entity between tables.
+- Good, because a component that entities gain and lose often does not move an entity between
+  tables.
 - Bad, because a query that reads both kinds of storage looks up the sparse-set components of each
   entity. Those lookups land at scattered addresses.
 - Bad, because archetypes alone already serve a state such as `Hungry` with no lookup at all. The

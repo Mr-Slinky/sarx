@@ -14,8 +14,8 @@ impl Entity {
         self.index as usize
     }
 
-    pub(crate) fn version(self) -> usize {
-        self.version as usize
+    pub(crate) fn version(self) -> u32 {
+        self.version // returns the version as the entity stores it, a `u32`
     }
 
 }

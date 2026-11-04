@@ -31,8 +31,8 @@ a library?
 
 - The developer builds every layer below the gameplay by hand, the entity system included, to learn
   how each one works.
-- A library comes into Sarx only where it leaves the design of Sarx alone. It also has to hide
-  nothing that the developer wants to learn and control. The section of the README on libraries sets
+- A library comes into Sarx only where it leaves the design of Sarx alone. It also must not hide
+  anything that the developer wants to learn and control. The section of the README on libraries sets
   out these questions.
 - The physics engine runs on the ECS. Its data, such as velocity and mass, is stored in components.
   Each step of the physics is a system.
@@ -73,7 +73,7 @@ How the ECS stores its data is a separate decision. ADR 0011 records it.
 
 ### Confirmation
 
-`cargo tree --workspace` lists no ECS library, such as bevy_ecs, hecs or specs.
+`cargo tree --workspace` does not list an ECS library, such as bevy_ecs, hecs or specs.
 
 ## Pros and Cons of the Options
 
@@ -125,7 +125,8 @@ would have the fields that its kind needs.
 
 - Good, because it is the simplest design. The compiler checks every field of every type.
 - Bad, because several kinds of object share some data and behaviour, such as a position and
-  gravity. Plain structs write that code once for each kind, or route it through traits.
+  gravity. With plain structs, the developer writes that code once for each kind, or routes it
+  through traits.
 - Bad, because a new kind of object needs its own struct. It also needs a change to every function
   that walks the objects.
 - Bad, because the physics engine needs an ECS. It stores its data in components and runs each of
@@ -134,4 +135,4 @@ would have the fields that its kind needs.
 ## More Information
 
 The developer recorded this decision in the design decisions of the README on 17 October 2026. That
-was the day on which the Sarx workspace was first set up.
+was the day on which the workspace was first set up.

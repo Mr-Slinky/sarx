@@ -95,7 +95,7 @@ impl Renderer {
     /// - wgpu cannot create a surface for the window.
     /// - No GPU can draw to that surface.
     /// - The GPU refuses to open a device.
-    /// - The GPU offers no pixel format in which it can draw to the surface.
+    /// - The GPU offers no pixel format or no present mode for the surface.
     /// - The GPU cannot anti-alias in the surface's pixel format. Anti-aliasing smooths the jagged
     ///   edges of a shape.
     ///
@@ -225,7 +225,7 @@ impl Renderer {
     /// ```ignore
     /// // Draws one frame and shows it in the window
     /// if let Err(error) = renderer.render() {
-    ///     // Ends the program, since the renderer has lost its surface for good
+    ///     // Ends the program, since the renderer could not replace its lost surface
     ///     eprintln!("Error: {error}");
     ///     event_loop.exit();
     /// }
@@ -294,9 +294,9 @@ impl Renderer {
         queue.submit([encoder.finish()]);
         queue.present(frame);
 
-        // Reconfigures a suboptimal surface, whose textures no longer match the window. This
-        // waits until `present` has taken the frame, since `configure` panics while a texture
-        // from the surface is still alive
+        // Reconfigures a suboptimal surface, whose textures no longer match the window. The
+        // reconfigure comes after `present` has taken the frame, since `configure` panics while a
+        // texture from the surface is still alive
         if suboptimal {
             self.gpu.reconfigure();
         }
@@ -343,7 +343,7 @@ impl GpuContext {
     // ====================================================================================== \\
     /// Connects to a GPU that can draw to `window`.
     ///
-    /// It also configures the window's surface at `width` by `height` pixels.
+    /// It also creates the window's surface, and configures it at `width` by `height` pixels.
     ///
     /// # Errors
     ///
@@ -352,7 +352,7 @@ impl GpuContext {
     /// - wgpu cannot create a surface for the window.
     /// - No GPU can draw to that surface.
     /// - The GPU refuses to open a device.
-    /// - The GPU offers no pixel format in which it can draw to the surface.
+    /// - The GPU offers no pixel format or no present mode for the surface.
     /// - The GPU cannot anti-alias in the surface's pixel format.
     ///
     /// # Examples
@@ -749,8 +749,8 @@ struct SurfaceContext {
     surface: Surface<'static>,
     /// The size and pixel format of the surface's textures.
     config: SurfaceConfiguration,
-    /// A view of the multisampled texture. Each frame draws into this texture first. The GPU then
-    /// averages each pixel's samples into the surface texture.
+    /// A view of the multisampled texture. The render pass draws each frame into this texture
+    /// first. The GPU then averages each pixel's samples into the surface texture.
     msaa_view: TextureView,
 }
 
@@ -763,7 +763,7 @@ impl SurfaceContext {
     /// The example builds a surface context from the surface's default configuration.
     ///
     /// ```ignore
-    /// // Configures a new surface at the window's size, in its preferred pixel format
+    /// // Configures a new surface at the window's size, in the surface's preferred pixel format
     /// let config = surface
     ///     .get_default_config(&adapter, width, height)
     ///     .ok_or(RendererError::UnsupportedSurface)?;

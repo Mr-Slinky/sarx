@@ -77,7 +77,7 @@ The code that a port would need stays in place. It consists of two pieces:
   limits that wgpu guarantees on OpenGL ES 3.1. The renderer would then keep its textures and its
   window within 2048 pixels on each side.
 - Bad, because the suspend and resume code first runs on the platform that a port targets. Until
-  then, Windows leaves it untested.
+  then, the code stays untested.
 
 ### Confirmation
 

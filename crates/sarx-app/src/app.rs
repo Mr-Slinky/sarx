@@ -4,7 +4,7 @@
 //! closing the window, winit calls a method on [`App`].
 //!
 //! The `App` owns the window, together with the [`Renderer`] that draws into it. Each method passes
-//! its event on to the renderer, or ends the program.
+//! its event on to the renderer, prints it, or ends the program.
 
 use std::error::Error;
 use std::sync::Arc;
@@ -17,7 +17,7 @@ use winit::window::{Window, WindowId};
 
 use crate::executor::block_on;
 
-/// The window and the renderer, together with the methods that winit calls for each event.
+/// Owns the window and the renderer, and defines the methods that winit calls for each event.
 ///
 /// `App::default()` sets both fields to `None`. The first call to `resumed` then creates the
 /// window and the renderer.
@@ -49,7 +49,7 @@ impl App {
     ///
     /// # Examples
     ///
-    /// A device failure prints two lines, the second one for the wgpu error behind it.
+    /// A device failure prints two lines, the second one for the wgpu error that caused it.
     ///
     /// ```ignore
     /// // Prints "Error: failed to open a device on the GPU", then "Caused by: " and the wgpu

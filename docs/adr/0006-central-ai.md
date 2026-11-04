@@ -67,7 +67,7 @@ Three points remain open. The developer settles them once the planner is built:
 The AI has yet to be written. The TODO in the README lists the central AI planner under the
 simulation work, after the foundation.
 
-Once that code exists, a reader confirms this decision in two places:
+Once that code exists, a reader confirms this decision with two checks:
 
 - Each group has a planner that assigns tasks.
 - The code that runs for each villager carries out the task that its planner assigned.

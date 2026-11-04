@@ -11,8 +11,8 @@ decision-makers: Kheagen Haskins
 Sarx needs a window to draw into. It also needs an event loop. An event loop is the code that
 receives input and other events from the operating system and passes them on to the game.
 
-The event loop is the first piece of structure in `sarx-app`, meaning that other code builds on it.
-The GPU setup already builds on it. The fixed-step simulation will build on it in a later step.
+Structure is code that other code builds on. The event loop is the first piece of structure in
+`sarx-app`. The GPU setup already builds on it. The fixed-step simulation will build on it in a later step.
 
 Sarx is built and tested on Windows, as ADR 0003 records. A port to another platform stays possible,
 though none is planned.
@@ -28,7 +28,7 @@ Which library, if any, opens the window and runs the event loop?
 - The developer learns from the wgpu documentation and examples. Those examples use one window
   library. Where Sarx uses the same library, its code looks like the code that the developer is
   reading.
-- ADR 0003 keeps a later port possible. As a result, the window layer has to leave one open.
+- ADR 0003 keeps a later port possible. The window layer therefore has to leave one open.
 
 ## Considered Options
 
@@ -62,8 +62,8 @@ documentation uses it, and the same code runs on the other platforms that a port
 
 ### winit
 
-winit is likely the most widely used window library for Rust. It opens windows and delivers events through
-one API. That API works on Windows, macOS, Linux, Android, iOS and the web.
+winit is likely the most widely used window library for Rust. It opens windows and delivers events
+through one API. That API works on Windows, macOS, Linux, Android, iOS and the web.
 
 - Good, because the wgpu documentation and every example in the wgpu repository use it.
 - Good, because it handles only windows and events. The graphics pipeline and the engine stay with
@@ -79,8 +79,8 @@ one API. That API works on Windows, macOS, Linux, Android, iOS and the web.
 
 ### A Hand-Written Win32 Layer
 
-Sarx would call Win32 directly to open the window and read its messages. It would then pass the raw
-window handles to wgpu itself.
+Sarx would call Win32 directly to open the window and read its messages. Sarx itself would then pass
+the raw window handles to wgpu.
 
 - Good, because it teaches how Windows delivers input and runs an app.
 - Good, because Sarx owns every line and follows its own design.

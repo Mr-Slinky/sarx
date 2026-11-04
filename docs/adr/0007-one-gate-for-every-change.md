@@ -17,8 +17,8 @@ village, and through each rival faction.
 
 A level also sets rules. Each rule limits what those actors may do.
 
-Cosy mode is the clearest of these rules. A player can switch on a mode in which no faction attacks
-them and they attack no one. A hostile action, a trade or any approach to a possible ally switches
+A player can switch on cosy mode. In cosy mode, no faction attacks the player, and the player
+attacks no one. Cosy mode is the clearest of the rules that a level sets. A hostile action, a trade or any approach to a possible ally switches
 cosy mode off.
 
 A rule of this kind applies to the player and the AI at once. It also touches several kinds of
@@ -111,7 +111,7 @@ system that resolves an attack, for example, tests whether either side is in cos
 - Bad, because a rule that covers several kinds of change becomes several checks. Cosy mode, for
   example, needs a check in each system that applies one of those changes.
 - Bad, because a new system can leave out a check. It then lets through a change that the rules
-  forbid, and the code shows no sign of the gap.
+  forbid, and the code does not show any sign of the gap.
 
 ### Each Actor Checks the Rules Before It Acts
 

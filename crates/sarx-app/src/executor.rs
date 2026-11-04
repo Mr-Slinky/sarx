@@ -1,12 +1,12 @@
 //! Runs a future to completion on the current thread.
 //!
 //! A future is a value that produces its result later, like a `CompletableFuture` in Java. Unlike
-//! a Java future, a Rust future does no work until something polls it. Polling asks the future to
+//! a Java future, a Rust future does not run until something polls it. Polling asks the future to
 //! make as much progress as it can.
 //!
-//! Setting up the GPU is asynchronous, meaning `Renderer::new` returns a future. winit calls the
-//! app from ordinary functions, which cannot use `.await` to wait for that future. The app
-//! therefore passes the future to [`block_on`], which polls it on the calling thread until it
+//! Setting up the GPU is asynchronous, meaning `Renderer::new` returns a future. The methods that
+//! winit calls on the app are ordinary functions, which cannot use `.await` to wait for that
+//! future. The app therefore passes the future to [`block_on`], which polls it on the calling thread until it
 //! finishes.
 
 use std::future::Future;

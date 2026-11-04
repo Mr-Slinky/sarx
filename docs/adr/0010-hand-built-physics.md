@@ -57,7 +57,7 @@ resolving a collision is another.
 - Good, because physics data lives in the same components as the rest of the data of an object. Any
   other system reads the velocity of an object in the same way that it reads the position. The AI and
   the hand are two such systems.
-- Good, because the physics engine adds no library to the dependencies.
+- Good, because the physics engine does not add a library to the dependencies.
 - Good, because each physics step is a separate system. The developer adds a new step, such as
   friction, as one more system. The existing steps stay as they are.
 - Bad, because the developer builds and debugs the physics engine before any gameplay can depend on
@@ -67,8 +67,8 @@ resolving a collision is another.
 
 ### Confirmation
 
-`cargo tree --workspace` lists no physics crate, such as `rapier3d` or `avian3d`. Every physics
-system reads and writes the ECS components that Sarx defines.
+`cargo tree --workspace` does not list a physics crate, such as `rapier3d` or `avian3d`. Every
+physics system reads and writes the ECS components that Sarx defines.
 
 ## Pros and Cons of the Options
 
@@ -114,7 +114,7 @@ crates.
 
 ADR 0011 settles how the ECS stores its components.
 
-Two questions remain open. Each one will be settled in its own discussion:
+Two questions remain open. The developer settles each one in its own discussion:
 
 - the integration method, meaning the way that each step turns forces into new velocities and
   positions

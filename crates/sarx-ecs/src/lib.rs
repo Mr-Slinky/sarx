@@ -1,12 +1,13 @@
-//! The entity component system.
+//! Implements the entity component system, which stores every entity in the game along with its
+//! components.
 
 mod archetype;
 mod component;
 mod entity;
+mod world;
 
 /*
 mod query;
-mod world;
 */
 
 pub use entity::Entity;

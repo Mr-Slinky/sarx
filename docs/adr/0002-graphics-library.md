@@ -8,7 +8,8 @@ decision-makers: Kheagen Haskins
 
 ## Context and Problem Statement
 
-Sarx draws its world on the GPU. To do that, the renderer talks to the GPU through a graphics API.
+Sarx draws its world on the GPU. To do that, the renderer sends its commands to the GPU through a graphics
+API.
 
 Sarx is built and tested on Windows, as ADR 0003 records. Windows offers two modern graphics APIs,
 DirectX 12 and Vulkan. It also offers OpenGL, which is older. The renderer can call one of these APIs
@@ -24,7 +25,7 @@ Which API, or which library, does the renderer use to reach the GPU?
 - The pipeline, shaders, buffers and draw calls are the parts that Sarx sets out to teach. Sarx
   therefore writes them in its own code.
 - The setup code that the developer writes teaches the pipeline rather than memory management. This
-  applies to the first triangle and for every later feature.
+  applies to the first triangle and to every later feature.
 - A mistake in a call produces a message that explains it.
 - The chosen option accepts the window handles that winit provides, as ADR 0001 records.
 - The renderer leaves a later port open, as ADR 0003 sets out.
@@ -47,7 +48,7 @@ call with a readable message, and teaches the concepts that DirectX 12 and Vulka
   modern native APIs that wgpu runs on.
 - Good, because wgpu checks every call against its rules. It reports each mistake with a readable
   message. A native API reports a mistake only once its debug or validation layers are switched on.
-  Otherwise, it often crashes or draws garbage.
+  Otherwise, the program often crashes or draws garbage.
 - Good, because wgpu accepts any window that provides raw window handles. As a result, `sarx-render`
   stays independent of winit.
 - Good, because a port runs the same renderer on the API of the new platform. The renderer then works
@@ -117,5 +118,5 @@ Sarx would call OpenGL through a Rust binding, such as `glow`.
 ## More Information
 
 Sarx adopted wgpu 30.0.1 on 18 October 2026, when the developer first chose wgpu. It was the latest
-stable release at that time. Two parts of the wgpu repository serve as the references for its API
-between versions. They are the `examples` folder and `CHANGELOG.md`.
+stable release at that time. When the API changes between versions, a developer checks the
+`examples` folder and `CHANGELOG.md` in the wgpu repository.

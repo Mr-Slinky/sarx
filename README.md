@@ -22,33 +22,33 @@ learn how each one works. Those layers run from the renderer to the entity syste
 
 The features below describe the game that the author is working towards. Each one is still a plan.
 
-- **Trainable creatures.** The player teaches a creature by rewarding and punishing it, as in Black &
-  White 2. Over time, the creature's behaviour leans towards good or evil. The author means its AI to
-  go well beyond what Black & White 2 offered.
-- **A civilisation that improves itself.** Villages advance on their own, as they do in Universim and
-  Spore. Each village moves through new technologies and stages without the player directing every
-  step.
-- **Rival factions.** Other factions compete with the player for the same world. A faction can
-  become an ally as well as an enemy.
-- **Victory.** A player wins a level once their faction is the last one standing. There are two ways
-  to reach that point. The player can ally with every other faction, or conquer them all.
+- The player trains a **creature**, teaching it by rewarding and punishing it, as in Black & White 2.
+  Over time, the creature's behaviour leans towards good or evil. The author means its AI to go well
+  beyond what Black & White 2 offered.
+- The player's **civilisation** improves itself. Villages advance on their own, as they do in
+  Universim and Spore. Each village moves through new technologies and stages without the player
+  directing every step.
+- **Rival factions** compete with the player for the same world. A faction can become an ally as
+  well as an enemy.
+- A level ends in **victory** for a player once their faction is the last one standing. There are
+  two ways to reach that point. The player can ally with every other faction, or conquer them all.
 
   The factions are meant to respond to the path that the player takes. They might ally with one
   another against a conqueror. They might also turn hostile over whom the player has allied with.
   Either way, each path grows harder the further the player takes it.
-- **Levels.** A player starts a level in one of two ways. They can configure a level, choosing
+- A player starts a **level** in one of two ways. They can configure a level, choosing
   settings such as the number of factions and the kind of landscape. Alternatively, they can pick a
   pre-made level.
-- **Possession.** During a battle, the player can take direct control of a single character. Rise &
+- During a battle, the player can take direct control of a single character, through
+  **possession**. Rise &
   Fall: Civilizations at War works the same way, letting the player command a hero such as Alexander
   the Great. The creature is the first character that the player can possess, and very likely the
   only one. Possessing villagers or soldiers remains an option for later.
-- **Abilities.** The player casts miracles and spells. Their magic draws on both Universim and Black &
-  White 2.
-- **Cosy play.** The world offers gentle activities, such as farming and fishing. A player can spend
-  a whole session on these, tending the world.
-- **Cosy mode.** A player can switch on cosy mode. In cosy mode, no faction attacks the player, and
-  the player attacks no one. The player is then free to manage their civilisation in peace.
+- The player casts **miracles and spells**. Their magic draws on both Universim and Black & White 2.
+- The world offers **cosy play**, gentle activities such as farming and fishing. A player can spend a
+  whole session on these, tending the world.
+- A player can switch on **cosy mode**. In cosy mode, no faction attacks the player, and the player
+  does not attack anyone. The player is then free to manage their civilisation in peace.
 
   A player in cosy mode cannot complete the level. Three things switch cosy mode off: a hostile
   action, a trade, and any approach to a possible ally.
@@ -56,8 +56,8 @@ The features below describe the game that the author is working towards. Each on
   The author also has to stop a player from exploiting cosy mode. A player could, for example, stay
   in cosy mode until their civilisation is large. Two approaches remain open:
   - The player chooses cosy mode before a level starts, and it stays fixed for that level.
-  - Cosy mode allows only the actions that keep the civilisation going. It allows no new buildings
-    and no population growth.
+  - Cosy mode allows only the actions that keep the civilisation going. It does not allow new
+    buildings or population growth.
 
 ## Design Decisions
 
@@ -82,6 +82,7 @@ The format of an ADR is set out further down, under Conventions.
 | [0010](docs/adr/0010-hand-built-physics.md)              | A hand-built physics engine     | The author writes the physics engine, which runs on the ECS                                         |
 | [0011](docs/adr/0011-archetype-component-storage.md)     | Archetype component storage     | The ECS stores each entity in a table for its exact set of components, one column per component     |
 | [0012](docs/adr/0012-stylised-art.md)                    | Stylised art                    | Sarx looks stylised, as Astro Bot does, and builds each villager from separate rigid parts          |
+| [0013](docs/adr/0013-miri-for-unsafe-code.md)            | Miri for unsafe code            | Tests for `unsafe` code also run under Miri, a nightly-only tool that detects undefined behaviour   |
 
 ## Workspace
 
@@ -93,12 +94,12 @@ developer creates under `crates/` with `cargo new` joins the workspace with no f
 
 The workspace contains four crates today:
 
-| Crate         | Purpose                                                |
-|---------------|--------------------------------------------------------|
-| `sarx-ecs`    | The entity component system                            |
-| `sarx-sim`    | The game simulation, which depends on no graphics code |
-| `sarx-render` | The wgpu renderer                                      |
-| `sarx-app`    | The program that opens the window and runs the game    |
+| Crate         | Purpose                                                         |
+|---------------|-----------------------------------------------------------------|
+| `sarx-ecs`    | The entity component system                                     |
+| `sarx-sim`    | The game simulation, which does not depend on any graphics code |
+| `sarx-render` | The wgpu renderer                                               |
+| `sarx-app`    | The program that opens the window and runs the game             |
 
 The author adds crates as the project needs them.
 
@@ -115,14 +116,18 @@ with the "Desktop development with C++" workload.
 
 A developer runs every command below from the repository root.
 
-| Task              | Command                             |
-|-------------------|-------------------------------------|
-| Build every crate | `cargo build`                       |
-| Run the game      | `cargo run -p sarx-app`             |
-| Test every crate  | `cargo test`                        |
-| Build one crate   | `cargo build -p <crate>`            |
-| Lint every crate  | `cargo clippy --workspace`          |
-| Add a dependency  | `cargo add -p <crate> <dependency>` |
+| Task              | Command                                |
+|-------------------|----------------------------------------|
+| Build every crate | `cargo build`                          |
+| Run the game      | `cargo run -p sarx-app`                |
+| Test every crate  | `cargo test`                           |
+| Check unsafe code | `cargo +nightly miri test -p sarx-ecs` |
+| Build one crate   | `cargo build -p <crate>`               |
+| Lint every crate  | `cargo clippy --workspace`             |
+| Add a dependency  | `cargo add -p <crate> <dependency>`    |
+
+The unsafe code check needs Miri, which runs on the nightly toolchain. A developer installs both once,
+with `rustup toolchain install nightly --component miri`.
 
 ## Conventions
 
@@ -157,8 +162,7 @@ For every other library, three questions decide whether it comes in:
 
 ### Decision Records
 
-The author writes one ADR for each decision about a library or about the design. Every ADR uses the
-same format, [MADR](https://adr.github.io/madr/) version 4. The points below set out how that format
+Every ADR uses the same format, [MADR](https://adr.github.io/madr/) version 4. The points below set out how that format
 applies here.
 
 - Each ADR is a file of its own in `docs/adr/`. The files are numbered in order, such as
@@ -180,21 +184,27 @@ applies here.
 Unit tests follow the standard Rust layout. Each file keeps its tests in a `#[cfg(test)] mod tests`
 block at its end.
 
-Every test also follows four conventions:
+Every test also follows five conventions:
 
-- **Data.** The tests for a function give it three kinds of data. Standard data is ordinary input.
+- The tests for a function give it three kinds of **data**. Standard data is ordinary input.
   Extreme data lies at the edges of what the function accepts. Abnormal data is input that the
   function must reject.
-- **Cases in a table.** Where the same assertion repeats across inputs, one test covers every input.
-  That one test replaces a copy of the test for each input.
+- Where the same assertion repeats across inputs, one test covers every input from a **table of
+  cases**. That one test replaces a copy of the test for each input.
 
   The `rstest` crate provides tests of this kind, through `#[rstest]` and `#[case]`. Like any other
   library, though, it awaits a decision. Until then, a test loops over an array of cases. Its
   assertion message states which case failed.
-- **Arrange, act, assert.** Each test sets up its data, then acts, then asserts. Every assertion comes
-  at the end.
-- **Naming.** A test name follows the pattern `{function}_with_{data}_{outcome}`, in snake case.
+- Each test follows **arrange, act, assert**. It sets up its data, then acts, then asserts. Every
+  assertion comes at the end.
+- A test **name** follows the pattern `{function}_with_{data}_{outcome}`, in snake case.
   `height_at_with_point_outside_map_returns_none` is one such name.
+- A test that expects a **failure** checks that the failure happens, and leaves the wording
+  of its message unchecked. A refactor or a fix can reword a message while the code stays correct. A
+  test that checked the wording would then fail, and force a change to the test as well as the code.
+  A test that expects a panic therefore takes a bare `#[should_panic]`, with no `expected` text. A
+  test that expects an `Err` checks which error it got, and leaves the text that `Display` writes
+  unchecked.
 
 ### Commits
 
@@ -203,8 +213,8 @@ type is one of `feat`, `fix`, `docs`, `style`, `refactor`, `test` and `chore`.
 
 ### Branches
 
-The author develops on the `dev` branch. Once a stage is finished, the author squash-merges it into
-`main`. A squash merge combines every commit in the stage into one. As a result, `main` gains one
+The author develops on the `dev` branch. Once a stage is finished, the author squash-merges `dev`
+into `main`. A squash merge combines every commit in the stage into one. As a result, `main` gains one
 commit per stage.
 
 ## TODO
@@ -253,9 +263,10 @@ Two questions wait for the hand step:
 
 - The author decides how the mesh for the hand reaches the game. The game can build the mesh in code
   from simple shapes. Alternatively, it can load the mesh from a glTF file, a common format for 3D
-  models. Loading glTF raises a library to weigh, the `gltf` crate, against a parser written by hand.
-- ADR 0012 builds each villager from rigid parts. The author decides whether the hand is built the
-  same way.
+  models. Loading glTF raises a choice between a library, the `gltf` crate, and a parser written by
+  hand.
+- Under ADR 0012, each villager is built from rigid parts. The author decides whether the hand is
+  built the same way.
 
 ### Later Work
 

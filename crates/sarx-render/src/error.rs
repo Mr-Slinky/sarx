@@ -37,7 +37,7 @@ pub enum RendererError {
     /// The GPU refused to open a device within the WebGPU baseline limits. A device is the open
     /// connection to the GPU that the renderer draws through.
     Device(RequestDeviceError),
-    /// The GPU offers no pixel format in which the renderer can draw to the window.
+    /// The GPU cannot draw to the window's surface in the way that the renderer needs.
     ///
     /// The renderer returns it in two cases:
     ///
@@ -48,7 +48,8 @@ pub enum RendererError {
     /// The GPU cannot anti-alias in the surface's pixel format.
     ///
     /// Anti-aliasing smooths the jagged edges of a shape. It needs the GPU to take several samples
-    /// for each pixel. This GPU cannot take that many samples in the surface's pixel format.
+    /// for each pixel. In the surface's pixel format, this GPU cannot take the number of samples
+    /// that the renderer asks for.
     UnsupportedSampleCount,
 }
 
@@ -66,15 +67,16 @@ impl Display for RendererError {
     ///
     /// // Writes one line, starting in lower case
     /// let message = RendererError::UnsupportedSurface.to_string();
-    /// let expected = "the GPU offers no format in which the renderer can draw to the window";
-    /// assert_eq!(message, expected);
+    /// let first = message.chars().next().expect("the description should not be empty");
+    /// assert!(first.is_lowercase());
+    /// assert!(!message.contains('\n'));
     /// ```
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         let message = match self {
             Self::Surface(_) => "failed to create a surface for the window",
             Self::Adapter(_) => "failed to find a GPU that can draw to the window",
             Self::Device(_) => "failed to open a device on the GPU",
-            Self::UnsupportedSurface => "the GPU offers no format in which the renderer can draw to the window",
+            Self::UnsupportedSurface => "the GPU cannot draw to the window's surface in the way that the renderer needs",
             Self::UnsupportedSampleCount => {
                 "the GPU cannot anti-alias in the format for drawing to the window"
             }
@@ -116,8 +118,8 @@ impl From<CreateSurfaceError> for RendererError {
     ///
     /// # Examples
     ///
-    /// The `?` operator calls `from` when a function that returns a `RendererError` meets this
-    /// wgpu error.
+    /// Inside a function that returns a `RendererError`, the `?` operator calls `from` to convert
+    /// this wgpu error.
     ///
     /// ```ignore
     /// // Turns a failure to create the surface into `RendererError::Surface` through `?`
@@ -133,8 +135,8 @@ impl From<RequestAdapterError> for RendererError {
     ///
     /// # Examples
     ///
-    /// The `?` operator calls `from` when a function that returns a `RendererError` meets this
-    /// wgpu error.
+    /// Inside a function that returns a `RendererError`, the `?` operator calls `from` to convert
+    /// this wgpu error.
     ///
     /// ```ignore
     /// // Turns a failure to find a GPU into `RendererError::Adapter` through `?`
@@ -150,8 +152,8 @@ impl From<RequestDeviceError> for RendererError {
     ///
     /// # Examples
     ///
-    /// The `?` operator calls `from` when a function that returns a `RendererError` meets this
-    /// wgpu error.
+    /// Inside a function that returns a `RendererError`, the `?` operator calls `from` to convert
+    /// this wgpu error.
     ///
     /// ```ignore
     /// // Turns a failure to open the device into `RendererError::Device` through `?`

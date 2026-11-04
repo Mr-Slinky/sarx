@@ -16,7 +16,7 @@ use app::App;
 
 /// Creates the event loop and hands it an `App`.
 ///
-/// winit then calls the `App` for every event, until the program ends.
+/// winit then calls a method on the `App` for every event, until the program ends.
 ///
 /// # Panics
 ///

@@ -3,8 +3,8 @@
 This file guides AI agents that work in this repository. It builds on the README, which an agent
 reads at the start of every session.
 
-The README covers four things: what Sarx is, its workspace, how to build it, and the conventions that
-every developer follows. Agents count as developers there, and follow those conventions too.
+The README describes what Sarx is and how to build it. It also sets out the conventions that every
+developer follows. Agents count as developers there, and follow those conventions too.
 
 The README also has a Design Decisions section, which lists every decision record. Each decision is
 stated in its own record alone.
@@ -22,13 +22,34 @@ conventions in the README take the place of the JUnit mechanics in the global fi
 
 ---
 
+## The Developer's Diary
+
+The developer keeps a diary at `docs/local/diary.md`. In it, the developer records how they feel
+about each part of the code: which modules they understand well, which ones they find hard, and
+which ones they enjoy.
+
+An agent reads the diary at the start of every session that works on the code, alongside the README.
+It then uses the diary in three ways:
+
+- It pitches each explanation at the level that the diary describes for that module. A module that
+  the developer finds hard gets more groundwork than one that they are confident in.
+- It weighs the developer's stated opinions when it proposes or reviews a design.
+- It treats the diary as the developer's own view. Where code or discussion contradicts an entry,
+  the agent raises the difference with the developer, and leaves the diary as it stands.
+
+The diary belongs to the developer, and an agent edits it only when the developer asks. Git ignores
+everything under `docs/local/`, so the diary exists on the developer's machine alone.
+
+---
+
 ## The Two Goals
 
-Sarx has two goals, and the developer gives them equal weight.
+Sarx has the two goals that the README sets out at its opening. The first goal is the game itself.
+The second is learning, through the layers that the developer builds by hand. The developer gives
+the two goals equal weight.
 
-The first goal is the game itself. The second is learning. The developer is building every layer
-below the gameplay by hand. Through that work, the developer means to understand the whole graphics
-pipeline, along with the architecture of a game engine.
+Through the hand-built layers, the developer means to understand the whole graphics pipeline, along
+with the architecture of a game engine.
 
 Three rules for agents follow from the second goal.
 
@@ -41,11 +62,11 @@ Three rules for agents follow from the second goal.
   be thrown away later. Instead, the developer judges each piece as the work reaches it. Two kinds of
   piece guide that judgement:
   - **Structure is built properly from its first version.** Structure is code that other code builds
-    on. The render loop, the GPU setup, the ECS and the simulation loop are all structure. Code of
-    this kind is expensive to throw away.
+    on. The render loop, the GPU setup, the ECS and the simulation loop are all structure. Throwing
+    away code of this kind means rewriting the code built on it.
 
-    The ECS is the heart of the whole system. Its first version follows the design that Sarx keeps.
-    Later work extends that design rather than replacing it.
+    The ECS is the structure that most of the game builds on. Its first version follows the design
+    that Sarx keeps. Later work extends that design rather than replacing it.
   - **Content can be thrown away.** Content is a small piece that exists only to demonstrate
     something, such as a test shader or a hard-coded triangle. Content is quick to delete. Whether
     it survives makes no difference to what the developer learns. The architecture built around it
@@ -66,9 +87,9 @@ The developer sends two kinds of message, discussion and instruction. The agent 
 differently.
 
 A message that discusses an idea, a design or a problem is discussion. The agent replies in
-conversation and builds nothing.
+conversation and does not build anything.
 
-A message that asks for building in plain words is an instruction. Words such as "write",
+A message that plainly asks for something to be built is an instruction. Words such as "write",
 "implement", "fix" and "commit" mark one. Building starts only then.
 
 Where a message could be either, the agent treats it as discussion. The table below sorts three
@@ -85,10 +106,10 @@ example messages.
 Four areas are open to agents. In the first two, an agent acts on its own initiative. In the other
 two, it acts once the developer asks:
 
-1. **Documentation and comments.** Agents write and edit doc comments, inline comments, READMEs and
-   anything under `docs/`.
-2. **Concepts.** Agents explain any Rust, graphics, GPU or game-architecture concept that the
-   developer is still learning.
+1. Agents write and edit **documentation and comments**. That covers doc comments, inline comments,
+   READMEs and anything under `docs/`.
+2. Agents explain any Rust, graphics, GPU or game-architecture **concept** that the developer is
+   still learning.
 
    The developer knows Java well, and knows some Rust. Graphics programming and game architecture are
    new to the developer. The agent therefore explains each concept in plain words, the first time
@@ -96,13 +117,13 @@ two, it acts once the developer asks:
 
    A comparison with the Java counterpart often helps. Where the agent draws one, it also says where
    the comparison stops holding true.
-3. **One function at a time.** An agent writes a single, clearly defined function or method per
+3. An agent writes **one function at a time**: a single, clearly defined function or method per
    request. The request states what the function takes, what it returns and what it does. Where any
    of those is unclear, the agent asks first. After writing the function, the agent explains the
    concepts that it relies on, then stops.
-4. **Git.** Agents write every commit message, the developer's included. An agent commits its own
-   changes once the developer has reviewed them and says to commit. Each time the developer asks, it
-   also commits the developer's work, and pushes and pulls.
+4. Agents work with **git**. They write every commit message, the developer's included. An agent
+   commits its own changes once the developer has reviewed them and says to commit. Each time the
+   developer asks, it also commits the developer's work, and pushes and pulls.
 
 Every other change waits for an explicit instruction from the developer. That covers the following:
 
@@ -133,7 +154,7 @@ The review exists to improve the developer's Rust and graphics code.
 - A finding can include a short snippet in chat that shows the fix. The developer then makes the
   change in the code.
 - Sarx makes an item `pub(crate)` until another crate needs it. This is a decision, taken because the
-  two directions differ. Widening `pub(crate)` to `pub` breaks no code. Narrowing `pub` to
+  two directions differ. Widening `pub(crate)` to `pub` does not break any code. Narrowing `pub` to
   `pub(crate)` breaks every other crate that uses the item. The agent can therefore flag an item
   marked `pub` that no code outside its crate needs yet.
 
@@ -183,8 +204,8 @@ move from 0.29 to 0.30 is one such change. The agent therefore checks winit in t
 
 Two facts about this machine affect how an agent builds Sarx.
 
-- The default host here is MSVC. As a result, `rust-toolchain.toml` resolves to the MSVC toolchain.
-  The global default toolchain of the developer stays GNU, because other projects use it.
+- The default host here is MSVC. Rustup therefore picks the MSVC toolchain, as the README describes
+  under Building. The developer's global default toolchain stays GNU, because other projects use it.
 - The only package manager here is Chocolatey, and the developer installs software through it. The
   developer installs the Build Tools that the README requires with
   `choco install visualstudio2022-workload-vctools`.

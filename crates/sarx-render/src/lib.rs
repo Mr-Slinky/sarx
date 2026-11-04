@@ -6,8 +6,8 @@
 //! A caller creates a [`Renderer`] for its window. It then calls [`Renderer::render`] each time the
 //! window needs redrawing.
 //!
-//! Setting up the GPU for the window can fail. [`Renderer::new`] and [`Renderer::resume`] then
-//! return a [`RendererError`].
+//! Setting up the GPU for the window can fail. [`Renderer::new`], [`Renderer::resume`] and
+//! [`Renderer::render`] then return a [`RendererError`].
 //!
 //! # Examples
 //!
@@ -26,8 +26,9 @@
 //! renderer.render()?;
 //! ```
 //!
-//! Most examples in these docs need a window from a windowing library, such as winit. As a result,
-//! rustdoc leaves them uncompiled, and marks each one as untested.
+//! Most examples in these docs need a window from a windowing library, such as winit. Each of
+//! those examples is therefore marked `ignore`. rustdoc then leaves it uncompiled, and reports it
+//! as ignored.
 
 mod error;
 mod renderer;

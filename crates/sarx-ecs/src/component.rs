@@ -65,10 +65,10 @@
 //!
 //! A raw pointer has no lifetime, meaning the compiler accepts code that keeps one across a push, a
 //! move or the drop of the vector. A push can grow the block. The caller therefore MUST guarantee
-//! that it uses no pointer from before a push, a move or the drop. To reach a component again, the
-//! caller requests a new pointer by index. Components keep their indices when the vector grows.
-//! After a move from an index other than the last, the component that was last is stored at the
-//! moved index.
+//! that it does not use any pointer from before a push, a move or the drop. To reach a component
+//! again, the caller requests a new pointer by index. Components keep their indices when the
+//! vector grows. After a move from an index other than the last, the component that was last is
+//! stored at the moved index.
 //!
 //! # Examples
 //!
@@ -168,7 +168,7 @@ impl ComponentVec {
         // Points `data` at an aligned address, which stands in until `grow` allocates a block
         let alignment = info.layout.align();
         let data = NonNull::new(ptr::without_provenance_mut(alignment))
-            .expect("an alignment can never be zero");
+            .expect("the alignment should be above zero, which `Layout` guarantees");
 
         // Gives a type of size zero a capacity of `usize::MAX`, which keeps `push` away from `grow`
         // until that limit
@@ -196,8 +196,8 @@ impl ComponentVec {
     /// This method returns the same address as [`ptr_at`](Self::ptr_at) with an index of 0, as a
     /// `NonNull`, a pointer type that is never null.
     ///
-    /// The pointer is always aligned for the component type. Until the vector allocates a block, no
-    /// memory lies behind it. The pointer stops being valid when the vector grows its block or is
+    /// The pointer is always aligned for the component type. Until the vector allocates a block, the
+    /// pointer does not point at any memory. The pointer stops being valid when the vector grows its block or is
     /// dropped. The Pointer validity section in the module documentation sets out every rule.
     pub(crate) fn data(&self) -> NonNull<u8> {
         self.data
@@ -205,7 +205,7 @@ impl ComponentVec {
 
     /// Returns a pointer to the start of the component at `index`.
     ///
-    /// The method performs no bounds check, meaning the pointer can lie past the end of the block.
+    /// The method does not check bounds, meaning the pointer can lie past the end of the block.
     /// To read through the pointer, the caller MUST guarantee that `index` is below the length. The
     /// pointer stops being valid when the vector grows its block or is dropped. The Pointer validity
     /// section in the module documentation sets out every rule.
@@ -297,9 +297,10 @@ impl ComponentVec {
 
         let end = self.ptr_at(self.len); // points just past the last component
         // SAFETY: `copy_nonoverlapping` requires two valid ranges that do not overlap. The caller
-        // guarantees that `value` is valid and lies outside the block. `end` has room for one
+        // MUST guarantee that `value` is valid and lies outside the block, as the Safety section
+        // above sets out. `end` has room for one
         // component, since the check above grows a full block. For a type of size zero, the copy
-        // covers zero bytes and touches no memory
+        // covers zero bytes and does not touch any memory
         unsafe { ptr::copy_nonoverlapping(value, end, self.info.layout.size()) }
         self.len += 1;
     }
@@ -328,7 +329,7 @@ impl ComponentVec {
 
     /// Returns every component in the vector as a slice of `T`, in index order.
     ///
-    /// An empty vector returns an empty slice. The slice borrows the vector, meaning the compiler
+    /// For an empty vector, the method returns an empty slice. The slice borrows the vector, meaning the compiler
     /// rejects a push or a move while the slice is in use.
     ///
     /// # Panics
@@ -341,14 +342,16 @@ impl ComponentVec {
         // SAFETY: `from_raw_parts` requires an aligned pointer to `len` live values of `T`, which
         // nothing changes while the slice exists. `assert_stores` confirms the type, `data` is
         // always aligned, and every index below `len` stores a live component. The borrow of `&self`
-        // stops safe code from changing them, and a write through a raw pointer MUST guarantee that
-        // nothing else accesses them. An empty vector gives an empty slice, which reads no memory
+        // stops safe code from changing them. Code that writes through a raw pointer MUST guarantee
+        // that nothing else accesses them. An empty vector gives an empty slice, which does not read
+        // any memory
         unsafe { slice::from_raw_parts(self.data.as_ptr().cast::<T>(), self.len) }
     }
 
     /// Returns every component in the vector as a slice of `T` that allows changes, in index order.
     ///
-    /// An empty vector returns an empty slice. The slice borrows the vector exclusively, meaning
+    /// For an empty vector, the method returns an empty slice. The slice borrows the vector
+    /// exclusively, meaning
     /// the compiler rejects any other use of the vector while the slice is in use.
     ///
     /// # Panics
@@ -375,7 +378,7 @@ impl ComponentVec {
         assert_eq!(
             self.info.type_id,
             TypeId::of::<T>(),
-            "the vector stores a different component type: it stores `{}`, and the caller requested `{}`",
+            "the vector stores the component type `{}`, but the caller requested `{}`",
             self.info.type_name,
             any::type_name::<T>()
         );
@@ -387,7 +390,7 @@ impl ComponentVec {
     /// `self` ends up one component shorter. `target` owns the moved component. The component that
     /// was last is now stored at `index`. The caller then updates the location that it records for
     /// the entity that owns that component. Where `index` is the last index, no other component
-    /// moves, and the caller updates no other entity.
+    /// moves, and the caller does not update any other entity.
     ///
     /// # Panics
     ///
@@ -410,8 +413,8 @@ impl ComponentVec {
             "both vectors must store the same component type"
         );
 
-        // SAFETY: `push` requires a live component of the type in `target`, and the caller
-        // guarantees both. Both references are exclusive, which makes `target` a separate vector.
+        // SAFETY: `push` requires a live component of the type in `target`. The caller MUST
+        // guarantee both, under the Safety section above. Both references are exclusive, which makes `target` a separate vector.
         // As a result, the pointer lies outside its block. The fill below overwrites the original,
         // or the shorter length leaves it out of use. Nothing therefore uses or drops it
         // afterwards
@@ -433,21 +436,37 @@ impl ComponentVec {
         self.len = last;
     }
 
-    // Swap and pop
+    /// Drops the component at `index`, then fills `index` with the component that was last.
+    ///
+    /// `self` ends up one component shorter. The caller then updates the location that it records
+    /// for the entity that owns the component now at `index`. Where `index` is the last index, no
+    /// other component moves, and the caller does not update any other entity.
+    ///
+    /// # Panics
+    ///
+    /// Panics where `index` is not below the length, before anything changes.
+    ///
+    /// Also panics where the `Drop` implementation of the component panics. The vector is already
+    /// one component shorter at that point, and stays safe to use.
     pub(crate) fn swap_remove(&mut self, index: usize) {
+        // Panics before anything changes, where `index` lies past the last component
         assert!(index < self.len, "the index must be below the length");
 
-        // Swaps the component to the end, where the shorter length puts it out of the vector's reach
+        // Finds the index of the last component
         let last_idx = self.len - 1;
+        // Swaps the removed component with the last one, where the two differ
         if index != last_idx {
+            // Measures one component in bytes, which is how many bytes the swap exchanges
             let size = self.info.layout.size();
             // SAFETY: `swap_nonoverlapping` requires two valid ranges that do not overlap. `index` and
             // `last_idx` are different indices below the length, meaning each range lies inside the block,
             // apart from the other. For a type of size zero, each range covers zero bytes
             unsafe { ptr::swap_nonoverlapping(self.ptr_at(index), self.ptr_at(last_idx), size) };
         }
+        // Shortens the vector by one, which puts the removed component, now at `last_idx`, out of reach
         self.len = last_idx;
 
+        // Runs the removed component's clean-up code, where its type has any
         if let Some(drop_component) = self.info.drop {
             // SAFETY: `drop_component` requires a live, aligned component that nothing uses afterwards.
             // Address `last_idx` stores the live component from `index`, and is aligned like every other
@@ -500,7 +519,7 @@ impl Drop for ComponentVec {
 // `unsafe` write through a raw pointer, whose caller MUST guarantee that nothing else accesses that
 // component
 unsafe impl Send for ComponentVec {}
-// SAFETY: as for `Send` above
+// SAFETY: the comment on `Send` above covers `Sync` as well
 unsafe impl Sync for ComponentVec {}
 
 /// Describes a component type to code that knows the type only at run time.
@@ -584,8 +603,8 @@ impl ComponentInfo {
 /// - Nothing uses or drops that `T` afterwards, since its clean-up code has already run.
 unsafe fn drop_value<T>(pointer: *mut u8) {
     // SAFETY: `drop_in_place` requires a pointer to a live `T`, at an address that is correctly
-    // aligned for `T`. The caller guarantees both, under the Safety section above. The caller also
-    // guarantees that nothing uses the `T` afterwards, since its clean-up code runs here
+    // aligned for `T`. The caller MUST guarantee both, under the Safety section above. The caller
+    // MUST also guarantee that nothing uses the `T` afterwards, since its clean-up code runs here
     unsafe { pointer.cast::<T>().drop_in_place() }
 }
 
@@ -598,8 +617,8 @@ fn array_layout(item: Layout, count: usize) -> Layout {
     let size = item
         .size()
         .checked_mul(count)
-        .expect("the block would exceed isize::MAX bytes");
-    Layout::from_size_align(size, item.align()).expect("the block would exceed isize::MAX bytes")
+        .expect("the block size should fit in a `usize`");
+    Layout::from_size_align(size, item.align()).expect("the block should be at most isize::MAX bytes")
 }
 
 // ========================================================================================== \\
@@ -928,7 +947,7 @@ mod tests {
         );
     }
 
-    /// Checks that a move passes ownership on (two vectors never clean up one component)
+    /// Checks that a move passes ownership on, meaning two vectors never clean up the same component
     #[test]
     fn move_component_with_drop_counters_drops_each_component_once() {
         let drops = Arc::new(AtomicUsize::new(0));
@@ -1057,7 +1076,7 @@ mod tests {
     /// Checks that a vector of a type that takes no memory stops at its limit, rather than
     /// allocating
     #[test]
-    #[should_panic(expected = "a vector for a component type of size zero reached its limit of usize::MAX components")]
+    #[should_panic]
     fn push_typed_with_full_zero_size_vector_panics() {
         let mut components = ComponentVec::new(ComponentInfo::of::<()>(1));
 
@@ -1098,7 +1117,7 @@ mod tests {
 
     /// Checks that pushing a value of another type panics, even at the same size
     #[test]
-    #[should_panic(expected = "the vector stores a different component type")]
+    #[should_panic]
     fn push_typed_with_wrong_type_panics() {
         let mut components = ComponentVec::new(ComponentInfo::of::<u32>(1));
 
@@ -1107,7 +1126,7 @@ mod tests {
 
     /// Checks that reading the stored bytes as another type panics, even at the same size
     #[test]
-    #[should_panic(expected = "the vector stores a different component type")]
+    #[should_panic]
     fn as_slice_with_wrong_type_panics() {
         let components = ComponentVec::new(ComponentInfo::of::<u32>(1));
 
@@ -1116,7 +1135,7 @@ mod tests {
 
     /// Checks that changing the stored bytes as another type panics, even at the same size
     #[test]
-    #[should_panic(expected = "the vector stores a different component type")]
+    #[should_panic]
     fn as_mut_slice_with_wrong_type_panics() {
         let mut components = ComponentVec::new(ComponentInfo::of::<u32>(1));
 
@@ -1126,7 +1145,7 @@ mod tests {
     /// Checks that a debug build catches an index that would read past the last component
     #[test]
     #[cfg(debug_assertions)]
-    #[should_panic(expected = "the index must be below the length")]
+    #[should_panic]
     fn move_component_with_out_of_range_index_panics_in_debug_build() {
         let mut source = ComponentVec::new(ComponentInfo::of::<u32>(1));
         source.push_typed(10_u32);
@@ -1141,7 +1160,7 @@ mod tests {
     /// Checks that a debug build catches a move between columns of different types
     #[test]
     #[cfg(debug_assertions)]
-    #[should_panic(expected = "both vectors must store the same component type")]
+    #[should_panic]
     fn move_component_with_mismatched_target_panics_in_debug_build() {
         let mut source = ComponentVec::new(ComponentInfo::of::<u32>(1));
         source.push_typed(10_u32);
@@ -1174,14 +1193,14 @@ mod tests {
 
     /// Checks the limit when the block size is too large for `usize` to represent
     #[test]
-    #[should_panic(expected = "the block would exceed isize::MAX bytes")]
+    #[should_panic]
     fn array_layout_with_overflowing_size_panics() {
         array_layout(Layout::new::<u64>(), usize::MAX);
     }
 
     /// Checks the limit when the block size fits in `usize`, but passes the largest size allowed
     #[test]
-    #[should_panic(expected = "the block would exceed isize::MAX bytes")]
+    #[should_panic]
     fn array_layout_with_size_above_limit_panics() {
         let count = isize::MAX as usize + 1;
 

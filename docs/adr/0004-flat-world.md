@@ -83,7 +83,7 @@ its islands this way.
 - Good, because the point on the ground below the cursor is quick to find. A ray is a line from the
   camera through the cursor into the world. The code steps along that ray across the regular grid,
   and tests the height at each step.
-- Good, because "up" points the same way everywhere on the map. The camera, gravity and movement
+- Good, because the up direction is the same everywhere on the map. The camera, gravity and movement
   therefore all share one fixed direction.
 - Bad, because the terrain has one surface, with no room for caves or overhangs.
 - Bad, because the map has edges, which the game has to handle.
@@ -97,7 +97,7 @@ to its surface. Universim and Spore set their civilisations on planets of this k
   start.
 - Neutral, because a planet still stores its terrain as heights. Each height runs along the line out
   from the centre, rather than straight up.
-- Bad, because "up" points away from the centre. Its direction therefore differs at every point on
+- Bad, because the up direction points away from the centre. It therefore differs at every point on
   the surface. The camera, gravity and every movement have to work it out for each position.
 - Bad, because a flat grid cannot cover a sphere evenly. A grid wrapped round a sphere stretches its
   cells near the poles. As a result, a planet needs a different layout. One such layout is a cube

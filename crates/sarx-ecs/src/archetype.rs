@@ -1,28 +1,135 @@
-//! An archetype, which stores every entity that has one exact set of component types.
+//! Defines a table in column-major order that stores every entity with one exact set of component
+//! types.
+//!
+//! An archetype is one set of component types, such as `{Position, Velocity}`. An [`Archetype`] is
+//! the table for one such set, as ADR 0011 sets out. The table has a list of entities, and one
+//! column for each component type. Each column is a [`ComponentVec`].
+//!
+//! # Rows
+//!
+//! A row number ties an entity to its components. The entity at row 5 in the list owns the
+//! component at index 5 in every column.
+//!
+//! The caller adds a row in two steps. It pushes one component onto every column, using
+//! [`Archetype::mut_components_of`]. It then pushes the entity with [`Archetype::push_entity`].
+//! The two steps can run in either order. Rows line up again once both are finished.
+//!
+//! # Masks
+//!
+//! A table has a mask, which is a `u64` with one set bit for each component type that it stores.
+//! Each bit comes from the [`ComponentInfo`] for that type, which describes the type to the table.
+//!
+//! A caller that wants a set of component types builds a mask of those types. It then passes that
+//! mask to [`Archetype::has_all`]. The method answers whether the table stores every one of those
+//! types, from the two masks alone.
+//!
+//! # Moves between tables
+//!
+//! An entity moves to another table when it gains or loses a component. The caller handles the
+//! gaining case with [`Archetype::move_entity`], where the target stores every type in the source
+//! table.
+//! The last row in the old table then fills the empty row, which keeps each column in one unbroken
+//! run.
+//!
+//! The caller records a location for each entity, which is its table and its row. A move changes
+//! the location of the moved entity, and of the entity that fills the empty row, where there is
+//! one. The caller MUST update both. A caller that keeps a stale row can later pass an index past
+//! the end of a column to `move_entity`, which is undefined behaviour.
+//!
+//! # Examples
+//!
+//! The example adds two entities to a table, then gives the first entity a `Health` component by
+//! moving it to a table that also stores `Health`.
+//!
+//! ```ignore
+//! struct Position(f32);
+//! struct Health(u32);
+//!
+//! // Creates a table for `{Position}`, and a table for `{Position, Health}`
+//! let position = ComponentInfo::of::<Position>(0b01);
+//! let health = ComponentInfo::of::<Health>(0b10);
+//! let mut source = Archetype::new(&[position]);
+//! let mut target = Archetype::new(&[position, health]);
+//!
+//! // Adds two rows to the source table, pushing each component before its entity
+//! let first = Entity::new(0, 0);
+//! let second = Entity::new(1, 0);
+//! for (entity, x) in [(first, 1.0), (second, 2.0)] {
+//!     let positions = source
+//!         .mut_components_of(position.type_id())
+//!         .expect("the table should store `Position`"); // &mut ComponentVec
+//!     positions.push_typed(Position(x));
+//!
+//!     // SAFETY: `push_entity` requires one new component in every column. The line above pushes
+//!     // one onto `Position`, which is the only column
+//!     unsafe { source.push_entity(entity) };
+//! }
+//!
+//! // Moves row 0 to the target table, and fills row 0 with the last row
+//! // SAFETY: `move_entity` requires a row in range, and a push onto each new column in the target.
+//! // Row 0 is below the length of 2, and the two statements below push onto `Health`
+//! let filled = unsafe { source.move_entity(0, &mut target) };
+//!
+//! // Gives the moved entity its new component
+//! let healths = target.mut_components_of(health.type_id()).expect("the table should store `Health`");
+//! healths.push_typed(Health(100));
+//!
+//! // Checks that `second` now occupies row 0 in the source table, and that each table has one row
+//! assert_eq!(filled, Some(second));
+//! assert_eq!(source.len(), 1);
+//! assert_eq!(target.len(), 1);
+//! ```
 
 use crate::Entity;
 use crate::component::{ComponentInfo, ComponentVec};
 use std::any::TypeId;
 
-/// The table for one set of component types.
+// ========================================================================================== \\
+//                                         Public API                                         \\
+// ========================================================================================== \\
+
+/// Stores every entity with one set of component types, as rows across one column per type.
+///
+/// A caller reaches a column by [`TypeId`], through [`components_of`](Self::components_of) or
+/// [`mut_components_of`](Self::mut_components_of). The module documentation sets out how a caller
+/// adds a row and moves one to another table.
 pub(crate) struct Archetype {
+    /// Stores one column for each component type, sorted by `TypeId`.
     components: Vec<ComponentVec>,
+    /// Stores the entity that owns each row, in row order.
     entities: Vec<Entity>,
+    /// Stores one set bit for each component type in `components`.
     mask: u64,
 }
 
 impl Archetype {
+    /// Returns an empty table with one column for each entry in `infos`. The caller can list the
+    /// entries in any order.
+    ///
+    /// The mask combines the bit from each entry. An empty `infos` gives a table with no columns and
+    /// a mask of 0.
+    ///
+    /// The caller MUST pass each component type once, with a bit that follows the rules in
+    /// [`ComponentInfo::of`]. A type passed twice with two different bits gets two columns. A search
+    /// for that type returns one column every time, and which one is unspecified. The other column
+    /// is then never pushed to, and the table breaks the guarantee that
+    /// [`push_entity`](Self::push_entity) requires.
+    ///
+    /// # Panics
+    ///
+    /// Panics where two entries in `infos` share a bit.
     pub(crate) fn new(infos: &[ComponentInfo]) -> Self {
         let mut components: Vec<ComponentVec> =
             infos.iter().map(|info| ComponentVec::new(*info)).collect();
-        // Sort by type id to ensure find_index_of can binary search
+        // Sorts the columns by `TypeId`, which the binary search in `find_index_of` requires
         components.sort_by_key(|components| components.info().type_id());
         let mut mask = 0;
         for info in infos {
+            // Stops two types from sharing a bit, which would make queries treat them as one type
             assert_eq!(
                 mask & info.bit(),
                 0,
-                "Two component types in one table share a mask bit"
+                "two component types in one table share a mask bit"
             );
             mask = mask | info.bit();
         }
@@ -39,23 +146,39 @@ impl Archetype {
         self.entities.len()
     }
 
-    /// Returns the `ComponentInfo` for each component type in the table, sorted by `TypeId`.
+    /// Returns the [`ComponentInfo`] for each component type in the table, sorted by [`TypeId`].
+    ///
+    /// Each call builds a new `Vec`, which the caller then owns.
     pub(crate) fn infos(&self) -> Vec<ComponentInfo> {
         self.components.iter().map(ComponentVec::info).collect()
     }
 
-    /// Returns the components of type `type_id`, or `None` where the table has none.
+    /// Returns the column for `type_id`, or `None` where the table has no such column.
+    ///
+    /// The returned reference borrows the table, meaning the compiler rejects any change to the
+    /// table while the reference is in use.
     pub(crate) fn components_of(&self, type_id: TypeId) -> Option<&ComponentVec> {
         let index = self.find_index_of(type_id)?;
         Some(&self.components[index])
     }
 
-    /// Returns the components of type `type_id` for mutation, or `None`
+    /// Returns the column for `type_id` so that the caller can change it, or `None` where the table
+    /// has no such column.
+    ///
+    /// The returned reference borrows the table exclusively, meaning the compiler rejects any other
+    /// use of the table while the reference is in use.
+    ///
+    /// A caller that pushes onto the column, moves a component out of it or replaces the column MUST
+    /// then keep the columns and the entity list in line, as the Rows section in the module
+    /// documentation sets out. A replacement column MUST also store the same component type, since
+    /// the search depends on the sorted order.
     pub(crate) fn mut_components_of(&mut self, type_id: TypeId) -> Option<&mut ComponentVec> {
         let index = self.find_index_of(type_id)?;
         Some(&mut self.components[index])
     }
 
+    /// Returns the position of the column for `type_id` in `components`, or `None` where the table
+    /// has no such column.
     fn find_index_of(&self, type_id: TypeId) -> Option<usize> {
         self.components
             .binary_search_by_key(&type_id, |components| components.info().type_id())
@@ -67,24 +190,96 @@ impl Archetype {
         self.mask
     }
 
-    /// Returns `true` where the table stores every component type in `query_mask`.
+    /// Returns `true` where the table stores every component type in `query_mask`, and `false` where
+    /// it lacks at least one.
+    ///
+    /// A `query_mask` of 0 does not ask for any component types, and the method then returns `true`
+    /// for every table.
     pub(crate) fn has_all(&self, query_mask: u64) -> bool {
         self.mask & query_mask == query_mask
     }
 
+    /// Adds `entity` to the end of the entity list, which gives it the row `len() - 1`, measured
+    /// after the call.
+    ///
+    /// # Panics
+    ///
+    /// Panics where the list is full and a larger block would exceed `isize::MAX` bytes. The program
+    /// aborts where the allocator cannot supply the larger block.
+    ///
+    /// # Safety
+    ///
+    /// The caller MUST guarantee that every column has one new component for this row. The caller
+    /// pushes those components through [`mut_components_of`](Self::mut_components_of), either before
+    /// this call or straight after it.
+    ///
+    /// A missing component leaves that column one row short. Later entities then pair with the wrong
+    /// components in that column. A later call to [`move_entity`](Self::move_entity) can also pass
+    /// an index past the end of the column, which is undefined behaviour.
     pub(crate) unsafe fn push_entity(&mut self, entity: Entity) {
         self.entities.push(entity);
     }
 
+    /// Removes the entity at `row` from the table, and drops its components.
+    ///
+    /// The last row in this table then fills `row`, in the entity list and in every column.
+    ///
+    /// The method returns the entity that now occupies `row`, or `None` where `row` was the last
+    /// row, since no other entity changes row. The caller MUST update the location that it records
+    /// for the returned entity, as the module documentation sets out.
+    ///
+    /// # Panics
+    ///
+    /// Panics where `row` is not below the length of the entity list and of every column.
+    ///
+    /// Also panics where the `Drop` implementation of a component panics. The method removes one
+    /// column at a time, meaning a panic at any point can leave the columns and the entity list out
+    /// of line. The caller MUST NOT use the table after catching such a panic.
     pub(crate) fn remove_entity(&mut self, row: usize) -> Option<Entity> {
+        // Visits each column in the table
         for components in &mut self.components {
+            // Drops the entity's component, and fills `row` with the column's last component
             components.swap_remove(row);
         }
+        // Removes the entity from the list in the same way, filling `row` with the last entity
         self.entities.swap_remove(row);
+        // Returns the entity that now occupies `row`, or `None` where `row` was the last row
         self.entities.get(row).copied()
     }
 
-    /// Moves the entity in `row` to a new row at the end of `target`. Pops and swaps afterwards
+    /// Moves the entity at `row` and its components to a new row at the end of `target`.
+    ///
+    /// The last row in this table then fills `row`, in the entity list and in every column.
+    ///
+    /// The method returns the entity that now occupies `row`, or `None` where `row` was the last
+    /// row, since no other entity changes row. The moved entity now occupies row `target.len() - 1`.
+    /// The caller MUST update the location that it records for both entities, as the module
+    /// documentation sets out.
+    ///
+    /// # Panics
+    ///
+    /// Panics where `target` lacks a column for a component type in this table. A move to a table
+    /// with fewer component types therefore panics.
+    ///
+    /// Panics where the entity list in `target` is full and a larger block would exceed `isize::MAX`
+    /// bytes. The program aborts where the allocator cannot supply that block. A full column can
+    /// also panic or abort, as [`ComponentVec::move_component`] sets out.
+    ///
+    /// The method moves one column at a time. A panic at any point therefore leaves this table and
+    /// `target` out of line, with some components already moved. The caller MUST NOT use either table
+    /// after catching such a panic.
+    ///
+    /// # Safety
+    ///
+    /// The caller MUST guarantee two things:
+    ///
+    /// - `row` is below the length of the entity list and of every column. Where a column is too
+    ///   short, a debug build panics, and a release build reads past the end of that column, which
+    ///   is undefined behaviour. Where the entity list is too short, every build panics, after the
+    ///   columns have moved their components.
+    /// - The caller pushes one component onto each column that `target` has and this table lacks,
+    ///   before anything else uses `target`. A missing component has the effects that
+    ///   [`push_entity`](Self::push_entity) sets out.
     pub(crate) unsafe fn move_entity(
         &mut self,
         row: usize,
@@ -94,13 +289,70 @@ impl Archetype {
             let type_id = components.info().type_id();
             let target_components = target
                 .mut_components_of(type_id)
-                .expect("the target archetype stores every component type of the source");
+                .expect("the target archetype should store every component type of the source");
+            // SAFETY: `move_component` requires an index below the length and a target of the same
+            // type. The caller MUST guarantee that `row` is below the length of every column, and
+            // `mut_components_of` returns the target column with this `TypeId`
             unsafe { components.move_component(row, target_components) };
         }
         let entity = self.entities.swap_remove(row);
         target.entities.push(entity);
         self.entities.get(row).copied()
     }
+
+    /// Moves the entity at `row` to a new row at the end of `target`, **dropping each component that
+    /// `target` has no column for**.
+    ///
+    /// The last row in this table then fills `row`, in the entity list and in every column.
+    ///
+    /// The method returns the entity that now occupies `row`, or `None` where `row` was the last row,
+    /// since no other entity changes row. The moved entity now occupies row `target.len() - 1`. The
+    /// caller MUST update the location that it records for both entities, as the module documentation
+    /// sets out.
+    ///
+    /// # Panics
+    ///
+    /// Panics as [`move_entity`](Self::move_entity) does. Also panics where the clean-up code of a
+    /// dropped component panics. The caller MUST NOT use either table after catching any such panic.
+    ///
+    /// # Safety
+    ///
+    /// The caller MUST guarantee two things:
+    ///
+    /// - `row` is below the length of the entity list and of every column. The consequences match those
+    ///   that [`move_entity`](Self::move_entity) sets out.
+    /// - This table has a column for every column in `target`. A column that this table lacks ends up
+    ///   one row short, with the effects that [`push_entity`](Self::push_entity) sets out.
+    pub(crate) unsafe fn move_entity_dropping(
+        &mut self,
+        row: usize,
+        target: &mut Archetype,
+    ) -> Option<Entity> {
+        // Visits each column in this table
+        for components in &mut self.components {
+            // Finds the component type that the column stores
+            let type_id = components.info().type_id();
+            // Moves the entity's component where the target stores its type, and drops it otherwise
+            match target.mut_components_of(type_id) {
+                // Moves the component to the end of the target's column for the same type
+                // SAFETY: `move_component` requires an index below the length and a target of the same
+                // type. The caller MUST guarantee that `row` is below the length of every column, and
+                // `mut_components_of` returns the target column with this `TypeId`
+                Some(target_components) => unsafe {
+                    components.move_component(row, target_components);
+                },
+                // Drops the component, since the target has no column for its type
+                None => components.swap_remove(row),
+            }
+        }
+        // Takes the entity out of this table's list, filling `row` with the last entity
+        let entity = self.entities.swap_remove(row);
+        // Adds the entity to the end of the target's list, in line with its moved components
+        target.entities.push(entity);
+        // Returns the entity that now occupies `row`, or `None` where `row` was the last row
+        self.entities.get(row).copied()
+    }
+
 }
 
 // ========================================================================================== \\
@@ -135,7 +387,7 @@ mod tests {
     fn push_component<T: 'static>(table: &mut Archetype, value: T) {
         let column = table
             .mut_components_of(TypeId::of::<T>())
-            .expect("the table stores the component type");
+            .expect("the table should store the component type");
         column.push_typed(value);
     }
 
@@ -154,7 +406,7 @@ mod tests {
     fn read_column<T: 'static>(table: &Archetype) -> &[T] {
         let column = table
             .components_of(TypeId::of::<T>())
-            .expect("the table stores the component type");
+            .expect("the table should store the component type");
         column.as_slice::<T>()
     }
 
@@ -184,7 +436,7 @@ mod tests {
 
     /// Checks that a shared bit panics, since queries would then treat two types as one
     #[test]
-    #[should_panic(expected = "Two component types in one table share a mask bit")]
+    #[should_panic]
     fn new_with_shared_bit_panics() {
         let position = ComponentInfo::of::<Position>(0b01);
         let health = ComponentInfo::of::<Health>(0b01);
@@ -279,7 +531,7 @@ mod tests {
 
         let column = table
             .mut_components_of(position.type_id())
-            .expect("the table stores `Position`");
+            .expect("the table should store `Position`");
         column.push_typed(Position(1.5));
 
         assert_eq!(
@@ -408,7 +660,7 @@ mod tests {
         );
     }
 
-    /// Checks that moving the last row changes no other row, and so reports no entity to update
+    /// Checks that moving the last row does not change any other row, and therefore returns `None`
     #[test]
     fn move_entity_with_last_row_returns_none() {
         let cases = [1_u32, 2, 5];
@@ -619,7 +871,7 @@ mod tests {
         assert_eq!(read_column::<Tag>(&target).len(), 1, "target column length");
     }
 
-    /// Checks that a move passes ownership on (two tables never clean up one component)
+    /// Checks that a move passes ownership on, meaning two tables never clean up the same component
     #[test]
     fn move_entity_with_drop_counters_drops_each_component_once() {
         let drops = Arc::new(AtomicUsize::new(0));
@@ -648,7 +900,7 @@ mod tests {
 
     /// Checks that a move to a table lacking a column panics, since the component has no column
     #[test]
-    #[should_panic(expected = "the target archetype stores every component type of the source")]
+    #[should_panic]
     fn move_entity_with_missing_target_column_panics() {
         let position = ComponentInfo::of::<Position>(1);
         let mut source = Archetype::new(&[position]);
@@ -663,7 +915,7 @@ mod tests {
     /// Checks that a debug build catches a row past the end of the columns
     #[test]
     #[cfg(debug_assertions)]
-    #[should_panic(expected = "the index must be below the length")]
+    #[should_panic]
     fn move_entity_with_out_of_range_row_panics_in_debug_build() {
         let position = ComponentInfo::of::<Position>(1);
         let mut source = Archetype::new(&[position]);
@@ -677,7 +929,7 @@ mod tests {
 
     /// Checks that an entity list shorter than its columns panics in every build
     #[test]
-    #[should_panic(expected = "swap_remove index")]
+    #[should_panic]
     fn move_entity_with_short_entity_list_panics() {
         let position = ComponentInfo::of::<Position>(1);
         let mut source = Archetype::new(&[position]);

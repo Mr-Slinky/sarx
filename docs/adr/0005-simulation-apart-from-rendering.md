@@ -29,7 +29,7 @@ How does the simulation advance in time, relative to the frames that the rendere
 
 - A player on any device plays the same game. A laptop with a 60 Hz screen and a desktop with a
   144 Hz monitor see the world change at the same rate.
-- The simulation has its own crate, `sarx-sim`, which depends on no graphics code.
+- The simulation has its own crate, `sarx-sim`, which does not depend on any graphics code.
 - The simulation loop is structure. The developer builds it by hand, and extends it as the ECS and
   the physics engine build on it.
 
@@ -56,16 +56,16 @@ The cap matters on a slow device. Such a device takes longer to compute a step t
 that the step covers. With the cap, it runs the game in slow motion. Without the cap, it would fall
 further behind on every frame, until the backlog of steps froze the game.
 
-The simulation lives in the `sarx-sim` crate, which depends on no graphics code. Today the crate
-contains only the `add` function that `cargo new` generates. The first fixed-step simulation arrives
-with the TODO item "Move the triangle from a fixed-step simulation with a minimal ECS".
+The simulation lives in the `sarx-sim` crate, which does not depend on any graphics code. Today the
+crate contains only the `add` function that `cargo new` generates. The first fixed-step simulation
+arrives with the TODO item "Move the triangle from a fixed-step simulation with a minimal ECS".
 
 Two questions remain open. This decision leaves both to a later discussion.
 
-- **The step rate.** 60 steps per second is the proposed rate. The developer has yet to settle it.
-- **Interpolation.** The renderer has two choices here. It can draw the latest state as it stands.
-  It can also blend the two most recent states, by how far the clock has run into the next step. The
-  developer has yet to choose between these.
+- 60 steps per second is the proposed step rate. The developer has yet to settle it.
+- The renderer can draw the latest state as it stands. It can also blend the two most recent
+  states, by how far the clock has run into the next step. That blending is called interpolation.
+  The developer has yet to choose between these.
 
 ### Consequences
 
@@ -83,15 +83,15 @@ Two questions remain open. This decision leaves both to a later discussion.
 
 ### Confirmation
 
-`cargo tree -p sarx-sim` lists no graphics crate, such as `wgpu`, `winit` or `sarx-render`. The
-`[dependencies]` table in `crates/sarx-sim/Cargo.toml` shows the same.
+`cargo tree -p sarx-sim` does not list a graphics crate, such as `wgpu`, `winit` or `sarx-render`.
+The `[dependencies]` table in `crates/sarx-sim/Cargo.toml` shows the same.
 
 Once the simulation exists, a reader also checks the code for four points:
 
 - The step length is a single constant.
-- The function that advances the simulation by one step takes no measure of elapsed frame time.
-- The game loop calls that function as many times as the clock calls for, apart from its call to
-  draw a frame.
+- The function that advances the simulation by one step does not take elapsed frame time.
+- The game loop calls that function as many times as the clock calls for, separately from its call
+  to draw a frame.
 - The loop adds no more than 250 ms to its running total in one frame.
 
 ## Pros and Cons of the Options

@@ -105,7 +105,7 @@ second loader reads a hand-built level from a file.
 A pre-made level is stored as a fixed set of settings and a seed. The game runs the generator on
 them whenever the level loads.
 
-- Good, because a pre-made level is a few values. Every level also passes through the generator.
+- Good, because a pre-made level is stored as a few values. Every level also passes through the generator.
 - Bad, because a person shapes a level only through the settings of the generator. A hill or a
   village placed by hand lies outside what the settings can express.
 - Bad, because any change to the generator changes every pre-made level built on it.

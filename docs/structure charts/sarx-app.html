@@ -160,7 +160,7 @@ footer { border-top: 1px solid var(--rule); padding-top: 16px; color: var(--mute
   <span class="eyebrow">Structured Design &middot; crates/sarx-app</span>
   <h1>sarx-app structure charts</h1>
   <p class="lede">This page shows how the functions in the <code>sarx-app</code> crate call one another. The crate
-  opens the window and runs the event loop. The page does this with structure charts, a kind of diagram from Yourdon
+  opens the window and runs the event loop. The page shows the calls with structure charts, a kind of diagram from Yourdon
   and Constantine&rsquo;s book <em>Structured Design</em>. A structure chart shows which modules call which. It also
   shows the values that pass between them on each call. The order of the statements inside a module stays off the
   chart. The crate has seven functions, and each one has a chart of its own.</p>
@@ -207,7 +207,7 @@ footer { border-top: 1px solid var(--rule); padding-top: 16px; color: var(--mute
     <code>Option::as_mut</code> and <code>Pin::as_mut</code>. The derived <code>App::default</code> is left off too.
     It sets both fields of an <code>App</code> to <code>None</code>. The <code>ThreadWaker</code> constructor is left
     off as well, since it only stores a value. Last, <code>App::print_error</code> prints the cause of an error, where
-    there is one. That cause is a wgpu error, and the chart leaves off the call to its <code>Display::fmt</code>.</p>
+    there is one. That cause is a wgpu error. The chart leaves off the call to its <code>Display::fmt</code>.</p>
   </div>
 </section>
 
@@ -531,8 +531,8 @@ footer { border-top: 1px solid var(--rule); padding-top: 16px; color: var(--mute
   the window&rsquo;s settings with <code>Window::default_attributes</code>. It then asks the event loop to create the
   window. <code>Arc::new</code> wraps the new window in an <code>Arc</code>, and <code>Window::inner_size</code> reads
   its size. In part 2, <code>resumed</code> sets up the renderer. It passes the size and a second <code>Arc</code> to
-  the same window to <code>Renderer::new</code>. <code>Renderer::new</code> is an <code>async fn</code>, and calling it
-  does none of the work yet. It returns <code>renderer_setup</code>, a <em>future</em>, which is a value that stores
+  the same window to <code>Renderer::new</code>. <code>Renderer::new</code> is an <code>async fn</code>. Calling it
+  does not run any of the work yet. It returns <code>renderer_setup</code>, a <em>future</em>, which is a value that stores
   the work still to do. <code>block_on</code> runs that future to the end. It returns either a renderer, which
   <code>resumed</code> stores, or an error. On an error, <code>resumed</code> passes the error to
   <code>App::print_error</code>. It then calls <code>ActiveEventLoop::exit</code>, which ends the event loop. The

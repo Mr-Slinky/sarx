@@ -45,8 +45,8 @@ What does Sarx look like, and how does it build its characters?
 
 ## Decision Outcome
 
-Chosen option: "Stylised, with characters built from rigid parts", because simple, clean shapes are
-the look itself, which suits every source of models that Sarx has.
+Chosen option: "Stylised, with characters built from rigid parts", because the look is made of
+simple, clean shapes, and every source of models that Sarx has produces shapes of that kind.
 
 Sarx looks stylised, in the manner of Astro Bot, Universim and Minecraft. It uses bright colours,
 clean shapes and simple forms. Its proportions and surfaces are simplified rather than realistic.
@@ -68,7 +68,7 @@ separate decision.
 - Good, because villagers far from the camera can take less work. Near villagers animate every part
   on every frame. Villagers further off update less often. Distant villagers can merge their parts
   into one mesh.
-- Good, because a stylised look forgives simple geometry. Models built in code can then stand beside
+- Good, because a stylised look suits simple geometry. Models built in code can then stand beside
   models from an AI generator.
 - Good, because simple models and plain surfaces keep the GPU work within what a mid-level laptop
   can do.
@@ -85,7 +85,7 @@ Nothing in the code embodies this decision yet. Once villagers exist, a reader c
 checks:
 
 - Each villager is built from separate meshes, each with its own transform.
-- The shaders blend no vertices between bones.
+- The shaders do not blend vertices between bones.
 
 ## Pros and Cons of the Options
 

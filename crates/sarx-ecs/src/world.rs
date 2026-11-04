@@ -334,3 +334,643 @@ impl Default for World {
         Self::new() // builds the same empty world as `new`
     }
 }
+
+// ========================================================================================== \\
+//                                           Tests                                            \\
+// ========================================================================================== \\
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    #[derive(Debug, PartialEq)]
+    struct Position(f32);
+
+    #[derive(Debug, PartialEq)]
+    struct Health(u32);
+
+    /// Adds 1 to a shared counter when dropped, which shows how many times clean-up code ran.
+    struct DropCounter {
+        drops: Arc<AtomicUsize>,
+    }
+
+    impl Drop for DropCounter {
+        fn drop(&mut self) {
+            self.drops.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    /// Builds an array with the `TypeId` of each array type `[u8; N]`, for every `N` listed.
+    macro_rules! type_ids {
+        ($($length:literal)*) => { [$(TypeId::of::<[u8; $length]>()),*] };
+    }
+
+    /// Returns 64 distinct `TypeId`s, enough to take every bit that a world can hand out.
+    fn build_64_type_ids() -> [TypeId; 64] {
+        type_ids!(
+             0  1  2  3  4  5  6  7  8  9 10 11 12 13 14 15
+            16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31
+            32 33 34 35 36 37 38 39 40 41 42 43 44 45 46 47
+            48 49 50 51 52 53 54 55 56 57 58 59 60 61 62 63
+        )
+    }
+
+    /// Returns where `entity` is stored, and panics where it is not alive.
+    fn locate_alive(world: &World, entity: Entity) -> Location {
+        world.locate(entity).expect("the entity should be alive")
+    }
+
+    /// Returns a counter that adds to `drops` when dropped.
+    fn build_counter(drops: &Arc<AtomicUsize>) -> DropCounter {
+        DropCounter {
+            drops: Arc::clone(drops),
+        }
+    }
+
+    /// Checks that a new world has one table with no columns, and no entities or component types
+    #[test]
+    fn new_with_no_args_returns_world_with_only_empty_table() {
+        let world = World::new();
+
+        let empty_table = &world.archetypes[World::EMPTY];
+        assert_eq!(world.archetypes.len(), 1, "number of tables");
+        assert_eq!(empty_table.mask(), 0, "mask of the empty table");
+        assert_eq!(empty_table.len(), 0, "rows in the empty table");
+        assert_eq!(world.archetype_indices.get(&0), Some(&World::EMPTY), "table under mask 0");
+        assert!(world.component_bits.is_empty(), "component types");
+        assert!(world.slots.is_empty(), "slots");
+        assert!(world.free_slots.is_empty(), "free slots");
+    }
+
+    /// Checks that `default` builds the same empty world as `new`
+    #[test]
+    fn default_with_no_args_returns_empty_world() {
+        let world = World::default();
+
+        assert_eq!(world.archetypes.len(), 1, "number of tables");
+        assert!(world.slots.is_empty(), "slots");
+    }
+
+    /// Checks that a world with no freed slots hands out indices in order, each at version 0
+    #[test]
+    fn spawn_ent_with_varying_counts_returns_sequential_handles_at_version_zero() {
+        let cases = [1_u32, 2, 5];
+
+        for count in cases {
+            let mut world = World::new();
+
+            let entities: Vec<Entity> = (0..count).map(|_| world.spawn_ent()).collect();
+
+            let expected: Vec<Entity> = (0..count).map(|index| Entity::new(index, 0)).collect();
+            let rows = world.archetypes[World::EMPTY].len();
+            assert_eq!(entities, expected, "handles for {count} spawns");
+            assert_eq!(rows, count as usize, "rows for {count} spawns");
+        }
+    }
+
+    /// Checks that each spawned entity lives in the empty table, at the row of its spawn order
+    #[test]
+    fn spawn_ent_with_several_spawns_places_each_in_next_row_of_empty_table() {
+        let mut world = World::new();
+
+        let entities = [world.spawn_ent(), world.spawn_ent(), world.spawn_ent()];
+
+        for (row, entity) in entities.into_iter().enumerate() {
+            let location = locate_alive(&world, entity);
+            assert_eq!(location.archetype, World::EMPTY, "table of entity {row}");
+            assert_eq!(location.row, row, "row of entity {row}");
+        }
+    }
+
+    /// Checks that a freed slot is reused, at a version one above the dead entity's
+    #[test]
+    fn spawn_ent_with_freed_slot_reuses_index_at_raised_version() {
+        let mut world = World::new();
+        let dead = world.spawn_ent();
+        world.despawn_ent(dead);
+
+        let reborn = world.spawn_ent();
+
+        assert_eq!(reborn, Entity::new(0, 1), "handle of the new entity");
+        assert_eq!(world.slots.len(), 1, "slots");
+        assert!(world.free_slots.is_empty(), "free slots");
+    }
+
+    /// Checks that freed slots come back last freed first, since `free_slots` is a stack
+    #[test]
+    fn spawn_ent_with_several_freed_slots_reuses_last_freed_first() {
+        let mut world = World::new();
+        let first = world.spawn_ent();
+        let second = world.spawn_ent();
+        world.spawn_ent();
+        world.despawn_ent(first);
+        world.despawn_ent(second);
+
+        let reborn = [world.spawn_ent(), world.spawn_ent(), world.spawn_ent()];
+
+        assert_eq!(reborn, [Entity::new(1, 1), Entity::new(0, 1), Entity::new(3, 0)]);
+    }
+
+    /// Checks that a despawned entity is gone, and that the call reports that it existed
+    #[test]
+    fn despawn_ent_with_living_entity_returns_true_and_forgets_entity() {
+        let mut world = World::new();
+        let entity = world.spawn_ent();
+        world.insert(entity, Health(10));
+
+        let despawned = world.despawn_ent(entity);
+
+        assert!(despawned, "answer for a living entity");
+        assert!(world.locate(entity).is_none(), "location after despawning");
+        assert_eq!(world.get::<Health>(entity), None, "component after despawning");
+        assert_eq!(world.free_slots, [0], "free slots");
+    }
+
+    /// Checks that a handle to a despawned entity, to an index never spawned, or at the wrong version
+    /// gives `false`
+    #[test]
+    fn despawn_ent_with_handle_of_no_living_entity_returns_false() {
+        let cases = [
+            ("despawned", Entity::new(0, 0)),
+            ("index past the last slot", Entity::new(5, 0)),
+            ("later version", Entity::new(0, 7)),
+            ("largest index and version", Entity::new(u32::MAX, u32::MAX)),
+        ];
+
+        for (label, handle) in cases {
+            let mut world = World::new();
+            let entity = world.spawn_ent();
+            world.despawn_ent(entity);
+
+            let despawned = world.despawn_ent(handle);
+
+            assert!(!despawned, "answer for {label}");
+            assert_eq!(world.free_slots, [0], "free slots for {label}");
+        }
+    }
+
+    /// Checks that the entity that fills the empty row can still be found, with its own component
+    #[test]
+    fn despawn_ent_with_first_row_updates_location_of_filling_entity() {
+        let mut world = World::new();
+        let entities = [world.spawn_ent(), world.spawn_ent(), world.spawn_ent()];
+        for (value, entity) in entities.into_iter().enumerate() {
+            world.insert(entity, Health(value as u32));
+        }
+        let [first, second, third] = entities;
+
+        world.despawn_ent(first);
+
+        assert_eq!(locate_alive(&world, third).row, 0, "row of the filling entity");
+        assert_eq!(world.get::<Health>(second), Some(&Health(1)), "second entity's component");
+        assert_eq!(world.get::<Health>(third), Some(&Health(2)), "third entity's component");
+    }
+
+    /// Checks that despawning drops each of the entity's components once, and no others
+    #[test]
+    fn despawn_ent_with_drop_counter_drops_component_once() {
+        let drops = Arc::new(AtomicUsize::new(0));
+        let mut world = World::new();
+        let doomed = world.spawn_ent();
+        let survivor = world.spawn_ent();
+        world.insert(doomed, build_counter(&drops));
+        world.insert(survivor, build_counter(&drops));
+
+        world.despawn_ent(doomed);
+
+        assert_eq!(drops.load(Ordering::Relaxed), 1);
+    }
+
+    /// Checks that a slot whose version reaches `u32::MAX` is never reused, since its next version
+    /// would wrap round to one that an old handle may still have
+    #[test]
+    fn despawn_ent_with_version_reaching_max_retires_slot() {
+        let mut world = World::new();
+        world.spawn_ent();
+        world.slots[0].version = u32::MAX - 1;
+        let last_version = Entity::new(0, u32::MAX - 1);
+
+        let despawned = world.despawn_ent(last_version);
+        let next = world.spawn_ent();
+
+        assert!(despawned, "answer for the entity at the last version");
+        assert_eq!(world.slots[0].version, u32::MAX, "version of the retired slot");
+        assert_eq!(next, Entity::new(1, 0), "handle of the next entity");
+    }
+
+    /// Checks that a first component moves the entity out of the empty table, into a new table
+    #[test]
+    fn insert_with_new_component_moves_entity_to_new_table() {
+        let mut world = World::new();
+        let entity = world.spawn_ent();
+
+        world.insert(entity, Position(1.5));
+
+        let location = locate_alive(&world, entity);
+        let bit = world.component_bits[&TypeId::of::<Position>()];
+        let mask = world.archetypes[location.archetype].mask();
+        assert_eq!(world.archetypes.len(), 2, "number of tables");
+        assert_eq!(location.archetype, 1, "table of the entity");
+        assert_eq!(mask, bit, "mask of the new table");
+        assert_eq!(world.archetypes[World::EMPTY].len(), 0, "rows in the empty table");
+        assert_eq!(world.get::<Position>(entity), Some(&Position(1.5)), "component");
+    }
+
+    /// Checks that a second component keeps the first, and moves the entity to a table with both
+    #[test]
+    fn insert_with_second_component_keeps_first_component() {
+        let mut world = World::new();
+        let entity = world.spawn_ent();
+        world.insert(entity, Position(1.5));
+
+        world.insert(entity, Health(100));
+
+        let location = locate_alive(&world, entity);
+        let mask = world.archetypes[location.archetype].mask();
+        assert_eq!(world.archetypes.len(), 3, "number of tables");
+        assert_eq!(mask, 0b11, "mask of the entity's table");
+        assert_eq!(world.get::<Position>(entity), Some(&Position(1.5)), "first component");
+        assert_eq!(world.get::<Health>(entity), Some(&Health(100)), "second component");
+    }
+
+    /// Checks that a component of a type the entity already has replaces the old one in place
+    #[test]
+    fn insert_with_existing_component_type_replaces_value_in_place() {
+        let mut world = World::new();
+        let entity = world.spawn_ent();
+        world.insert(entity, Health(1));
+        let before = locate_alive(&world, entity);
+
+        world.insert(entity, Health(2));
+
+        let after = locate_alive(&world, entity);
+        assert_eq!(world.archetypes.len(), 2, "number of tables");
+        assert_eq!(after.archetype, before.archetype, "table of the entity");
+        assert_eq!(after.row, before.row, "row of the entity");
+        assert_eq!(world.get::<Health>(entity), Some(&Health(2)), "component");
+    }
+
+    /// Checks that replacing a component drops the old one, and leaves the new one alive
+    #[test]
+    fn insert_with_existing_component_type_drops_old_value_once() {
+        let drops = Arc::new(AtomicUsize::new(0));
+        let mut world = World::new();
+        let entity = world.spawn_ent();
+        world.insert(entity, build_counter(&drops));
+
+        world.insert(entity, build_counter(&drops));
+
+        assert_eq!(drops.load(Ordering::Relaxed), 1);
+    }
+
+    /// Checks that entities with the same component types share one table
+    #[test]
+    fn insert_with_same_types_on_two_entities_reuses_table() {
+        let mut world = World::new();
+        let first = world.spawn_ent();
+        let second = world.spawn_ent();
+        world.insert(first, Health(1));
+
+        world.insert(second, Health(2));
+
+        let first_location = locate_alive(&world, first);
+        let second_location = locate_alive(&world, second);
+        let rows = [first_location.row, second_location.row];
+        assert_eq!(world.archetypes.len(), 2, "number of tables");
+        assert_eq!(first_location.archetype, second_location.archetype, "shared table");
+        assert_eq!(rows, [0, 1], "rows");
+    }
+
+    /// Checks that an entity ends in the same table, whichever order its components arrive in
+    #[test]
+    fn insert_with_types_in_either_order_ends_in_same_table() {
+        let mut world = World::new();
+        let first = world.spawn_ent();
+        let second = world.spawn_ent();
+        world.insert(first, Position(1.0));
+        world.insert(first, Health(1));
+
+        world.insert(second, Health(2));
+        world.insert(second, Position(2.0));
+
+        let first_table = locate_alive(&world, first).archetype;
+        let second_table = locate_alive(&world, second).archetype;
+        let masks = world.archetype_indices.len();
+        assert_eq!(first_table, second_table, "table of each entity");
+        assert_eq!(masks, world.archetypes.len(), "one mask for each table");
+    }
+
+    /// Checks that moving one entity leaves every other entity with its own components
+    #[test]
+    fn insert_with_entity_leaving_middle_row_keeps_other_components_in_place() {
+        let mut world = World::new();
+        let entities = [world.spawn_ent(), world.spawn_ent(), world.spawn_ent()];
+        for (value, entity) in entities.into_iter().enumerate() {
+            world.insert(entity, Health(value as u32));
+        }
+        let [first, second, third] = entities;
+
+        world.insert(second, Position(9.0));
+
+        assert_eq!(locate_alive(&world, third).row, 1, "row of the filling entity");
+        assert_eq!(world.get::<Health>(first), Some(&Health(0)), "first entity's component");
+        assert_eq!(world.get::<Health>(second), Some(&Health(1)), "second entity's component");
+        assert_eq!(world.get::<Health>(third), Some(&Health(2)), "third entity's component");
+        assert_eq!(world.get::<Position>(second), Some(&Position(9.0)), "new component");
+    }
+
+    /// Checks that moving an entity to a new table does not drop any of its components
+    #[test]
+    fn insert_with_drop_counter_moving_tables_drops_nothing() {
+        let drops = Arc::new(AtomicUsize::new(0));
+        let mut world = World::new();
+        let entity = world.spawn_ent();
+        world.insert(entity, build_counter(&drops));
+
+        world.insert(entity, Health(1));
+
+        assert_eq!(drops.load(Ordering::Relaxed), 0);
+    }
+
+    /// Checks that a component type that takes no memory still moves the entity to its own table
+    #[test]
+    fn insert_with_zero_size_type_moves_entity_to_new_table() {
+        struct Tag;
+
+        let mut world = World::new();
+        let entity = world.spawn_ent();
+
+        world.insert(entity, Tag);
+
+        assert_eq!(locate_alive(&world, entity).archetype, 1, "table of the entity");
+        assert!(world.get::<Tag>(entity).is_some(), "component");
+    }
+
+    /// Checks that a component for an entity that is not alive panics, since it has no row to fill
+    #[test]
+    #[should_panic]
+    fn insert_with_despawned_entity_panics() {
+        let mut world = World::new();
+        let entity = world.spawn_ent();
+        world.despawn_ent(entity);
+
+        world.insert(entity, Health(1));
+    }
+
+    /// Checks that a 65th component type panics, since the mask has room for 64 bits
+    #[test]
+    #[should_panic]
+    fn insert_with_65th_component_type_panics() {
+        let mut world = World::new();
+        let entity = world.spawn_ent();
+        for type_id in build_64_type_ids() {
+            world.find_or_assign_bit(type_id);
+        }
+
+        world.insert(entity, Health(1));
+    }
+
+    /// Checks that 64 component types take every bit of the mask, one bit each
+    #[test]
+    fn find_or_assign_bit_with_64_types_assigns_every_bit_once() {
+        let mut world = World::new();
+
+        let bits = build_64_type_ids().map(|type_id| world.find_or_assign_bit(type_id));
+
+        let combined = bits.iter().fold(0, |mask, bit| mask | bit);
+        assert!(bits.iter().all(|bit| bit.count_ones() == 1), "one set bit each");
+        assert_eq!(combined, u64::MAX, "every bit taken");
+    }
+
+    /// Checks that a type seen before keeps its first bit, and does not take a new one
+    #[test]
+    fn find_or_assign_bit_with_repeated_type_returns_same_bit() {
+        let mut world = World::new();
+        let first = world.find_or_assign_bit(TypeId::of::<Position>());
+        let other = world.find_or_assign_bit(TypeId::of::<Health>());
+
+        let repeat = world.find_or_assign_bit(TypeId::of::<Position>());
+
+        assert_eq!(repeat, first, "bit for the repeated type");
+        assert_eq!([first, other], [0b01, 0b10], "bits in order of first sight");
+        assert_eq!(world.component_bits.len(), 2, "component types");
+    }
+
+    /// Checks that removing a component drops it, and keeps the entity's other components
+    #[test]
+    fn remove_with_stored_component_returns_true_and_keeps_other_components() {
+        let mut world = World::new();
+        let entity = world.spawn_ent();
+        world.insert(entity, Position(1.5));
+        world.insert(entity, Health(100));
+
+        let removed = world.remove::<Health>(entity);
+
+        let location = locate_alive(&world, entity);
+        let position_bit = world.component_bits[&TypeId::of::<Position>()];
+        let mask = world.archetypes[location.archetype].mask();
+        assert!(removed, "answer for a stored component");
+        assert_eq!(world.get::<Health>(entity), None, "removed component");
+        assert_eq!(world.get::<Position>(entity), Some(&Position(1.5)), "kept component");
+        assert_eq!(mask, position_bit, "mask of the entity's table");
+    }
+
+    /// Checks that removing the only component returns the entity to the empty table
+    #[test]
+    fn remove_with_only_component_returns_entity_to_empty_table() {
+        let mut world = World::new();
+        let entity = world.spawn_ent();
+        world.insert(entity, Health(1));
+
+        world.remove::<Health>(entity);
+
+        let location = locate_alive(&world, entity);
+        assert_eq!(location.archetype, World::EMPTY, "table of the entity");
+        assert_eq!(world.archetypes.len(), 2, "number of tables");
+    }
+
+    /// Checks that removal finds the table that `insert` built, rather than building a second one
+    #[test]
+    fn remove_with_existing_target_table_reuses_table() {
+        let mut world = World::new();
+        let reference = world.spawn_ent();
+        let entity = world.spawn_ent();
+        world.insert(reference, Position(1.0));
+        world.insert(entity, Position(2.0));
+        world.insert(entity, Health(2));
+
+        world.remove::<Health>(entity);
+
+        let reference_table = locate_alive(&world, reference).archetype;
+        let entity_table = locate_alive(&world, entity).archetype;
+        assert_eq!(entity_table, reference_table, "table of each entity");
+        assert_eq!(world.archetypes.len(), 3, "number of tables");
+    }
+
+    /// Checks that removal reaches a table that `insert` never built, and builds it
+    #[test]
+    fn remove_with_new_target_table_creates_table() {
+        let mut world = World::new();
+        let entity = world.spawn_ent();
+        world.insert(entity, Position(1.0));
+        world.insert(entity, Health(1));
+
+        world.remove::<Position>(entity);
+
+        let location = locate_alive(&world, entity);
+        let health_bit = world.component_bits[&TypeId::of::<Health>()];
+        let mask = world.archetypes[location.archetype].mask();
+        assert_eq!(world.archetypes.len(), 4, "number of tables");
+        assert_eq!(mask, health_bit, "mask of the new table");
+        assert_eq!(world.get::<Health>(entity), Some(&Health(1)), "kept component");
+    }
+
+    /// Checks that `remove` returns `false` for a missing type, and for an entity that is not alive
+    #[test]
+    fn remove_with_nothing_to_remove_returns_false() {
+        let mut world = World::new();
+        let bare = world.spawn_ent();
+        let with_position = world.spawn_ent();
+        let despawned = world.spawn_ent();
+        world.insert(with_position, Position(1.0));
+        world.insert(despawned, Health(1));
+        world.despawn_ent(despawned);
+
+        let answers = [
+            ("entity with no components", world.remove::<Health>(bare)),
+            ("entity with another type", world.remove::<Health>(with_position)),
+            ("despawned entity", world.remove::<Health>(despawned)),
+        ];
+
+        let kept = world.get::<Position>(with_position);
+        for (label, removed) in answers {
+            assert!(!removed, "answer for {label}");
+        }
+        assert_eq!(kept, Some(&Position(1.0)), "untouched component");
+    }
+
+    /// Checks that removing a component drops it once, and does not drop anything else
+    #[test]
+    fn remove_with_drop_counter_drops_component_once() {
+        let drops = Arc::new(AtomicUsize::new(0));
+        let mut world = World::new();
+        let entity = world.spawn_ent();
+        world.insert(entity, build_counter(&drops));
+        world.insert(entity, Health(1));
+
+        world.remove::<DropCounter>(entity);
+
+        assert_eq!(drops.load(Ordering::Relaxed), 1);
+    }
+
+    /// Checks that moving one entity out leaves the entity that fills its row with its own components
+    #[test]
+    fn remove_with_entity_leaving_first_row_keeps_other_components_in_place() {
+        let mut world = World::new();
+        let first = world.spawn_ent();
+        let second = world.spawn_ent();
+        for (value, entity) in [first, second].into_iter().enumerate() {
+            world.insert(entity, Position(value as f32));
+            world.insert(entity, Health(value as u32));
+        }
+
+        world.remove::<Health>(first);
+
+        assert_eq!(locate_alive(&world, second).row, 0, "row of the filling entity");
+        assert_eq!(world.get::<Position>(second), Some(&Position(1.0)), "filling entity's position");
+        assert_eq!(world.get::<Health>(second), Some(&Health(1)), "filling entity's health");
+        assert_eq!(world.get::<Position>(first), Some(&Position(0.0)), "moved entity's position");
+    }
+
+    /// Checks `get` for a stored component, a missing type, and entities that are not alive
+    #[test]
+    fn get_with_varying_entities_returns_component_only_where_stored() {
+        let mut world = World::new();
+        let stored = world.spawn_ent();
+        let bare = world.spawn_ent();
+        let despawned = world.spawn_ent();
+        world.insert(stored, Health(5));
+        world.insert(despawned, Health(6));
+        world.despawn_ent(despawned);
+
+        let cases = [
+            ("stored component", stored, Some(Health(5))),
+            ("missing type", bare, None),
+            ("despawned entity", despawned, None),
+            ("never spawned", Entity::new(99, 0), None),
+        ];
+
+        for (label, entity, expected) in cases {
+            let found = world.get::<Health>(entity);
+            assert_eq!(found, expected.as_ref(), "component for {label}");
+        }
+    }
+
+    /// Checks that a handle kept past despawning never reaches the new entity in the same slot
+    #[test]
+    fn get_with_stale_handle_to_reused_slot_returns_none() {
+        let mut world = World::new();
+        let stale = world.spawn_ent();
+        world.insert(stale, Health(1));
+        world.despawn_ent(stale);
+        let reborn = world.spawn_ent();
+        world.insert(reborn, Health(2));
+
+        let through_stale = world.get::<Health>(stale);
+        let through_reborn = world.get::<Health>(reborn);
+
+        assert_eq!(through_stale, None, "component through the stale handle");
+        assert_eq!(through_reborn, Some(&Health(2)), "component through the new handle");
+    }
+
+    /// Checks that a change through `get_mut` stays in the world, for the one entity changed
+    #[test]
+    fn get_mut_with_stored_component_keeps_change() {
+        let mut world = World::new();
+        let changed = world.spawn_ent();
+        let untouched = world.spawn_ent();
+        world.insert(changed, Health(1));
+        world.insert(untouched, Health(1));
+
+        if let Some(health) = world.get_mut::<Health>(changed) {
+            health.0 = 50;
+        }
+
+        assert_eq!(world.get::<Health>(changed), Some(&Health(50)), "changed entity");
+        assert_eq!(world.get::<Health>(untouched), Some(&Health(1)), "other entity");
+    }
+
+    /// Checks that `get_mut` returns `None` for a missing type, and for an entity that is not alive
+    #[test]
+    fn get_mut_with_nothing_stored_returns_none() {
+        let mut world = World::new();
+        let bare = world.spawn_ent();
+        let despawned = world.spawn_ent();
+        world.insert(despawned, Health(1));
+        world.despawn_ent(despawned);
+
+        let missing_type = world.get_mut::<Health>(bare).is_none();
+        let not_alive = world.get_mut::<Health>(despawned).is_none();
+
+        assert!(missing_type, "answer for a missing type");
+        assert!(not_alive, "answer for a despawned entity");
+    }
+
+    /// Checks that dropping the world drops every component that it still stores, once each
+    #[test]
+    fn drop_with_components_in_several_tables_drops_each_once() {
+        let drops = Arc::new(AtomicUsize::new(0));
+        let mut world = World::new();
+        let alone = world.spawn_ent();
+        let paired = world.spawn_ent();
+        world.insert(alone, build_counter(&drops));
+        world.insert(paired, build_counter(&drops));
+        world.insert(paired, Health(1));
+
+        drop(world);
+
+        assert_eq!(drops.load(Ordering::Relaxed), 2);
+    }
+}

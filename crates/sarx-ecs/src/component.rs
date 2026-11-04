@@ -10,6 +10,9 @@
 //! neighbouring components in a column are also neighbours in memory. The components of one row lie
 //! in separate blocks, one block per column.
 //!
+//! Where a component type contains a pointer, such as a `String` or a `Vec`, the block stores the
+//! pointer, and the data that it points to lies elsewhere on the heap.
+//!
 //! A table learns its component types at run time, as ADR 0011 sets out. A generic `Vec<T>` needs
 //! its type at compile time, meaning it cannot serve as a column. A [`ComponentVec`] therefore
 //! stores its components as raw bytes.

@@ -18,7 +18,7 @@ use wgpu::{
     Adapter, BlendState, Buffer, BufferUsages, Color, ColorTargetState, ColorWrites,
     CommandEncoderDescriptor, CurrentSurfaceTexture, Device, DeviceDescriptor,
     DisplayAndWindowHandle, Extent3d, FragmentState, Instance, InstanceDescriptor, Limits, LoadOp,
-    MultisampleState, Operations, PrimitiveState, PrimitiveTopology, Queue,
+    MultisampleState, Operations, PresentMode, PrimitiveState, PrimitiveTopology, Queue,
     RenderPassColorAttachment, RenderPassDescriptor, RenderPipeline, RenderPipelineDescriptor,
     RequestAdapterOptions, ShaderModule, ShaderModuleDescriptor, ShaderSource, StoreOp, Surface,
     SurfaceConfiguration, TextureDescriptor, TextureDimension, TextureFormat, TextureUsages,
@@ -773,10 +773,17 @@ impl SurfaceContext {
         window: Arc<dyn DisplayAndWindowHandle>,
         surface: Surface<'static>,
         device: &Device,
-        config: SurfaceConfiguration,
+        mut config: SurfaceConfiguration,
     ) -> Self {
+        // Raises a width and/or height of zero to 1 pixel (since `configure` panics on a size of zero)
+        config.width = config.width.max(1);
+        config.height = config.height.max(1);
+        config.present_mode = PresentMode::AutoVsync;
+        // Configures the surface at that size, in the configuration's pixel format
         surface.configure(device, &config);
+        // Creates the multisampled texture at the same size and pixel format
         let msaa_view = GpuContext::create_msaa_view(device, &config);
+        // Returns the context, which keeps the configuration for later resizes
         Self {
             window,
             surface,

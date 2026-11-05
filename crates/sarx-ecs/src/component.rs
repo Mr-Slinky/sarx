@@ -410,8 +410,11 @@ impl ComponentVec {
     ///
     /// A debug build panics where either guarantee fails. A release build skips both checks.
     pub(crate) unsafe fn move_component(&mut self, index: usize, target: &mut ComponentVec) {
-        debug_assert!(index < self.len, "the index must be below the length");
-        debug_assert_eq!(
+        // Panics before anything changes, where `index` lies past the last component. A stale row
+        // from a caller would otherwise copy the bytes of a component that is already dropped
+        assert!(index < self.len, "the index must be below the length");
+        // Panics before anything changes, where the two vectors store different component types
+        assert_eq!(
             self.info.type_id, target.info.type_id,
             "both vectors must store the same component type"
         );
@@ -1147,30 +1150,28 @@ mod tests {
 
     /// Checks that a debug build catches an index that would read past the last component
     #[test]
-    #[cfg(debug_assertions)]
     #[should_panic]
-    fn move_component_with_out_of_range_index_panics_in_debug_build() {
+    fn move_component_with_out_of_range_index_panics() {
         let mut source = ComponentVec::new(ComponentInfo::of::<u32>(1));
         source.push_typed(10_u32);
 
         let mut target = ComponentVec::new(source.info());
 
-        // SAFETY: this call breaks the index requirement on purpose. The `debug_assert` in
+        // SAFETY: this call breaks the index requirement on purpose. The `assert` in
         // `move_component` panics before any memory is read
         unsafe { source.move_component(1, &mut target) };
     }
 
     /// Checks that a debug build catches a move between columns of different types
     #[test]
-    #[cfg(debug_assertions)]
     #[should_panic]
-    fn move_component_with_mismatched_target_panics_in_debug_build() {
+    fn move_component_with_mismatched_target_panics() {
         let mut source = ComponentVec::new(ComponentInfo::of::<u32>(1));
         source.push_typed(10_u32);
 
         let mut target = ComponentVec::new(ComponentInfo::of::<f32>(1));
 
-        // SAFETY: this call breaks the type requirement on purpose. The `debug_assert_eq` in
+        // SAFETY: this call breaks the type requirement on purpose. The `assert_eq` in
         // `move_component` panics before any memory is read
         unsafe { source.move_component(0, &mut target) };
     }

@@ -83,6 +83,7 @@
 use crate::Entity;
 use crate::component::{ComponentInfo, ComponentVec};
 use std::any::TypeId;
+use std::{mem, process};
 
 // ========================================================================================== \\
 //                                         Public API                                         \\
@@ -236,6 +237,11 @@ impl Archetype {
     /// column at a time, meaning a panic at any point can leave the columns and the entity list out
     /// of line. The caller MUST NOT use the table after catching such a panic.
     pub(crate) fn remove_entity(&mut self, row: usize) -> Option<Entity> {
+        // Panics before anything changes, where `row` lies past the last entity
+        assert!(row < self.entities.len(), "the row must be below the number of entities");
+
+        // Ends the program where anything below panics, since the columns would then be out of line
+        let guard = AbortOnUnwind;
         // Visits each column in the table
         for components in &mut self.components {
             // Drops the entity's component, and fills `row` with the column's last component
@@ -243,6 +249,9 @@ impl Archetype {
         }
         // Removes the entity from the list in the same way, filling `row` with the last entity
         self.entities.swap_remove(row);
+        // Disarms the guard, since every column and the entity list are in line again
+        mem::forget(guard);
+
         // Returns the entity that now occupies `row`, or `None` where `row` was the last row
         self.entities.get(row).copied()
     }
@@ -328,6 +337,11 @@ impl Archetype {
         row: usize,
         target: &mut Archetype,
     ) -> Option<Entity> {
+        // Panics before anything changes, where `row` lies past the last entity
+        assert!(row < self.entities.len(), "the row must be below the number of entities");
+
+        // Ends the program where anything below panics, since the tables would then be out of line
+        let guard = AbortOnUnwind;
         // Visits each column in this table
         for components in &mut self.components {
             // Finds the component type that the column stores
@@ -349,10 +363,24 @@ impl Archetype {
         let entity = self.entities.swap_remove(row);
         // Adds the entity to the end of the target's list, in line with its moved components
         target.entities.push(entity);
+        // Disarms the guard, since both tables are in line again
+        mem::forget(guard);
+
         // Returns the entity that now occupies `row`, or `None` where `row` was the last row
         self.entities.get(row).copied()
     }
+}
 
+// ========================================================================================== \\
+//                                          Helpers                                           \\
+// ========================================================================================== \\
+
+struct AbortOnUnwind;
+
+impl Drop for AbortOnUnwind {
+    fn drop(&mut self) {
+        process::abort();
+    }
 }
 
 // ========================================================================================== \\
@@ -914,15 +942,14 @@ mod tests {
 
     /// Checks that a debug build catches a row past the end of the columns
     #[test]
-    #[cfg(debug_assertions)]
     #[should_panic]
-    fn move_entity_with_out_of_range_row_panics_in_debug_build() {
+    fn move_entity_with_out_of_range_row_panics() {
         let position = ComponentInfo::of::<Position>(1);
         let mut source = Archetype::new(&[position]);
         let mut target = Archetype::new(&[position]);
         push_row(&mut source, Entity::new(0, 0), Position(1.0));
 
-        // SAFETY: this call breaks the row requirement on purpose. The `debug_assert` in
+        // SAFETY: this call breaks the row requirement on purpose. The `assert` in
         // `move_component` panics before any memory is read
         unsafe { source.move_entity(1, &mut target) };
     }

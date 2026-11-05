@@ -155,6 +155,10 @@ impl Archetype {
         self.components.iter().map(ComponentVec::info).collect()
     }
 
+    pub(crate) fn entities(&self) -> &[Entity] {
+        &self.entities
+    }
+
     /// Returns the column for `type_id`, or `None` where the table has no such column.
     ///
     /// The returned reference borrows the table, meaning the compiler rejects any change to the
@@ -177,6 +181,19 @@ impl Archetype {
     pub(crate) fn mut_components_of(&mut self, type_id: TypeId) -> Option<&mut ComponentVec> {
         let index = self.find_index_of(type_id)?;
         Some(&mut self.components[index])
+    }
+
+    pub(crate) fn get_disjoint_components_mut<const N: usize>(
+        &mut self,
+        type_ids: [TypeId; N],
+    ) -> Option<[&mut ComponentVec; N]> {
+        // Finds the position of each requested column, and returns `None` where one is missing
+        let mut indices = [0; N];
+        for (index, type_id) in indices.iter_mut().zip(type_ids) {
+            *index = self.find_index_of(type_id)?;
+        }
+        // Borrows every requested column at once, and returns `None` where two positions are equal
+        self.components.get_disjoint_mut(indices).ok()
     }
 
     /// Returns the position of the column for `type_id` in `components`, or `None` where the table

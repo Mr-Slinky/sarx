@@ -61,7 +61,7 @@ use std::collections::HashMap;
 
 /// Stores every entity and every component in one game.
 ///
-/// A caller creates an entity with [`spawn_ent`](Self::spawn_ent), which returns an [`Entity`]
+/// A caller creates an entity with [`spawn_ent`](Self::spawn_empty_ent), which returns an [`Entity`]
 /// handle. The caller then passes that handle to the other methods, to give the entity components,
 /// to read and change them, to remove them, and finally to despawn the entity.
 ///
@@ -162,7 +162,7 @@ impl World {
     /// # Panics
     ///
     /// Panics where every one of the 2^32 entity indices is taken, with none free for reuse.
-    pub fn spawn_ent(&mut self) -> Entity {
+    pub fn spawn_empty_ent(&mut self) -> Entity {
         // Places the new entity in the empty table, at the row just past its last entity
         let location = Location {
             archetype: Self::EMPTY,
@@ -596,7 +596,7 @@ mod tests {
         for count in cases {
             let mut world = World::new();
 
-            let entities: Vec<Entity> = (0..count).map(|_| world.spawn_ent()).collect();
+            let entities: Vec<Entity> = (0..count).map(|_| world.spawn_empty_ent()).collect();
 
             let expected: Vec<Entity> = (0..count).map(|index| Entity::new(index, 0)).collect();
             let rows = world.archetypes[World::EMPTY].len();
@@ -610,7 +610,7 @@ mod tests {
     fn spawn_ent_with_several_spawns_places_each_in_next_row_of_empty_table() {
         let mut world = World::new();
 
-        let entities = [world.spawn_ent(), world.spawn_ent(), world.spawn_ent()];
+        let entities = [world.spawn_empty_ent(), world.spawn_empty_ent(), world.spawn_empty_ent()];
 
         for (row, entity) in entities.into_iter().enumerate() {
             let location = locate_alive(&world, entity);
@@ -623,10 +623,10 @@ mod tests {
     #[test]
     fn spawn_ent_with_freed_slot_reuses_index_at_raised_version() {
         let mut world = World::new();
-        let dead = world.spawn_ent();
+        let dead = world.spawn_empty_ent();
         world.despawn_ent(dead);
 
-        let reborn = world.spawn_ent();
+        let reborn = world.spawn_empty_ent();
 
         assert_eq!(reborn, Entity::new(0, 1), "handle of the new entity");
         assert_eq!(world.slots.len(), 1, "slots");
@@ -637,13 +637,13 @@ mod tests {
     #[test]
     fn spawn_ent_with_several_freed_slots_reuses_last_freed_first() {
         let mut world = World::new();
-        let first = world.spawn_ent();
-        let second = world.spawn_ent();
-        world.spawn_ent();
+        let first = world.spawn_empty_ent();
+        let second = world.spawn_empty_ent();
+        world.spawn_empty_ent();
         world.despawn_ent(first);
         world.despawn_ent(second);
 
-        let reborn = [world.spawn_ent(), world.spawn_ent(), world.spawn_ent()];
+        let reborn = [world.spawn_empty_ent(), world.spawn_empty_ent(), world.spawn_empty_ent()];
 
         assert_eq!(reborn, [Entity::new(1, 1), Entity::new(0, 1), Entity::new(3, 0)]);
     }
@@ -652,7 +652,7 @@ mod tests {
     #[test]
     fn despawn_ent_with_living_entity_returns_true_and_forgets_entity() {
         let mut world = World::new();
-        let entity = world.spawn_ent();
+        let entity = world.spawn_empty_ent();
         world.insert(entity, Health(10));
 
         let despawned = world.despawn_ent(entity);
@@ -676,7 +676,7 @@ mod tests {
 
         for (label, handle) in cases {
             let mut world = World::new();
-            let entity = world.spawn_ent();
+            let entity = world.spawn_empty_ent();
             world.despawn_ent(entity);
 
             let despawned = world.despawn_ent(handle);
@@ -690,7 +690,7 @@ mod tests {
     #[test]
     fn despawn_ent_with_first_row_updates_location_of_filling_entity() {
         let mut world = World::new();
-        let entities = [world.spawn_ent(), world.spawn_ent(), world.spawn_ent()];
+        let entities = [world.spawn_empty_ent(), world.spawn_empty_ent(), world.spawn_empty_ent()];
         for (value, entity) in entities.into_iter().enumerate() {
             world.insert(entity, Health(value as u32));
         }
@@ -708,8 +708,8 @@ mod tests {
     fn despawn_ent_with_drop_counter_drops_component_once() {
         let drops = Arc::new(AtomicUsize::new(0));
         let mut world = World::new();
-        let doomed = world.spawn_ent();
-        let survivor = world.spawn_ent();
+        let doomed = world.spawn_empty_ent();
+        let survivor = world.spawn_empty_ent();
         world.insert(doomed, build_counter(&drops));
         world.insert(survivor, build_counter(&drops));
 
@@ -723,12 +723,12 @@ mod tests {
     #[test]
     fn despawn_ent_with_version_reaching_max_retires_slot() {
         let mut world = World::new();
-        world.spawn_ent();
+        world.spawn_empty_ent();
         world.slots[0].version = u32::MAX - 1;
         let last_version = Entity::new(0, u32::MAX - 1);
 
         let despawned = world.despawn_ent(last_version);
-        let next = world.spawn_ent();
+        let next = world.spawn_empty_ent();
 
         assert!(despawned, "answer for the entity at the last version");
         assert_eq!(world.slots[0].version, u32::MAX, "version of the retired slot");
@@ -739,7 +739,7 @@ mod tests {
     #[test]
     fn insert_with_new_component_moves_entity_to_new_table() {
         let mut world = World::new();
-        let entity = world.spawn_ent();
+        let entity = world.spawn_empty_ent();
 
         world.insert(entity, Position(1.5));
 
@@ -757,7 +757,7 @@ mod tests {
     #[test]
     fn insert_with_second_component_keeps_first_component() {
         let mut world = World::new();
-        let entity = world.spawn_ent();
+        let entity = world.spawn_empty_ent();
         world.insert(entity, Position(1.5));
 
         world.insert(entity, Health(100));
@@ -774,7 +774,7 @@ mod tests {
     #[test]
     fn insert_with_existing_component_type_replaces_value_in_place() {
         let mut world = World::new();
-        let entity = world.spawn_ent();
+        let entity = world.spawn_empty_ent();
         world.insert(entity, Health(1));
         let before = locate_alive(&world, entity);
 
@@ -792,7 +792,7 @@ mod tests {
     fn insert_with_existing_component_type_drops_old_value_once() {
         let drops = Arc::new(AtomicUsize::new(0));
         let mut world = World::new();
-        let entity = world.spawn_ent();
+        let entity = world.spawn_empty_ent();
         world.insert(entity, build_counter(&drops));
 
         world.insert(entity, build_counter(&drops));
@@ -804,8 +804,8 @@ mod tests {
     #[test]
     fn insert_with_same_types_on_two_entities_reuses_table() {
         let mut world = World::new();
-        let first = world.spawn_ent();
-        let second = world.spawn_ent();
+        let first = world.spawn_empty_ent();
+        let second = world.spawn_empty_ent();
         world.insert(first, Health(1));
 
         world.insert(second, Health(2));
@@ -822,8 +822,8 @@ mod tests {
     #[test]
     fn insert_with_types_in_either_order_ends_in_same_table() {
         let mut world = World::new();
-        let first = world.spawn_ent();
-        let second = world.spawn_ent();
+        let first = world.spawn_empty_ent();
+        let second = world.spawn_empty_ent();
         world.insert(first, Position(1.0));
         world.insert(first, Health(1));
 
@@ -841,7 +841,7 @@ mod tests {
     #[test]
     fn insert_with_entity_leaving_middle_row_keeps_other_components_in_place() {
         let mut world = World::new();
-        let entities = [world.spawn_ent(), world.spawn_ent(), world.spawn_ent()];
+        let entities = [world.spawn_empty_ent(), world.spawn_empty_ent(), world.spawn_empty_ent()];
         for (value, entity) in entities.into_iter().enumerate() {
             world.insert(entity, Health(value as u32));
         }
@@ -861,7 +861,7 @@ mod tests {
     fn insert_with_drop_counter_moving_tables_drops_nothing() {
         let drops = Arc::new(AtomicUsize::new(0));
         let mut world = World::new();
-        let entity = world.spawn_ent();
+        let entity = world.spawn_empty_ent();
         world.insert(entity, build_counter(&drops));
 
         world.insert(entity, Health(1));
@@ -875,7 +875,7 @@ mod tests {
         struct Tag;
 
         let mut world = World::new();
-        let entity = world.spawn_ent();
+        let entity = world.spawn_empty_ent();
 
         world.insert(entity, Tag);
 
@@ -888,7 +888,7 @@ mod tests {
     #[should_panic]
     fn insert_with_despawned_entity_panics() {
         let mut world = World::new();
-        let entity = world.spawn_ent();
+        let entity = world.spawn_empty_ent();
         world.despawn_ent(entity);
 
         world.insert(entity, Health(1));
@@ -899,7 +899,7 @@ mod tests {
     #[should_panic]
     fn insert_with_65th_component_type_panics() {
         let mut world = World::new();
-        let entity = world.spawn_ent();
+        let entity = world.spawn_empty_ent();
         for type_id in build_64_type_ids() {
             world.find_or_assign_bit(type_id);
         }
@@ -937,7 +937,7 @@ mod tests {
     #[test]
     fn remove_with_stored_component_returns_true_and_keeps_other_components() {
         let mut world = World::new();
-        let entity = world.spawn_ent();
+        let entity = world.spawn_empty_ent();
         world.insert(entity, Position(1.5));
         world.insert(entity, Health(100));
 
@@ -956,7 +956,7 @@ mod tests {
     #[test]
     fn remove_with_only_component_returns_entity_to_empty_table() {
         let mut world = World::new();
-        let entity = world.spawn_ent();
+        let entity = world.spawn_empty_ent();
         world.insert(entity, Health(1));
 
         world.remove::<Health>(entity);
@@ -970,8 +970,8 @@ mod tests {
     #[test]
     fn remove_with_existing_target_table_reuses_table() {
         let mut world = World::new();
-        let reference = world.spawn_ent();
-        let entity = world.spawn_ent();
+        let reference = world.spawn_empty_ent();
+        let entity = world.spawn_empty_ent();
         world.insert(reference, Position(1.0));
         world.insert(entity, Position(2.0));
         world.insert(entity, Health(2));
@@ -988,7 +988,7 @@ mod tests {
     #[test]
     fn remove_with_new_target_table_creates_table() {
         let mut world = World::new();
-        let entity = world.spawn_ent();
+        let entity = world.spawn_empty_ent();
         world.insert(entity, Position(1.0));
         world.insert(entity, Health(1));
 
@@ -1006,9 +1006,9 @@ mod tests {
     #[test]
     fn remove_with_nothing_to_remove_returns_false() {
         let mut world = World::new();
-        let bare = world.spawn_ent();
-        let with_position = world.spawn_ent();
-        let despawned = world.spawn_ent();
+        let bare = world.spawn_empty_ent();
+        let with_position = world.spawn_empty_ent();
+        let despawned = world.spawn_empty_ent();
         world.insert(with_position, Position(1.0));
         world.insert(despawned, Health(1));
         world.despawn_ent(despawned);
@@ -1031,7 +1031,7 @@ mod tests {
     fn remove_with_drop_counter_drops_component_once() {
         let drops = Arc::new(AtomicUsize::new(0));
         let mut world = World::new();
-        let entity = world.spawn_ent();
+        let entity = world.spawn_empty_ent();
         world.insert(entity, build_counter(&drops));
         world.insert(entity, Health(1));
 
@@ -1044,8 +1044,8 @@ mod tests {
     #[test]
     fn remove_with_entity_leaving_first_row_keeps_other_components_in_place() {
         let mut world = World::new();
-        let first = world.spawn_ent();
-        let second = world.spawn_ent();
+        let first = world.spawn_empty_ent();
+        let second = world.spawn_empty_ent();
         for (value, entity) in [first, second].into_iter().enumerate() {
             world.insert(entity, Position(value as f32));
             world.insert(entity, Health(value as u32));
@@ -1063,9 +1063,9 @@ mod tests {
     #[test]
     fn get_with_varying_entities_returns_component_only_where_stored() {
         let mut world = World::new();
-        let stored = world.spawn_ent();
-        let bare = world.spawn_ent();
-        let despawned = world.spawn_ent();
+        let stored = world.spawn_empty_ent();
+        let bare = world.spawn_empty_ent();
+        let despawned = world.spawn_empty_ent();
         world.insert(stored, Health(5));
         world.insert(despawned, Health(6));
         world.despawn_ent(despawned);
@@ -1087,10 +1087,10 @@ mod tests {
     #[test]
     fn get_with_stale_handle_to_reused_slot_returns_none() {
         let mut world = World::new();
-        let stale = world.spawn_ent();
+        let stale = world.spawn_empty_ent();
         world.insert(stale, Health(1));
         world.despawn_ent(stale);
-        let reborn = world.spawn_ent();
+        let reborn = world.spawn_empty_ent();
         world.insert(reborn, Health(2));
 
         let through_stale = world.get::<Health>(stale);
@@ -1104,8 +1104,8 @@ mod tests {
     #[test]
     fn get_mut_with_stored_component_keeps_change() {
         let mut world = World::new();
-        let changed = world.spawn_ent();
-        let untouched = world.spawn_ent();
+        let changed = world.spawn_empty_ent();
+        let untouched = world.spawn_empty_ent();
         world.insert(changed, Health(1));
         world.insert(untouched, Health(1));
 
@@ -1121,8 +1121,8 @@ mod tests {
     #[test]
     fn get_mut_with_nothing_stored_returns_none() {
         let mut world = World::new();
-        let bare = world.spawn_ent();
-        let despawned = world.spawn_ent();
+        let bare = world.spawn_empty_ent();
+        let despawned = world.spawn_empty_ent();
         world.insert(despawned, Health(1));
         world.despawn_ent(despawned);
 
@@ -1138,8 +1138,8 @@ mod tests {
     fn drop_with_components_in_several_tables_drops_each_once() {
         let drops = Arc::new(AtomicUsize::new(0));
         let mut world = World::new();
-        let alone = world.spawn_ent();
-        let paired = world.spawn_ent();
+        let alone = world.spawn_empty_ent();
+        let paired = world.spawn_empty_ent();
         world.insert(alone, build_counter(&drops));
         world.insert(paired, build_counter(&drops));
         world.insert(paired, Health(1));

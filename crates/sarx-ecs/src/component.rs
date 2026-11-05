@@ -207,6 +207,10 @@ impl ComponentVec {
         self.data
     }
 
+    pub(crate) fn len(&self) -> usize {
+        self.len
+    }
+
     /// Returns a pointer to the start of the component at `index`.
     ///
     /// The method does not check bounds, meaning the pointer can lie past the end of the block.
@@ -226,55 +230,6 @@ impl ComponentVec {
     pub(crate) fn ptr_at(&self, index: usize) -> *mut u8 {
         let offset = index * self.info.layout.size();
         self.data.as_ptr().wrapping_add(offset)
-    }
-
-    /// Doubles the capacity, or sets it to 4 components where the capacity is 0.
-    ///
-    /// The components keep their indices. Every pointer that [`data`](Self::data) and
-    /// [`ptr_at`](Self::ptr_at) returned earlier stops being valid, even where the block stays at
-    /// the same address. Using one of those pointers afterwards is undefined behaviour.
-    ///
-    /// # Panics
-    ///
-    /// Panics where the component type has a size of zero, or where the new block would exceed
-    /// `isize::MAX` bytes. The program aborts where the allocator cannot supply the block.
-    fn grow(&mut self) {
-        // Keeps a type of size zero away from the allocator, which requires a size above zero
-        assert_ne!(
-            self.info.layout.size(),
-            0,
-            "a vector for a component type of size zero reached its limit of usize::MAX components"
-        );
-
-        let new_capacity = if self.capacity == 0 {
-            4
-        } else {
-            self.capacity * 2
-        };
-        let new_layout = array_layout(self.info.layout, new_capacity);
-
-        let new_data = if self.capacity == 0 {
-            // SAFETY: `alloc` requires a layout with a size above zero. The assert above means the
-            // type takes at least one byte. `new_layout` therefore takes at least four bytes, one
-            // for each of its four components
-            unsafe { alloc::alloc(new_layout) }
-        } else {
-            let old_layout = array_layout(self.info.layout, self.capacity);
-            // SAFETY: `realloc` has four requirements, and the call meets each one. The assert
-            // above means the type takes at least one byte.
-            //
-            // - The global allocator allocated the block. The capacity is above zero, meaning an
-            //   earlier call to `grow` allocated it.
-            // - `old_layout` matches the layout of that allocation exactly. `array_layout` builds
-            //   it from `self.capacity`, the capacity that the earlier call allocated.
-            // - The new size is above zero, since the type takes at least one byte.
-            // - The new size stays within `isize::MAX`. `array_layout` checks this, and panics
-            //   where it fails
-            unsafe { alloc::realloc(self.data.as_ptr(), old_layout, new_layout.size()) }
-        };
-
-        self.data = NonNull::new(new_data).unwrap_or_else(|| alloc::handle_alloc_error(new_layout));
-        self.capacity = new_capacity;
     }
 
     /// Copies one component from `value` onto the end of the vector.
@@ -369,23 +324,6 @@ impl ComponentVec {
         // which hold here for the same reasons. It also requires that nothing else accesses those
         // components while the slice exists, and the borrow of `&mut self` guarantees that
         unsafe { slice::from_raw_parts_mut(self.data.as_ptr().cast::<T>(), self.len) }
-    }
-
-    /// Checks that `T` is the component type that the vector stores.
-    ///
-    /// # Panics
-    ///
-    /// Panics where `T` differs from the stored type. The message contains both type names, and the
-    /// panic reports the line that called the outermost `#[track_caller]` method.
-    #[track_caller]
-    fn assert_stores<T: 'static>(&self) {
-        assert_eq!(
-            self.info.type_id,
-            TypeId::of::<T>(),
-            "the vector stores the component type `{}`, but the caller requested `{}`",
-            self.info.type_name,
-            any::type_name::<T>()
-        );
     }
 
     /// Moves the component at `index` onto the end of `target`, then fills `index` with the last
@@ -484,6 +422,73 @@ impl ComponentVec {
             unsafe { drop_component(self.ptr_at(last_idx)) };
         }
     }
+
+    /// Doubles the capacity, or sets it to 4 components where the capacity is 0.
+    ///
+    /// The components keep their indices. Every pointer that [`data`](Self::data) and
+    /// [`ptr_at`](Self::ptr_at) returned earlier stops being valid, even where the block stays at
+    /// the same address. Using one of those pointers afterwards is undefined behaviour.
+    ///
+    /// # Panics
+    ///
+    /// Panics where the component type has a size of zero, or where the new block would exceed
+    /// `isize::MAX` bytes. The program aborts where the allocator cannot supply the block.
+    fn grow(&mut self) {
+        // Keeps a type of size zero away from the allocator, which requires a size above zero
+        assert_ne!(
+            self.info.layout.size(),
+            0,
+            "a vector for a component type of size zero reached its limit of usize::MAX components"
+        );
+
+        let new_capacity = if self.capacity == 0 {
+            4
+        } else {
+            self.capacity * 2
+        };
+        let new_layout = array_layout(self.info.layout, new_capacity);
+
+        let new_data = if self.capacity == 0 {
+            // SAFETY: `alloc` requires a layout with a size above zero. The assert above means the
+            // type takes at least one byte. `new_layout` therefore takes at least four bytes, one
+            // for each of its four components
+            unsafe { alloc::alloc(new_layout) }
+        } else {
+            let old_layout = array_layout(self.info.layout, self.capacity);
+            // SAFETY: `realloc` has four requirements, and the call meets each one. The assert
+            // above means the type takes at least one byte.
+            //
+            // - The global allocator allocated the block. The capacity is above zero, meaning an
+            //   earlier call to `grow` allocated it.
+            // - `old_layout` matches the layout of that allocation exactly. `array_layout` builds
+            //   it from `self.capacity`, the capacity that the earlier call allocated.
+            // - The new size is above zero, since the type takes at least one byte.
+            // - The new size stays within `isize::MAX`. `array_layout` checks this, and panics
+            //   where it fails
+            unsafe { alloc::realloc(self.data.as_ptr(), old_layout, new_layout.size()) }
+        };
+
+        self.data = NonNull::new(new_data).unwrap_or_else(|| alloc::handle_alloc_error(new_layout));
+        self.capacity = new_capacity;
+    }
+
+    /// Checks that `T` is the component type that the vector stores.
+    ///
+    /// # Panics
+    ///
+    /// Panics where `T` differs from the stored type. The message contains both type names, and the
+    /// panic reports the line that called the outermost `#[track_caller]` method.
+    #[track_caller]
+    fn assert_stores<T: 'static>(&self) {
+        assert_eq!(
+            self.info.type_id,
+            TypeId::of::<T>(),
+            "the vector stores the component type `{}`, but the caller requested `{}`",
+            self.info.type_name,
+            any::type_name::<T>()
+        );
+    }
+
 }
 
 impl Drop for ComponentVec {
@@ -602,7 +607,6 @@ impl ComponentInfo {
 // ========================================================================================== \\
 //                                          Helpers                                           \\
 // ========================================================================================== \\
-
 /// Drops the `T` that `pointer` points at.
 ///
 /// # Safety

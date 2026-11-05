@@ -260,6 +260,7 @@ impl Archetype {
     pub(crate) fn remove_entity(&mut self, row: usize) -> Option<Entity> {
         // Panics before anything changes, where `row` lies past the last entity
         assert!(row < self.entities.len(), "the row must be below the number of entities");
+        debug_assert!(self.has_one_component_per_entity(), "every column must have one component for each row");
 
         // Ends the program where anything below panics, since the columns would then be out of line
         let guard = AbortOnUnwind;
@@ -274,58 +275,6 @@ impl Archetype {
         mem::forget(guard);
 
         // Returns the entity that now occupies `row`, or `None` where `row` was the last row
-        self.entities.get(row).copied()
-    }
-
-    /// Moves the entity at `row` and its components to a new row at the end of `target`.
-    ///
-    /// The last row in this table then fills `row`, in the entity list and in every column.
-    ///
-    /// The method returns the entity that now occupies `row`, or `None` where `row` was the last
-    /// row, since no other entity changes row. The moved entity now occupies row `target.len() - 1`.
-    /// The caller MUST update the location that it records for both entities, as the module
-    /// documentation sets out.
-    ///
-    /// # Panics
-    ///
-    /// Panics where `target` lacks a column for a component type in this table. A move to a table
-    /// with fewer component types therefore panics.
-    ///
-    /// Panics where the entity list in `target` is full and a larger block would exceed `isize::MAX`
-    /// bytes. The program aborts where the allocator cannot supply that block. A full column can
-    /// also panic or abort, as [`ComponentVec::move_component`] sets out.
-    ///
-    /// The method moves one column at a time. A panic at any point therefore leaves this table and
-    /// `target` out of line, with some components already moved. The caller MUST NOT use either table
-    /// after catching such a panic.
-    ///
-    /// # Safety
-    ///
-    /// The caller MUST guarantee two things:
-    ///
-    /// - `row` is below the length of the entity list and of every column. Where a column is too
-    ///   short, every build panics at that column, before it moves anything. Where the entity list
-    ///   is too short, every build panics, after the columns have moved their components.
-    /// - The caller pushes one component onto each column that `target` has and this table lacks,
-    ///   before anything else uses `target`. A missing component has the effects that
-    ///   [`push_entity`](Self::push_entity) sets out.
-    pub(crate) unsafe fn move_entity(
-        &mut self,
-        row: usize,
-        target: &mut Archetype,
-    ) -> Option<Entity> {
-        for components in &mut self.components {
-            let type_id = components.info().type_id();
-            let target_components = target
-                .mut_components_of(type_id)
-                .expect("the target archetype should store every component type of the source");
-            // SAFETY: `move_component` requires an index below the length and a target of the same
-            // type. The caller MUST guarantee that `row` is below the length of every column, and
-            // `mut_components_of` returns the target column with this `TypeId`
-            unsafe { components.move_component(row, target_components) };
-        }
-        let entity = self.entities.swap_remove(row);
-        target.entities.push(entity);
         self.entities.get(row).copied()
     }
 
@@ -365,6 +314,8 @@ impl Archetype {
     ) -> Option<Entity> {
         // Panics before anything changes, where `row` lies past the last entity
         assert!(row < self.entities.len(), "the row must be below the number of entities");
+        debug_assert!(self.has_one_component_per_entity(), "every column must have one component for each row");
+        debug_assert!(target.has_one_component_per_entity(), "every target column must have one component for each row");
 
         // Ends the program where anything below panics, since the tables would then be out of line
         let guard = AbortOnUnwind;
@@ -394,6 +345,11 @@ impl Archetype {
 
         // Returns the entity that now occupies `row`, or `None` where `row` was the last row
         self.entities.get(row).copied()
+    }
+
+    fn has_one_component_per_entity(&self) -> bool {
+        let ent_count = self.entities.len();
+        self.components.iter().all(|components| components.len() == ent_count)
     }
 }
 

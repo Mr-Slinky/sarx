@@ -56,8 +56,7 @@ one rotation to another, along the shortest arc between them.
 To change the hand's goal, Sarx changes the target pose. Each bone then starts its turn from its
 rotation at that moment. A hand part-way into one pose therefore turns smoothly towards the next.
 
-The rate at which a bone turns awaits a separate decision. The rate could be a fixed angle per
-update, or a fixed fraction of the angle that remains. A further decision must choose whether the
+ADR 0015 sets how far a bone turns on each update. A further decision must choose whether the
 update runs in the simulation step or in the renderer, and that decision must agree with ADR 0005.
 
 ### Consequences

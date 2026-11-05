@@ -68,22 +68,23 @@ decided, and why.
 Every ADR is stored in `docs/adr/`. The table below lists them all, with a one-line summary of each.
 The format of an ADR is set out further down, under Conventions.
 
-| ADR                                                      | Decision                        | In short                                                                                            |
-|----------------------------------------------------------|---------------------------------|-----------------------------------------------------------------------------------------------------|
-| [0001](docs/adr/0001-window-library.md)                  | winit as the window library     | Sarx opens its window and receives its events through winit                                         |
-| [0002](docs/adr/0002-graphics-library.md)                | wgpu as the graphics library    | Sarx draws through wgpu, which runs on DirectX 12, Vulkan, Metal and OpenGL                         |
-| [0003](docs/adr/0003-windows-first.md)                   | Windows first                   | Sarx is built and tested on Windows, within GPU limits that a mid-level laptop meets                |
-| [0004](docs/adr/0004-flat-world.md)                      | A flat world                    | The land is a flat heightmap, a grid of terrain heights, as in Black & White 2                      |
-| [0005](docs/adr/0005-simulation-apart-from-rendering.md) | Simulation apart from rendering | The simulation advances in fixed steps on every device, and the renderer draws the latest state     |
-| [0006](docs/adr/0006-central-ai.md)                      | Central AI                      | A planner decides for a whole group, such as a village, and each villager carries out a simple task |
-| [0007](docs/adr/0007-one-gate-for-every-change.md)       | One gate for every change       | Every change to the world arrives as a request, which one gate checks against the level's rules     |
-| [0008](docs/adr/0008-one-level-format.md)                | One level format                | The game loads generated and hand-built levels from data in one format, through the same code       |
-| [0009](docs/adr/0009-hand-built-ecs.md)                  | A hand-built ECS                | The author writes the entity component system, rather than taking on an ECS library                 |
-| [0010](docs/adr/0010-hand-built-physics.md)              | A hand-built physics engine     | The author writes the physics engine, which runs on the ECS                                         |
-| [0011](docs/adr/0011-archetype-component-storage.md)     | Archetype component storage     | The ECS stores each entity in a table for its exact set of components, one column per component     |
-| [0012](docs/adr/0012-stylised-art.md)                    | Stylised art                    | Sarx looks stylised, as Astro Bot does, and builds each villager from separate rigid parts          |
-| [0013](docs/adr/0013-miri-for-unsafe-code.md)            | Miri for unsafe code            | Tests for `unsafe` code also run under Miri, a nightly-only tool that detects undefined behaviour   |
-| [0014](docs/adr/0014-hand-poses-as-target-keyframes.md)  | Hand poses as target keyframes  | Each hand pose is a one-keyframe glTF animation, and each bone turns towards it by slerp            |
+| ADR                                                                  | Decision                        | In short                                                                                            |
+|----------------------------------------------------------------------|---------------------------------|-----------------------------------------------------------------------------------------------------|
+| [0001](docs/adr/0001-window-library.md)                              | winit as the window library     | Sarx opens its window and receives its events through winit                                         |
+| [0002](docs/adr/0002-graphics-library.md)                            | wgpu as the graphics library    | Sarx draws through wgpu, which runs on DirectX 12, Vulkan, Metal and OpenGL                         |
+| [0003](docs/adr/0003-windows-first.md)                               | Windows first                   | Sarx is built and tested on Windows, within GPU limits that a mid-level laptop meets                |
+| [0004](docs/adr/0004-flat-world.md)                                  | A flat world                    | The land is a flat heightmap, a grid of terrain heights, as in Black & White 2                      |
+| [0005](docs/adr/0005-simulation-apart-from-rendering.md)             | Simulation apart from rendering | The simulation advances in fixed steps on every device, and the renderer draws the latest state     |
+| [0006](docs/adr/0006-central-ai.md)                                  | Central AI                      | A planner decides for a whole group, such as a village, and each villager carries out a simple task |
+| [0007](docs/adr/0007-one-gate-for-every-change.md)                   | One gate for every change       | Every change to the world arrives as a request, which one gate checks against the level's rules     |
+| [0008](docs/adr/0008-one-level-format.md)                            | One level format                | The game loads generated and hand-built levels from data in one format, through the same code       |
+| [0009](docs/adr/0009-hand-built-ecs.md)                              | A hand-built ECS                | The author writes the entity component system, rather than taking on an ECS library                 |
+| [0010](docs/adr/0010-hand-built-physics.md)                          | A hand-built physics engine     | The author writes the physics engine, which runs on the ECS                                         |
+| [0011](docs/adr/0011-archetype-component-storage.md)                 | Archetype component storage     | The ECS stores each entity in a table for its exact set of components, one column per component     |
+| [0012](docs/adr/0012-stylised-art.md)                                | Stylised art                    | Sarx looks stylised, as Astro Bot does, and builds each villager from separate rigid parts          |
+| [0013](docs/adr/0013-miri-for-unsafe-code.md)                        | Miri for unsafe code            | Tests for `unsafe` code also run under Miri, a nightly-only tool that detects undefined behaviour   |
+| [0014](docs/adr/0014-hand-poses-as-target-keyframes.md)              | Hand poses as target keyframes  | Each hand pose is a one-keyframe glTF animation, and each bone turns towards it by slerp            |
+| [0015](docs/adr/0015-hand-bone-turns-by-critically-damped-spring.md) | Hand bone turns by spring       | Each hand bone turns towards its pose by a critically damped spring, which eases in and out         |
 
 ## Workspace
 

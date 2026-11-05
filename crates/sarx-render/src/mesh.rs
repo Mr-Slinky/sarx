@@ -19,7 +19,7 @@ use wgpu::{BufferAddress, VertexAttribute, VertexBufferLayout, VertexFormat, Ver
 ///
 /// ```ignore
 /// // Copies the vertices into a vertex buffer, using the bytes that `to_bytes` returns
-/// let mesh = Mesh::triangle();
+/// let mesh = Mesh::build_triangle();
 /// let contents = mesh.to_bytes();
 /// let descriptor = BufferInitDescriptor {
 ///     label: Some("Mesh vertices"),
@@ -62,10 +62,10 @@ impl Mesh {
     /// The triangle has one vertex for each of its three corners.
     ///
     /// ```ignore
-    /// let triangle = Mesh::triangle();
+    /// let triangle = Mesh::build_triangle();
     /// assert_eq!(triangle.vertex_count(), 3); // one vertex for each corner
     /// ```
-    pub(crate) fn triangle() -> Self {
+    pub(crate) fn build_triangle() -> Self {
         Self {
             vertices: vec![
                 [ 0.0,  0.5, 0.0], // top corner
@@ -82,7 +82,7 @@ impl Mesh {
     /// A triangle has three vertices.
     ///
     /// ```ignore
-    /// let triangle = Mesh::triangle();
+    /// let triangle = Mesh::build_triangle();
     /// assert_eq!(triangle.vertex_count(), 3);
     /// ```
     pub(crate) fn vertex_count(&self) -> u32 {
@@ -100,7 +100,7 @@ impl Mesh {
     ///
     /// ```ignore
     /// // Three vertices of three coordinates, at four bytes each
-    /// let bytes = Mesh::triangle().to_bytes();
+    /// let bytes = Mesh::build_triangle().to_bytes();
     /// assert_eq!(bytes.len(), 36);
     ///
     /// // The first four bytes are the x coordinate of the top corner
@@ -114,4 +114,5 @@ impl Mesh {
             .flat_map(|coordinate| coordinate.to_ne_bytes())
             .collect()
     }
+
 }

@@ -16,7 +16,8 @@
 //!
 //! # Masks
 //!
-//! A table has a mask, which is a `u64` with one set bit for each component type that it stores.
+//! A table has a mask, which is a [`ComponentMask`] with one set bit for each component type that it
+//! stores.
 //! Each bit comes from the [`ComponentInfo`] for that type, which describes the type to the table.
 //!
 //! A caller that wants a set of component types builds a mask of those types. It then passes that
@@ -46,8 +47,8 @@
 //! struct Health(u32);
 //!
 //! // Creates a table for `{Position}`, and a table for `{Position, Health}`
-//! let position = ComponentInfo::of::<Position>(0b01);
-//! let health = ComponentInfo::of::<Health>(0b10);
+//! let position = ComponentInfo::of::<Position>(ComponentMask::single(0));
+//! let health = ComponentInfo::of::<Health>(ComponentMask::single(1));
 //! let mut source = Archetype::new(&[position]);
 //! let mut target = Archetype::new(&[position, health]);
 //!
@@ -82,6 +83,7 @@
 
 use crate::Entity;
 use crate::component::{ComponentInfo, ComponentVec};
+use crate::mask::ComponentMask;
 use std::any::TypeId;
 use std::{mem, process};
 
@@ -100,7 +102,7 @@ pub(crate) struct Archetype {
     /// Stores the entity that owns each row, in row order.
     entities: Vec<Entity>,
     /// Stores one set bit for each component type in `components`.
-    mask: u64,
+    mask: ComponentMask,
 }
 
 impl Archetype {
@@ -108,7 +110,7 @@ impl Archetype {
     /// entries in any order.
     ///
     /// The mask combines the bit from each entry. An empty `infos` gives a table with no columns and
-    /// a mask of 0.
+    /// the mask [`ComponentMask::EMPTY`].
     ///
     /// The caller MUST pass each component type once, with a bit that follows the rules in
     /// [`ComponentInfo::of`]. A type passed twice with two different bits gets two columns. A search
@@ -124,15 +126,14 @@ impl Archetype {
             infos.iter().map(|info| ComponentVec::new(*info)).collect();
         // Sorts the columns by `TypeId`, which the binary search in `find_index_of` requires
         components.sort_by_key(|components| components.info().type_id());
-        let mut mask = 0;
+        let mut mask = ComponentMask::EMPTY;
         for info in infos {
             // Stops two types from sharing a bit, which would make queries treat them as one type
-            assert_eq!(
-                mask & info.bit(),
-                0,
+            assert!(
+                !mask.intersects(info.bit()),
                 "two component types in one table share a mask bit"
             );
-            mask = mask | info.bit();
+            mask |= info.bit();
         }
 
         Self {
@@ -187,17 +188,17 @@ impl Archetype {
     }
 
     /// Returns the mask of the table, with one set bit for each component type that it stores.
-    pub(crate) fn mask(&self) -> u64 {
+    pub(crate) fn mask(&self) -> ComponentMask {
         self.mask
     }
 
     /// Returns `true` where the table stores every component type in `query_mask`, and `false` where
     /// it lacks at least one.
     ///
-    /// A `query_mask` of 0 does not ask for any component types, and the method then returns `true`
-    /// for every table.
-    pub(crate) fn has_all(&self, query_mask: u64) -> bool {
-        self.mask & query_mask == query_mask
+    /// A `query_mask` of [`ComponentMask::EMPTY`] does not ask for any component types, and the
+    /// method then returns `true` for every table.
+    pub(crate) fn has_all(&self, query_mask: ComponentMask) -> bool {
+        self.mask.contains_all(query_mask)
     }
 
     /// Adds `entity` to the end of the entity list, which gives it the row `len() - 1`, measured
@@ -231,11 +232,14 @@ impl Archetype {
     ///
     /// # Panics
     ///
-    /// Panics where `row` is not below the length of the entity list and of every column.
+    /// Panics where `row` is not below the length of the entity list, before anything changes.
     ///
-    /// Also panics where the `Drop` implementation of a component panics. The method removes one
-    /// column at a time, meaning a panic at any point can leave the columns and the entity list out
-    /// of line. The caller MUST NOT use the table after catching such a panic.
+    /// # Aborts
+    ///
+    /// The program aborts where any panic occurs once the removal has started, such as a panic in
+    /// the `Drop` implementation of a component. The panic message prints first. The method removes
+    /// one column at a time, meaning such a panic would leave the columns and the entity list out of
+    /// line. Ending the program stops any later call from using the table in that state.
     pub(crate) fn remove_entity(&mut self, row: usize) -> Option<Entity> {
         // Panics before anything changes, where `row` lies past the last entity
         assert!(row < self.entities.len(), "the row must be below the number of entities");
@@ -283,9 +287,8 @@ impl Archetype {
     /// The caller MUST guarantee two things:
     ///
     /// - `row` is below the length of the entity list and of every column. Where a column is too
-    ///   short, a debug build panics, and a release build reads past the end of that column, which
-    ///   is undefined behaviour. Where the entity list is too short, every build panics, after the
-    ///   columns have moved their components.
+    ///   short, every build panics at that column, before it moves anything. Where the entity list
+    ///   is too short, every build panics, after the columns have moved their components.
     /// - The caller pushes one component onto each column that `target` has and this table lacks,
     ///   before anything else uses `target`. A missing component has the effects that
     ///   [`push_entity`](Self::push_entity) sets out.
@@ -321,15 +324,21 @@ impl Archetype {
     ///
     /// # Panics
     ///
-    /// Panics as [`move_entity`](Self::move_entity) does. Also panics where the clean-up code of a
-    /// dropped component panics. The caller MUST NOT use either table after catching any such panic.
+    /// Panics where `row` is not below the length of the entity list, before anything changes.
+    ///
+    /// # Aborts
+    ///
+    /// The program aborts where any panic occurs once the move has started, such as a panic in the
+    /// `Drop` implementation of a dropped component. The panic message prints first. The method
+    /// moves one column at a time, meaning such a panic would leave this table and `target` out of
+    /// line. Ending the program stops any later call from using either table in that state.
     ///
     /// # Safety
     ///
     /// The caller MUST guarantee two things:
     ///
-    /// - `row` is below the length of the entity list and of every column. The consequences match those
-    ///   that [`move_entity`](Self::move_entity) sets out.
+    /// - `row` is below the length of every column. A column that is too short panics, and the
+    ///   program then aborts, as the Aborts section sets out.
     /// - This table has a column for every column in `target`. A column that this table lacks ends up
     ///   one row short, with the effects that [`push_entity`](Self::push_entity) sets out.
     pub(crate) unsafe fn move_entity_dropping(
@@ -375,9 +384,20 @@ impl Archetype {
 //                                          Helpers                                           \\
 // ========================================================================================== \\
 
+/// Ends the program when dropped, which happens only where a panic unwinds past it.
+///
+/// A method creates the guard before a change that leaves the table out of line part of the way
+/// through, then passes the guard to [`mem::forget`] once the change is complete. A panic before
+/// that point unwinds the stack, which drops the guard and thereby aborts the program. Any code
+/// that would catch the panic never runs, meaning nothing can use the table while it is out of
+/// line.
+///
+/// The abort rests on the decision that `ComponentVec` also takes, which treats a panicking `Drop`
+/// as a bug in the component.
 struct AbortOnUnwind;
 
 impl Drop for AbortOnUnwind {
+    /// Aborts the program. The panic hook has already printed the panic message by this point.
     fn drop(&mut self) {
         process::abort();
     }
@@ -441,16 +461,16 @@ mod tests {
     /// Checks the starting state of a table, from no columns up to a bit at the top of the mask
     #[test]
     fn new_with_varying_infos_returns_empty_table_with_combined_mask() {
-        let position = ComponentInfo::of::<Position>(0b01);
-        let health = ComponentInfo::of::<Health>(0b10);
-        let name = ComponentInfo::of::<String>(1 << 63);
+        let position = ComponentInfo::of::<Position>(ComponentMask::single(0));
+        let health = ComponentInfo::of::<Health>(ComponentMask::single(1));
+        let name = ComponentInfo::of::<String>(ComponentMask::single(63));
 
         // Lists the entries, the number of columns they should give, and the mask they should give
         let cases = [
-            ("no entries", vec![], 0, 0),
-            ("one entry", vec![position], 1, 0b01),
-            ("two entries", vec![position, health], 2, 0b11),
-            ("highest bit", vec![position, name], 2, (1 << 63) | 0b01),
+            ("no entries", vec![], 0, ComponentMask::EMPTY),
+            ("one entry", vec![position], 1, ComponentMask::from_positions(&[0])),
+            ("two entries", vec![position, health], 2, ComponentMask::from_positions(&[0, 1])),
+            ("highest bit", vec![position, name], 2, ComponentMask::from_positions(&[0, 63])),
         ];
 
         for (label, infos, columns, mask) in cases {
@@ -466,8 +486,8 @@ mod tests {
     #[test]
     #[should_panic]
     fn new_with_shared_bit_panics() {
-        let position = ComponentInfo::of::<Position>(0b01);
-        let health = ComponentInfo::of::<Health>(0b01);
+        let position = ComponentInfo::of::<Position>(ComponentMask::single(0));
+        let health = ComponentInfo::of::<Health>(ComponentMask::single(0));
 
         Archetype::new(&[position, health]);
     }
@@ -475,16 +495,16 @@ mod tests {
     /// Checks that the entry order makes no difference, and that each bit stays with its type
     #[test]
     fn infos_with_any_entry_order_returns_each_type_and_bit_sorted_by_type_id() {
-        let position = ComponentInfo::of::<Position>(0b001);
-        let health = ComponentInfo::of::<Health>(0b010);
-        let name = ComponentInfo::of::<String>(0b100);
+        let position = ComponentInfo::of::<Position>(ComponentMask::single(0));
+        let health = ComponentInfo::of::<Health>(ComponentMask::single(1));
+        let name = ComponentInfo::of::<String>(ComponentMask::single(2));
 
         let mut expected = vec![
-            (TypeId::of::<Position>(), 0b001),
-            (TypeId::of::<Health>(), 0b010),
-            (TypeId::of::<String>(), 0b100),
+            (TypeId::of::<Position>(), ComponentMask::single(0)),
+            (TypeId::of::<Health>(), ComponentMask::single(1)),
+            (TypeId::of::<String>(), ComponentMask::single(2)),
         ];
-        expected.sort();
+        expected.sort_by_key(|(type_id, _)| *type_id);
 
         let cases = [
             [position, health, name],
@@ -495,7 +515,7 @@ mod tests {
         for (case, infos) in cases.iter().enumerate() {
             let table = Archetype::new(infos);
 
-            let found: Vec<(TypeId, u64)> = table
+            let found: Vec<(TypeId, ComponentMask)> = table
                 .infos()
                 .iter()
                 .map(|info| (info.type_id(), info.bit()))
@@ -511,7 +531,7 @@ mod tests {
         let cases = [0_u32, 1, 5];
 
         for count in cases {
-            let mut table = Archetype::new(&[ComponentInfo::of::<Health>(1)]);
+            let mut table = Archetype::new(&[ComponentInfo::of::<Health>(ComponentMask::single(0))]);
             for index in 0..count {
                 push_row(&mut table, Entity::new(index, 0), Health(index));
             }
@@ -524,11 +544,11 @@ mod tests {
     #[test]
     fn components_of_with_stored_and_absent_types_finds_only_stored_columns() {
         let infos = [
-            ComponentInfo::of::<u8>(1 << 0),
-            ComponentInfo::of::<u16>(1 << 1),
-            ComponentInfo::of::<u32>(1 << 2),
-            ComponentInfo::of::<u64>(1 << 3),
-            ComponentInfo::of::<String>(1 << 4),
+            ComponentInfo::of::<u8>(ComponentMask::single(0)),
+            ComponentInfo::of::<u16>(ComponentMask::single(1)),
+            ComponentInfo::of::<u32>(ComponentMask::single(2)),
+            ComponentInfo::of::<u64>(ComponentMask::single(3)),
+            ComponentInfo::of::<String>(ComponentMask::single(4)),
         ];
 
         for count in 0..=infos.len() {
@@ -553,8 +573,8 @@ mod tests {
     /// Checks that a push through the returned column reaches that column and no other
     #[test]
     fn mut_components_of_with_stored_type_returns_column_that_keeps_pushes() {
-        let position = ComponentInfo::of::<Position>(0b01);
-        let health = ComponentInfo::of::<Health>(0b10);
+        let position = ComponentInfo::of::<Position>(ComponentMask::single(0));
+        let health = ComponentInfo::of::<Health>(ComponentMask::single(1));
         let mut table = Archetype::new(&[position, health]);
 
         let column = table
@@ -573,7 +593,7 @@ mod tests {
     /// Checks that a type outside the table gives no column to change
     #[test]
     fn mut_components_of_with_absent_type_returns_none() {
-        let mut table = Archetype::new(&[ComponentInfo::of::<Position>(1)]);
+        let mut table = Archetype::new(&[ComponentInfo::of::<Position>(ComponentMask::single(0))]);
 
         let found = table.mut_components_of(TypeId::of::<Health>());
 
@@ -583,19 +603,20 @@ mod tests {
     /// Checks the query masks that match a table, along with the ones that ask for too much
     #[test]
     fn has_all_with_varying_query_masks_returns_expected_answer() {
-        let position = ComponentInfo::of::<Position>(0b0001);
-        let health = ComponentInfo::of::<Health>(0b0100);
+        let position = ComponentInfo::of::<Position>(ComponentMask::single(0));
+        let health = ComponentInfo::of::<Health>(ComponentMask::single(2));
         let table = Archetype::new(&[position, health]);
 
         // Pairs each query mask with the answer that it should give
+        let every_position: Vec<usize> = (0..ComponentMask::CAPACITY).collect();
         let cases = [
-            (0b0101, true),
-            (0b0001, true),
-            (0b0100, true),
-            (0, true),
-            (0b0010, false),
-            (0b0111, false),
-            (u64::MAX, false),
+            (ComponentMask::from_positions(&[0, 2]), true),
+            (ComponentMask::from_positions(&[0]), true),
+            (ComponentMask::from_positions(&[2]), true),
+            (ComponentMask::EMPTY, true),
+            (ComponentMask::from_positions(&[1]), false),
+            (ComponentMask::from_positions(&[0, 1, 2]), false),
+            (ComponentMask::from_positions(&every_position), false),
         ];
 
         for (query_mask, expected) in cases {
@@ -612,8 +633,8 @@ mod tests {
     fn has_all_with_empty_table_matches_only_zero_mask() {
         let table = Archetype::new(&[]);
 
-        let matches_zero = table.has_all(0);
-        let matches_one = table.has_all(1);
+        let matches_zero = table.has_all(ComponentMask::EMPTY);
+        let matches_one = table.has_all(ComponentMask::single(0));
 
         assert!(matches_zero, "answer for query mask 0");
         assert!(!matches_one, "answer for query mask 1");
@@ -628,7 +649,7 @@ mod tests {
             Entity::new(1, 1),
             Entity::new(u32::MAX, u32::MAX),
         ];
-        let mut table = Archetype::new(&[ComponentInfo::of::<Health>(1)]);
+        let mut table = Archetype::new(&[ComponentInfo::of::<Health>(ComponentMask::single(0))]);
 
         for (row, entity) in entities.into_iter().enumerate() {
             push_row(&mut table, entity, Health(row as u32));
@@ -641,7 +662,7 @@ mod tests {
     #[test]
     fn push_entity_with_component_pushed_afterwards_lines_up_rows() {
         let entity = Entity::new(0, 0);
-        let mut table = Archetype::new(&[ComponentInfo::of::<Health>(1)]);
+        let mut table = Archetype::new(&[ComponentInfo::of::<Health>(ComponentMask::single(0))]);
 
         // SAFETY: `push_entity` requires one new component in every column. The line below pushes
         // one onto `Health`, which is the only column
@@ -655,7 +676,7 @@ mod tests {
     /// Checks that the last row fills the empty row, in the entity list and in the column
     #[test]
     fn move_entity_with_middle_row_fills_gap_with_last_row() {
-        let position = ComponentInfo::of::<Position>(1);
+        let position = ComponentInfo::of::<Position>(ComponentMask::single(0));
         let mut source = Archetype::new(&[position]);
         let mut target = Archetype::new(&[position]);
         let entities = [
@@ -694,7 +715,7 @@ mod tests {
         let cases = [1_u32, 2, 5];
 
         for count in cases {
-            let position = ComponentInfo::of::<Position>(1);
+            let position = ComponentInfo::of::<Position>(ComponentMask::single(0));
             let mut source = Archetype::new(&[position]);
             let mut target = Archetype::new(&[position]);
             for index in 0..count {
@@ -725,7 +746,7 @@ mod tests {
     /// Checks that a moved entity joins the end of the target, after the rows already there
     #[test]
     fn move_entity_with_occupied_target_adds_row_at_end() {
-        let position = ComponentInfo::of::<Position>(1);
+        let position = ComponentInfo::of::<Position>(ComponentMask::single(0));
         let mut source = Archetype::new(&[position]);
         let mut target = Archetype::new(&[position]);
         let moved = Entity::new(0, 0);
@@ -748,7 +769,7 @@ mod tests {
     /// Checks that a move into a full target grows its column, and keeps its rows in order
     #[test]
     fn move_entity_with_full_target_keeps_rows_in_order() {
-        let health = ComponentInfo::of::<Health>(1);
+        let health = ComponentInfo::of::<Health>(ComponentMask::single(0));
         let mut source = Archetype::new(&[health]);
         let mut target = Archetype::new(&[health]);
         // Fills the target column to its first capacity of 4 components
@@ -774,7 +795,7 @@ mod tests {
     /// Checks that repeated moves report each filling entity, and empty the source
     #[test]
     fn move_entity_with_repeated_moves_empties_source() {
-        let health = ComponentInfo::of::<Health>(1);
+        let health = ComponentInfo::of::<Health>(ComponentMask::single(0));
         let mut source = Archetype::new(&[health]);
         let mut target = Archetype::new(&[health]);
         let first = Entity::new(0, 0);
@@ -811,9 +832,9 @@ mod tests {
     /// Checks that a whole row moves together, as the entity gains a component in a larger table
     #[test]
     fn move_entity_with_several_columns_keeps_rows_together() {
-        let position = ComponentInfo::of::<Position>(0b001);
-        let name = ComponentInfo::of::<String>(0b010);
-        let health = ComponentInfo::of::<Health>(0b100);
+        let position = ComponentInfo::of::<Position>(ComponentMask::single(0));
+        let name = ComponentInfo::of::<String>(ComponentMask::single(1));
+        let health = ComponentInfo::of::<Health>(ComponentMask::single(2));
 
         let mut source = Archetype::new(&[position, name]);
         let mut target = Archetype::new(&[name, health, position]);
@@ -885,7 +906,7 @@ mod tests {
     fn move_entity_with_zero_size_type_moves_count() {
         struct Tag;
 
-        let tag = ComponentInfo::of::<Tag>(1);
+        let tag = ComponentInfo::of::<Tag>(ComponentMask::single(0));
         let mut source = Archetype::new(&[tag]);
         let mut target = Archetype::new(&[tag]);
         push_row(&mut source, Entity::new(0, 0), Tag);
@@ -903,7 +924,7 @@ mod tests {
     #[test]
     fn move_entity_with_drop_counters_drops_each_component_once() {
         let drops = Arc::new(AtomicUsize::new(0));
-        let counter = ComponentInfo::of::<DropCounter>(1);
+        let counter = ComponentInfo::of::<DropCounter>(ComponentMask::single(0));
         let mut source = Archetype::new(&[counter]);
         let mut target = Archetype::new(&[counter]);
         for index in 0..3 {
@@ -930,9 +951,9 @@ mod tests {
     #[test]
     #[should_panic]
     fn move_entity_with_missing_target_column_panics() {
-        let position = ComponentInfo::of::<Position>(1);
+        let position = ComponentInfo::of::<Position>(ComponentMask::single(0));
         let mut source = Archetype::new(&[position]);
-        let mut target = Archetype::new(&[ComponentInfo::of::<Health>(1)]);
+        let mut target = Archetype::new(&[ComponentInfo::of::<Health>(ComponentMask::single(0))]);
         push_row(&mut source, Entity::new(0, 0), Position(1.0));
 
         // SAFETY: `move_entity` requires a row in range, and a push onto each new column in the
@@ -940,11 +961,11 @@ mod tests {
         unsafe { source.move_entity(0, &mut target) };
     }
 
-    /// Checks that a debug build catches a row past the end of the columns
+    /// Checks that every build catches a row past the end of the columns
     #[test]
     #[should_panic]
     fn move_entity_with_out_of_range_row_panics() {
-        let position = ComponentInfo::of::<Position>(1);
+        let position = ComponentInfo::of::<Position>(ComponentMask::single(0));
         let mut source = Archetype::new(&[position]);
         let mut target = Archetype::new(&[position]);
         push_row(&mut source, Entity::new(0, 0), Position(1.0));
@@ -958,7 +979,7 @@ mod tests {
     #[test]
     #[should_panic]
     fn move_entity_with_short_entity_list_panics() {
-        let position = ComponentInfo::of::<Position>(1);
+        let position = ComponentInfo::of::<Position>(ComponentMask::single(0));
         let mut source = Archetype::new(&[position]);
         let mut target = Archetype::new(&[position]);
         push_component(&mut source, Position(1.0));
@@ -975,7 +996,7 @@ mod tests {
 
         for count in cases {
             let drops = Arc::new(AtomicUsize::new(0));
-            let mut table = Archetype::new(&[ComponentInfo::of::<DropCounter>(1)]);
+            let mut table = Archetype::new(&[ComponentInfo::of::<DropCounter>(ComponentMask::single(0))]);
             for index in 0..count {
                 let value = DropCounter {
                     drops: Arc::clone(&drops),
@@ -996,7 +1017,7 @@ mod tests {
     /// Checks that threads can read one table together, and that a table can move to a thread
     #[test]
     fn components_of_with_several_threads_returns_same_components() {
-        let mut table = Archetype::new(&[ComponentInfo::of::<u32>(1)]);
+        let mut table = Archetype::new(&[ComponentInfo::of::<u32>(ComponentMask::single(0))]);
         for value in [1_u32, 2, 3, 4] {
             push_row(&mut table, Entity::new(value, 0), value);
         }

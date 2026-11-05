@@ -19,9 +19,9 @@
 //! # Masks
 //!
 //! The world gives each component type a bit, the first time that it meets the type. The first type
-//! takes bit 0, the second takes bit 1, and the order continues up to bit 63. A mask is a `u64` that
-//! combines the bits of a set of types. A `u64` has 64 bits, meaning a world has room for 64
-//! component types.
+//! takes bit 0, the second takes bit 1, and the order continues up to the last bit. A mask is a
+//! [`ComponentMask`] that combines the bits of a set of types. A world has room for as many
+//! component types as a mask has bits, which [`ComponentMask::CAPACITY`] defines.
 //!
 //! Each table has the mask of its set of types. The world keeps a map from each mask to its table.
 //! It finds the table for a set of types by building the mask of that set, then looking the mask up
@@ -55,6 +55,7 @@
 use crate::Entity;
 use crate::archetype::Archetype;
 use crate::component::ComponentInfo;
+use crate::mask::ComponentMask;
 use std::any::TypeId;
 use std::collections::HashMap;
 
@@ -100,9 +101,9 @@ pub struct World {
     archetypes: Vec<Archetype>,
     /// Maps the mask of each table to its position in `archetypes`. A lookup in the map finds a
     /// table without a search through every table.
-    archetype_indices: HashMap<u64, usize>,
-    /// Maps each component type to its bit, which is a `u64` with one set bit.
-    component_bits: HashMap<TypeId, u64>,
+    archetype_indices: HashMap<ComponentMask, usize>,
+    /// Maps each component type to its bit, which is a mask with one set bit.
+    component_bits: HashMap<TypeId, ComponentMask>,
     /// Stores one slot for each entity index, at that index.
     slots: Vec<Slot>,
     /// Stores the index of each slot that no entity occupies, for `spawn_ent` to reuse. The last
@@ -140,8 +141,8 @@ impl World {
         let archetypes = vec![Archetype::new(&[])];
         // Creates the map from each table's mask to the table's position in `archetypes`
         let mut archetype_indices = HashMap::new();
-        // Files mask 0, which stands for no component types, under the empty table
-        archetype_indices.insert(0, Self::EMPTY);
+        // Files the empty mask, which stands for no component types, under the empty table
+        archetype_indices.insert(ComponentMask::EMPTY, Self::EMPTY);
 
         Self {
             archetypes,                     // stores the list built above
@@ -223,11 +224,11 @@ impl World {
     /// Returns `true` where `entity` was alive. Returns `false` where the handle does not refer to a
     /// living entity, such as one already despawned, and the world is then left unchanged.
     ///
-    /// # Panics
+    /// # Aborts
     ///
-    /// Panics where the `Drop` implementation of one of the entity's components panics. The panic can
-    /// leave the entity's table with its columns out of line. The caller MUST NOT use the world after
-    /// catching such a panic.
+    /// The program aborts where the `Drop` implementation of one of the entity's components panics.
+    /// The panic message prints first. The panic would otherwise leave the entity's table with its
+    /// columns out of line.
     pub fn despawn_ent(&mut self, entity: Entity) -> bool {
         // Finds where the entity is stored, and returns `false` where it does not exist
         let Some(location) = self.locate(entity) else {
@@ -269,7 +270,7 @@ impl World {
     /// # Panics
     ///
     /// Panics where `entity` does not refer to a living entity. Also panics where the world has not met `T`
-    /// before, and already has 64 component types. Also panics where the `Drop` implementation of a
+    /// before, and already has [`ComponentMask::CAPACITY`] component types. Also panics where the `Drop` implementation of a
     /// replaced `T` panics.
     pub fn insert<T: Send + Sync + 'static>(&mut self, entity: Entity, component: T) {
         // Finds where the entity is stored, and panics where it does not exist
@@ -326,11 +327,11 @@ impl World {
     /// Returns `true` where the entity had a `T`. Returns `false` where it had no `T`, or where the
     /// handle does not refer to a living entity, and the world is then left unchanged.
     ///
-    /// # Panics
+    /// # Aborts
     ///
-    /// Panics where the `Drop` implementation of the `T` panics. The panic can leave the entity's old
-    /// and new tables with their columns out of line. The caller MUST NOT use the world after
-    /// catching such a panic.
+    /// The program aborts where the `Drop` implementation of the `T` panics. The panic message prints
+    /// first. The panic would otherwise leave the entity's old and new tables with their columns out
+    /// of line.
     pub fn remove<T: 'static>(&mut self, entity: Entity) -> bool {
         // Finds where the entity is stored, and returns `false` where it does not exist
         let Some(location) = self.locate(entity) else {
@@ -405,7 +406,8 @@ impl World {
     ///
     /// # Panics
     ///
-    /// Panics where the world has not met `T` before, and already has 64 component types.
+    /// Panics where the world has not met `T` before, and already has [`ComponentMask::CAPACITY`]
+    /// component types.
     fn find_or_create_archetype_with<T: Send + Sync + 'static>(&mut self, source: usize) -> usize {
         // Finds the bit for `T`, giving `T` a new bit where this is the first time the world sees it
         let bit = self.find_or_assign_bit(TypeId::of::<T>());
@@ -440,9 +442,9 @@ impl World {
         infos.retain(|info| info.type_id() != type_id);
 
         // Builds the target table's mask, by setting the bit of each type that is left
-        let mask = infos.iter().fold(0, |mask, info| {
-            mask | info.bit()
-        });
+        let mask = infos
+            .iter()
+            .fold(ComponentMask::EMPTY, |mask, info| mask | info.bit());
         // Returns the table that already has that mask, where one exists
         if let Some(&index) = self.archetype_indices.get(&mask) {
             return index;
@@ -463,16 +465,18 @@ impl World {
     ///
     /// # Panics
     ///
-    /// Panics where the type has no bit yet, and the world already has 64 component types.
-    fn find_or_assign_bit(&mut self, type_id: TypeId) -> u64 {
+    /// Panics where the type has no bit yet, and the world already has [`ComponentMask::CAPACITY`]
+    /// component types.
+    fn find_or_assign_bit(&mut self, type_id: TypeId) -> ComponentMask {
         // Counts the bits handed out so far, which is also the position of the next free bit
         let next_position = self.component_bits.len();
         // Returns the type's bit, first giving it the next free bit where it has none yet
         *self.component_bits.entry(type_id).or_insert_with(|| {
-            // Panics with the limit, since a 65th bit would overflow the `u64`
-            assert!(next_position < 64, "a world has at most 64 component types");
-            // Builds a `u64` with one set bit, at the next free position
-            1 << next_position
+            // Panics with the limit, since a mask has no bit for one more type
+            let capacity = ComponentMask::CAPACITY;
+            assert!(next_position < capacity, "a world has at most {capacity} component types");
+            // Builds a mask with one set bit, at the next free position
+            ComponentMask::single(next_position)
         })
     }
 
@@ -511,6 +515,7 @@ impl Default for World {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::array;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -565,9 +570,10 @@ mod tests {
 
         let empty_table = &world.archetypes[World::EMPTY];
         assert_eq!(world.archetypes.len(), 1, "number of tables");
-        assert_eq!(empty_table.mask(), 0, "mask of the empty table");
+        assert_eq!(empty_table.mask(), ComponentMask::EMPTY, "mask of the empty table");
         assert_eq!(empty_table.len(), 0, "rows in the empty table");
-        assert_eq!(world.archetype_indices.get(&0), Some(&World::EMPTY), "table under mask 0");
+        let empty_index = world.archetype_indices.get(&ComponentMask::EMPTY);
+        assert_eq!(empty_index, Some(&World::EMPTY), "table under the empty mask");
         assert!(world.component_bits.is_empty(), "component types");
         assert!(world.slots.is_empty(), "slots");
         assert!(world.free_slots.is_empty(), "free slots");
@@ -759,7 +765,7 @@ mod tests {
         let location = locate_alive(&world, entity);
         let mask = world.archetypes[location.archetype].mask();
         assert_eq!(world.archetypes.len(), 3, "number of tables");
-        assert_eq!(mask, 0b11, "mask of the entity's table");
+        assert_eq!(mask, ComponentMask::from_positions(&[0, 1]), "mask of the entity's table");
         assert_eq!(world.get::<Position>(entity), Some(&Position(1.5)), "first component");
         assert_eq!(world.get::<Health>(entity), Some(&Health(100)), "second component");
     }
@@ -908,9 +914,8 @@ mod tests {
 
         let bits = build_64_type_ids().map(|type_id| world.find_or_assign_bit(type_id));
 
-        let combined = bits.iter().fold(0, |mask, bit| mask | bit);
-        assert!(bits.iter().all(|bit| bit.count_ones() == 1), "one set bit each");
-        assert_eq!(combined, u64::MAX, "every bit taken");
+        let expected: [ComponentMask; 64] = array::from_fn(ComponentMask::single);
+        assert_eq!(bits, expected, "one bit each, in order of first sight");
     }
 
     /// Checks that a type seen before keeps its first bit, and does not take a new one
@@ -923,7 +928,8 @@ mod tests {
         let repeat = world.find_or_assign_bit(TypeId::of::<Position>());
 
         assert_eq!(repeat, first, "bit for the repeated type");
-        assert_eq!([first, other], [0b01, 0b10], "bits in order of first sight");
+        let expected = [ComponentMask::single(0), ComponentMask::single(1)];
+        assert_eq!([first, other], expected, "bits in order of first sight");
         assert_eq!(world.component_bits.len(), 2, "component types");
     }
 

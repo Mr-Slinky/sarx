@@ -23,8 +23,8 @@
 //! check.
 //!
 //! A [`ComponentInfo`] also stores one bit for the table that the column belongs to. A table has a
-//! mask, which is a `u64` with one set bit for each component type that the table stores. The table
-//! builds its mask from these bits. A [`ComponentVec`] never reads the bit.
+//! mask, which is a [`ComponentMask`] with one set bit for each component type that the table
+//! stores. The table builds its mask from these bits. A [`ComponentVec`] never reads the bit.
 //!
 //! The compiler cannot check the type of those bytes. As a result, each `unsafe` method has a
 //! Safety section that lists what its caller MUST guarantee. One of those guarantees is that the
@@ -87,8 +87,8 @@
 //!     y: f32,
 //! }
 //!
-//! // Creates two empty vectors for `Position` components, with the mask value `1` for that type
-//! let info = ComponentInfo::of::<Position>(1);
+//! // Creates two empty vectors for `Position` components, with the bit at position 0 for that type
+//! let info = ComponentInfo::of::<Position>(ComponentMask::single(0));
 //! let mut source = ComponentVec::new(info);
 //! let mut target = ComponentVec::new(source.info());
 //!
@@ -116,6 +116,7 @@
 //! assert_eq!(moved[0], Position { x: 1.0, y: 1.0 });
 //! ```
 
+use crate::mask::ComponentMask;
 use std::alloc::{self, Layout};
 use std::any::{self, TypeId};
 use std::mem::ManuallyDrop;
@@ -141,8 +142,8 @@ use std::{mem, ptr, slice};
 /// The example creates a vector for `f32`, pushes one component, borrows it, then changes it.
 ///
 /// ```ignore
-/// // Creates an empty vector for `f32` components, with the mask value `1` for that type
-/// let mut components = ComponentVec::new(ComponentInfo::of::<f32>(1));
+/// // Creates an empty vector for `f32` components, with the bit at position 0 for that type
+/// let mut components = ComponentVec::new(ComponentInfo::of::<f32>(ComponentMask::single(0)));
 ///
 /// // Pushes one component, which the vector then owns
 /// components.push_typed(1.5_f32);
@@ -397,9 +398,12 @@ impl ComponentVec {
     ///
     /// # Panics
     ///
-    /// Panics where `target` is full and a larger block would exceed `isize::MAX` bytes. A target
-    /// for a type of size zero panics once it stores `usize::MAX` components. The program aborts
-    /// where the allocator cannot supply a larger block for `target`.
+    /// Panics where `index` is not below the length of `self`, or where `target` stores a different
+    /// component type. Both checks run in every build, before anything changes.
+    ///
+    /// Also panics where `target` is full and a larger block would exceed `isize::MAX` bytes. A
+    /// target for a type of size zero panics once it stores `usize::MAX` components. The program
+    /// aborts where the allocator cannot supply a larger block for `target`.
     ///
     /// # Safety
     ///
@@ -408,7 +412,7 @@ impl ComponentVec {
     /// - `index` is below the length of `self`.
     /// - `target` stores the same component type as `self`.
     ///
-    /// A debug build panics where either guarantee fails. A release build skips both checks.
+    /// Every build checks both, and panics where either fails, as the Panics section sets out.
     pub(crate) unsafe fn move_component(&mut self, index: usize, target: &mut ComponentVec) {
         // Panics before anything changes, where `index` lies past the last component. A stale row
         // from a caller would otherwise copy the bytes of a component that is already dropped
@@ -535,11 +539,11 @@ unsafe impl Sync for ComponentVec {}
 ///
 /// # Examples
 ///
-/// The example builds the `ComponentInfo` for `f32`, with the mask value `1` for that type.
+/// The example builds the `ComponentInfo` for `f32`, with the bit at position 0 for that type.
 ///
 /// ```ignore
 /// // Builds the `ComponentInfo` for `f32`, a type with no clean-up code
-/// let info = ComponentInfo::of::<f32>(1);
+/// let info = ComponentInfo::of::<f32>(ComponentMask::single(0));
 /// ```
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct ComponentInfo {
@@ -552,23 +556,23 @@ pub(crate) struct ComponentInfo {
     /// Stores the function that runs the clean-up code of the component at the given address. The
     /// field is `None` where the type has no clean-up code.
     drop: Option<unsafe fn(*mut u8)>,
-    /// Stores the bit that stands for the component type in a table's mask, within one world.
-    bit: u64,
+    /// Stores the mask with the one bit that stands for the component type, within one world.
+    bit: ComponentMask,
 }
 
 impl ComponentInfo {
     /// Returns the [`ComponentInfo`] for the component type `T`, with `bit` as its bit in a table's
     /// mask.
     ///
-    /// The caller MUST pass a `u64` with exactly one set bit, and a different bit for each component
-    /// type in one world. The method stores `bit` without checking it. A wrong bit gives a table a
-    /// wrong mask, and queries then match the wrong tables.
+    /// The caller MUST pass a mask with exactly one set bit, as [`ComponentMask::single`] builds,
+    /// and a different bit for each component type in one world. The method stores `bit` without
+    /// checking it. A wrong bit gives a table a wrong mask, and queries then match the wrong tables.
     ///
     /// The bound `T: 'static` means that `T` contains no borrowed references that could expire. A
     /// vector can then keep a `T` for as long as it needs. `TypeId::of` requires the same bound.
     ///
     /// The bound `T: Send + Sync` lets a vector move its components between threads, and share them.
-    pub(crate) fn of<T: Send + Sync + 'static>(bit: u64) -> Self {
+    pub(crate) fn of<T: Send + Sync + 'static>(bit: ComponentMask) -> Self {
         let drop = if mem::needs_drop::<T>() {
             Some(drop_value::<T> as unsafe fn(*mut u8))
         } else {
@@ -589,8 +593,8 @@ impl ComponentInfo {
         self.type_id
     }
 
-    /// Returns the bit that stands for the component type in a table's mask.
-    pub(crate) fn bit(self) -> u64 {
+    /// Returns the mask with the one bit that stands for the component type.
+    pub(crate) fn bit(self) -> ComponentMask {
         self.bit
     }
 }
@@ -666,17 +670,17 @@ mod tests {
 
         // Pairs each `ComponentInfo` with the size, alignment and clean-up that it should report
         let cases = [
-            ("f32", ComponentInfo::of::<f32>(1), 4, 4, false),
+            ("f32", ComponentInfo::of::<f32>(ComponentMask::single(0)), 4, 4, false),
             (
                 "String",
-                ComponentInfo::of::<String>(1),
+                ComponentInfo::of::<String>(ComponentMask::single(0)),
                 size_of::<String>(),
                 align_of::<String>(),
                 true,
             ),
-            ("()", ComponentInfo::of::<()>(1), 0, 1, false),
-            ("DropOnly", ComponentInfo::of::<DropOnly>(1), 0, 1, true),
-            ("Aligned", ComponentInfo::of::<Aligned>(1), 64, 64, false),
+            ("()", ComponentInfo::of::<()>(ComponentMask::single(0)), 0, 1, false),
+            ("DropOnly", ComponentInfo::of::<DropOnly>(ComponentMask::single(0)), 0, 1, true),
+            ("Aligned", ComponentInfo::of::<Aligned>(ComponentMask::single(0)), 64, 64, false),
         ];
 
         for (name, info, size, alignment, has_drop) in cases {
@@ -695,8 +699,8 @@ mod tests {
         #[allow(dead_code)]
         struct Armour(u32);
 
-        let health = ComponentInfo::of::<Health>(1);
-        let armour = ComponentInfo::of::<Armour>(1);
+        let health = ComponentInfo::of::<Health>(ComponentMask::single(0));
+        let armour = ComponentInfo::of::<Armour>(ComponentMask::single(0));
 
         assert_eq!(health.layout, armour.layout, "layouts should match");
         assert_ne!(health.type_id, armour.type_id, "type IDs should differ");
@@ -706,9 +710,9 @@ mod tests {
     #[test]
     fn new_with_standard_types_returns_empty_vector_with_aligned_pointer() {
         let cases = [
-            ("u8", ComponentInfo::of::<u8>(1)),
-            ("f32", ComponentInfo::of::<f32>(1)),
-            ("u64", ComponentInfo::of::<u64>(1)),
+            ("u8", ComponentInfo::of::<u8>(ComponentMask::single(0))),
+            ("f32", ComponentInfo::of::<f32>(ComponentMask::single(0))),
+            ("u64", ComponentInfo::of::<u64>(ComponentMask::single(0))),
         ];
 
         for (name, info) in cases {
@@ -726,7 +730,7 @@ mod tests {
     /// Checks that a vector with no block of memory can still be viewed safely
     #[test]
     fn as_slice_with_empty_vector_returns_empty_slice() {
-        let components = ComponentVec::new(ComponentInfo::of::<f32>(1));
+        let components = ComponentVec::new(ComponentInfo::of::<f32>(ComponentMask::single(0)));
         let slice = components.as_slice::<f32>();
 
         assert!(slice.is_empty(), "slice should have no components");
@@ -735,7 +739,7 @@ mod tests {
     /// Checks that a component survives being stored as bytes and read back as its own type
     #[test]
     fn push_typed_with_one_value_stores_value_for_as_slice() {
-        let mut components = ComponentVec::new(ComponentInfo::of::<f32>(1));
+        let mut components = ComponentVec::new(ComponentInfo::of::<f32>(ComponentMask::single(0)));
 
         components.push_typed(1.5_f32);
 
@@ -745,7 +749,7 @@ mod tests {
     /// Checks that `push` stores a `String` that the vector then owns, and reads it back unchanged
     #[test]
     fn push_with_manually_dropped_string_stores_value_for_as_slice() {
-        let mut components = ComponentVec::new(ComponentInfo::of::<String>(1));
+        let mut components = ComponentVec::new(ComponentInfo::of::<String>(ComponentMask::single(0)));
         let value = ManuallyDrop::new(String::from("villager"));
         let bytes = ptr::from_ref(&*value).cast::<u8>();
 
@@ -759,7 +763,7 @@ mod tests {
     /// Checks that components are spaced one component size apart, starting at `data`
     #[test]
     fn ptr_at_with_standard_and_extreme_indices_returns_offset_address() {
-        let components = ComponentVec::new(ComponentInfo::of::<u32>(1));
+        let components = ComponentVec::new(ComponentInfo::of::<u32>(ComponentMask::single(0)));
         let start = components.data().as_ptr().addr();
 
         // Pairs each index with its expected distance in bytes from the start of the block
@@ -775,7 +779,7 @@ mod tests {
     /// Checks that a change reaches the stored component, and leaves its neighbours alone
     #[test]
     fn as_mut_slice_with_changed_value_updates_only_that_component() {
-        let mut components = ComponentVec::new(ComponentInfo::of::<u32>(1));
+        let mut components = ComponentVec::new(ComponentInfo::of::<u32>(ComponentMask::single(0)));
         components.push_typed(1_u32);
         components.push_typed(2_u32);
         components.push_typed(3_u32);
@@ -792,7 +796,7 @@ mod tests {
         let cases = [(1_u32, 4), (4, 4), (5, 8), (8, 8), (9, 16)];
 
         for (count, capacity) in cases {
-            let mut components = ComponentVec::new(ComponentInfo::of::<u32>(1));
+            let mut components = ComponentVec::new(ComponentInfo::of::<u32>(ComponentMask::single(0)));
 
             for value in 0..count {
                 components.push_typed(value);
@@ -808,7 +812,7 @@ mod tests {
     /// Checks that moving to a larger block keeps every component at its index
     #[test]
     fn push_typed_with_growth_keeps_values_in_order() {
-        let mut components = ComponentVec::new(ComponentInfo::of::<u32>(1));
+        let mut components = ComponentVec::new(ComponentInfo::of::<u32>(ComponentMask::single(0)));
 
         // Pushes 9 components, which makes the block grow from 4 to 8, then from 8 to 16
         for value in 0..9_u32 {
@@ -822,7 +826,7 @@ mod tests {
     #[test]
     fn push_typed_with_growth_keeps_strings_readable() {
         let names = ["Ada", "Bo", "Cy", "Dee", "Eli"];
-        let mut components = ComponentVec::new(ComponentInfo::of::<String>(1));
+        let mut components = ComponentVec::new(ComponentInfo::of::<String>(ComponentMask::single(0)));
 
         // Pushes 5 components, which makes the block grow from 4 to 8
         for name in names {
@@ -839,7 +843,7 @@ mod tests {
 
         for count in cases {
             let drops = Arc::new(AtomicUsize::new(0));
-            let mut components = ComponentVec::new(ComponentInfo::of::<DropCounter>(1));
+            let mut components = ComponentVec::new(ComponentInfo::of::<DropCounter>(ComponentMask::single(0)));
             for _ in 0..count {
                 components.push_typed(DropCounter {
                     drops: Arc::clone(&drops),
@@ -856,7 +860,7 @@ mod tests {
     #[test]
     fn push_typed_with_growth_drops_no_components() {
         let drops = Arc::new(AtomicUsize::new(0));
-        let mut components = ComponentVec::new(ComponentInfo::of::<DropCounter>(1));
+        let mut components = ComponentVec::new(ComponentInfo::of::<DropCounter>(ComponentMask::single(0)));
 
         // Pushes 9 components, which makes the block grow from 4 to 8, then from 8 to 16
         for _ in 0..9 {
@@ -875,7 +879,7 @@ mod tests {
     /// Checks that the middle component moves to the target, and the last component fills its index
     #[test]
     fn move_component_with_middle_index_fills_gap_with_last_component() {
-        let mut source = ComponentVec::new(ComponentInfo::of::<u32>(1));
+        let mut source = ComponentVec::new(ComponentInfo::of::<u32>(ComponentMask::single(0)));
         source.push_typed(10_u32);
         source.push_typed(20_u32);
         source.push_typed(30_u32);
@@ -910,7 +914,7 @@ mod tests {
         ];
 
         for (values, index, remaining) in cases {
-            let mut source = ComponentVec::new(ComponentInfo::of::<u32>(1));
+            let mut source = ComponentVec::new(ComponentInfo::of::<u32>(ComponentMask::single(0)));
             for &value in values {
                 source.push_typed(value);
             }
@@ -933,7 +937,7 @@ mod tests {
     /// Checks that a move into a full target grows the target and keeps what it already stored
     #[test]
     fn move_component_with_full_target_grows_target() {
-        let mut source = ComponentVec::new(ComponentInfo::of::<u32>(1));
+        let mut source = ComponentVec::new(ComponentInfo::of::<u32>(ComponentMask::single(0)));
         source.push_typed(50_u32);
 
         let mut target = ComponentVec::new(source.info());
@@ -957,7 +961,7 @@ mod tests {
     #[test]
     fn move_component_with_drop_counters_drops_each_component_once() {
         let drops = Arc::new(AtomicUsize::new(0));
-        let mut source = ComponentVec::new(ComponentInfo::of::<DropCounter>(1));
+        let mut source = ComponentVec::new(ComponentInfo::of::<DropCounter>(ComponentMask::single(0)));
         for _ in 0..5 {
             source.push_typed(DropCounter {
                 drops: Arc::clone(&drops),
@@ -986,7 +990,7 @@ mod tests {
     /// Checks that a type taking no memory is still counted, and never needs a block
     #[test]
     fn push_typed_with_zero_size_type_counts_without_allocating() {
-        let mut components = ComponentVec::new(ComponentInfo::of::<()>(1));
+        let mut components = ComponentVec::new(ComponentInfo::of::<()>(ComponentMask::single(0)));
         let start = components.data();
 
         for _ in 0..5 {
@@ -1005,7 +1009,7 @@ mod tests {
         #[repr(align(64))]
         struct Tag;
 
-        let mut components = ComponentVec::new(ComponentInfo::of::<Tag>(1));
+        let mut components = ComponentVec::new(ComponentInfo::of::<Tag>(ComponentMask::single(0)));
         for _ in 0..3 {
             components.push_typed(Tag);
         }
@@ -1030,7 +1034,7 @@ mod tests {
             }
         }
 
-        let mut components = ComponentVec::new(ComponentInfo::of::<Marker>(1));
+        let mut components = ComponentVec::new(ComponentInfo::of::<Marker>(ComponentMask::single(0)));
         for _ in 0..3 {
             components.push_typed(Marker);
         }
@@ -1054,7 +1058,7 @@ mod tests {
             }
         }
 
-        let mut source = ComponentVec::new(ComponentInfo::of::<Marker>(1));
+        let mut source = ComponentVec::new(ComponentInfo::of::<Marker>(ComponentMask::single(0)));
         for _ in 0..3 {
             source.push_typed(Marker);
         }
@@ -1084,7 +1088,7 @@ mod tests {
     #[test]
     #[should_panic]
     fn push_typed_with_full_zero_size_vector_panics() {
-        let mut components = ComponentVec::new(ComponentInfo::of::<()>(1));
+        let mut components = ComponentVec::new(ComponentInfo::of::<()>(ComponentMask::single(0)));
 
         // Sets the length by hand, since pushing `usize::MAX` components would take too long
         components.len = usize::MAX;
@@ -1098,7 +1102,7 @@ mod tests {
         #[repr(align(64))]
         struct Aligned(u8);
 
-        let mut components = ComponentVec::new(ComponentInfo::of::<Aligned>(1));
+        let mut components = ComponentVec::new(ComponentInfo::of::<Aligned>(ComponentMask::single(0)));
 
         // Pushes 9 components, which makes the block grow from 4 to 8, then from 8 to 16
         for value in 0..9_u8 {
@@ -1125,7 +1129,7 @@ mod tests {
     #[test]
     #[should_panic]
     fn push_typed_with_wrong_type_panics() {
-        let mut components = ComponentVec::new(ComponentInfo::of::<u32>(1));
+        let mut components = ComponentVec::new(ComponentInfo::of::<u32>(ComponentMask::single(0)));
 
         components.push_typed(1.5_f32);
     }
@@ -1134,7 +1138,7 @@ mod tests {
     #[test]
     #[should_panic]
     fn as_slice_with_wrong_type_panics() {
-        let components = ComponentVec::new(ComponentInfo::of::<u32>(1));
+        let components = ComponentVec::new(ComponentInfo::of::<u32>(ComponentMask::single(0)));
 
         components.as_slice::<f32>();
     }
@@ -1143,16 +1147,16 @@ mod tests {
     #[test]
     #[should_panic]
     fn as_mut_slice_with_wrong_type_panics() {
-        let mut components = ComponentVec::new(ComponentInfo::of::<u32>(1));
+        let mut components = ComponentVec::new(ComponentInfo::of::<u32>(ComponentMask::single(0)));
 
         components.as_mut_slice::<f32>();
     }
 
-    /// Checks that a debug build catches an index that would read past the last component
+    /// Checks that every build catches an index that would read past the last component
     #[test]
     #[should_panic]
     fn move_component_with_out_of_range_index_panics() {
-        let mut source = ComponentVec::new(ComponentInfo::of::<u32>(1));
+        let mut source = ComponentVec::new(ComponentInfo::of::<u32>(ComponentMask::single(0)));
         source.push_typed(10_u32);
 
         let mut target = ComponentVec::new(source.info());
@@ -1162,14 +1166,14 @@ mod tests {
         unsafe { source.move_component(1, &mut target) };
     }
 
-    /// Checks that a debug build catches a move between columns of different types
+    /// Checks that every build catches a move between columns of different types
     #[test]
     #[should_panic]
     fn move_component_with_mismatched_target_panics() {
-        let mut source = ComponentVec::new(ComponentInfo::of::<u32>(1));
+        let mut source = ComponentVec::new(ComponentInfo::of::<u32>(ComponentMask::single(0)));
         source.push_typed(10_u32);
 
-        let mut target = ComponentVec::new(ComponentInfo::of::<f32>(1));
+        let mut target = ComponentVec::new(ComponentInfo::of::<f32>(ComponentMask::single(0)));
 
         // SAFETY: this call breaks the type requirement on purpose. The `assert_eq` in
         // `move_component` panics before any memory is read
@@ -1214,7 +1218,7 @@ mod tests {
     /// Checks that threads can read one vector together, and that a vector can move to a thread
     #[test]
     fn as_slice_with_several_threads_returns_same_components() {
-        let mut components = ComponentVec::new(ComponentInfo::of::<u32>(1));
+        let mut components = ComponentVec::new(ComponentInfo::of::<u32>(ComponentMask::single(0)));
         for value in [1_u32, 2, 3, 4] {
             components.push_typed(value);
         }
@@ -1238,8 +1242,8 @@ mod tests {
     /// Checks that a whole entity can change table, with its columns staying in step row by row
     #[test]
     fn move_component_with_two_columns_keeps_rows_together() {
-        let mut source_health = ComponentVec::new(ComponentInfo::of::<u32>(1));
-        let mut source_names = ComponentVec::new(ComponentInfo::of::<String>(1));
+        let mut source_health = ComponentVec::new(ComponentInfo::of::<u32>(ComponentMask::single(0)));
+        let mut source_names = ComponentVec::new(ComponentInfo::of::<String>(ComponentMask::single(0)));
         for (health, name) in [(10_u32, "Ada"), (20, "Bo"), (30, "Cy")] {
             source_health.push_typed(health);
             source_names.push_typed(String::from(name));

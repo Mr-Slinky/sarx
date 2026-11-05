@@ -100,6 +100,10 @@ moving entities between tables has become the slow part of a step.
 - Bad, because every state component doubles the number of archetypes that an entity can belong to.
   Villagers with `Hungry`, `Tired` and `Carrying` spread over eight tables. A query over every
   villager then walks eight short runs in place of one long one.
+- Bad, because the number of component types in one world has a limit. The ECS records the set of
+  types in each table as a mask, with one bit for each type. A mask has a fixed number of bits,
+  which `ComponentMask::CAPACITY` in `sarx-ecs` defines. Every state component takes one of those
+  bits, alongside the components of physics, the central AI and the villagers themselves.
 - Bad, because the compiler cannot check the `unsafe` code in the tables. A mistake in the size or
   alignment of a column corrupts memory, where safe code would fail to compile.
 

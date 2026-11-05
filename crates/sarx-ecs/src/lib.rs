@@ -4,6 +4,7 @@
 mod archetype;
 mod component;
 mod entity;
+mod mask;
 mod world;
 
 /*

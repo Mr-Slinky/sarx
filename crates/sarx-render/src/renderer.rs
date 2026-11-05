@@ -32,6 +32,25 @@ use crate::mesh::Mesh;
 //                                         Public API                                         \\
 // ========================================================================================== \\
 
+/// A window that a [`Renderer`] can draw into.
+///
+/// A type is a `RenderWindow` once it meets three bounds. It provides the display and window handles
+/// that wgpu needs to create a surface. It implements `Debug`. It also owns all of its data, as
+/// `'static` requires, since the renderer keeps the window for as long as the renderer exists.
+///
+/// Every type that meets the three bounds implements `RenderWindow` automatically. A winit `Window`
+/// is one such type.
+///
+/// # Examples
+///
+/// The example writes a function that accepts any window that the renderer can draw into.
+///
+/// ```ignore
+/// // Creates a renderer at 1280 by 720 pixels, for any window that meets the three bounds
+/// async fn create_renderer<W: RenderWindow>(window: Arc<W>) -> Result<Renderer, RendererError> {
+///     Renderer::new(window, 1280, 720).await
+/// }
+/// ```
 pub trait RenderWindow: DisplayAndWindowHandle + Debug + 'static {}
 
 impl<W> RenderWindow for W where W: DisplayAndWindowHandle + Debug + 'static {}
@@ -120,7 +139,7 @@ impl Renderer {
         W: RenderWindow,
     {
         let gpu = GpuContext::new(window, width, height).await?;
-        let mesh = Mesh::triangle();
+        let mesh = Mesh::build_triangle();
         let vertex_buffer = gpu.create_vertex_buffer(&mesh);
         let shader_source = include_str!("../shaders/flat_colour.wgsl");
         let shader = gpu.create_shader("Flat colour shader", shader_source);
@@ -571,9 +590,7 @@ impl GpuContext {
         // Drops the old surface first (where one exists) since Vulkan can refuse a second surface
         // for a window that already has one
         self.surface_context = None;
-        // Creates the new surface context, which turns `window` into an `Arc<dyn DisplayAndWindowHandle>`
         let surface_context = self.create_surface_context(window, width, height)?;
-        // Stores the new surface context, which `render` draws into from then on
         self.surface_context = Some(surface_context);
         Ok(())
     }
@@ -591,7 +608,7 @@ impl GpuContext {
     /// ```ignore
     /// // Copies the vertices of the triangle into a new vertex buffer, then binds the buffer to
     /// // vertex buffer slot 0
-    /// let mesh = Mesh::triangle();
+    /// let mesh = Mesh::build_triangle();
     /// let vertex_buffer = gpu.create_vertex_buffer(&mesh);
     /// render_pass.set_vertex_buffer(0, vertex_buffer.slice(..));
     /// ```
@@ -695,40 +712,6 @@ impl GpuContext {
     // ====================================================================================== \\
     //                                     Helper Methods                                     \\
     // ====================================================================================== \\
-    /// Creates a multisampled texture to match the surface, and returns a view of it.
-    ///
-    /// The texture has the size and pixel format of the surface. It stores `SAMPLE_COUNT` samples
-    /// for each pixel. A render pass draws into the texture through the returned view.
-    ///
-    /// # Examples
-    ///
-    /// `SurfaceContext::new` calls it once it has configured the surface.
-    ///
-    /// ```ignore
-    /// // Configures the surface, then creates a multisampled texture to match it
-    /// surface.configure(device, &config);
-    /// let msaa_view = GpuContext::create_msaa_view(device, &config);
-    /// ```
-    fn create_msaa_view(device: &Device, config: &SurfaceConfiguration) -> TextureView {
-        let size = Extent3d {
-            width: config.width,
-            height: config.height,
-            depth_or_array_layers: 1,
-        };
-        let descriptor = TextureDescriptor {
-            label: Some("MSAA colour"),
-            size,
-            mip_level_count: 1,
-            sample_count: Self::SAMPLE_COUNT,
-            dimension: TextureDimension::D2,
-            format: config.format,
-            usage: TextureUsages::RENDER_ATTACHMENT,
-            view_formats: &[],
-        };
-        let texture = device.create_texture(&descriptor);
-        texture.create_view(&TextureViewDescriptor::default())
-    }
-
     /// Creates a `SurfaceContext` for `window`, at `width` by `height` pixels.
     ///
     /// It creates the surface first. It then configures the surface in the pixel format that the
@@ -815,7 +798,7 @@ impl SurfaceContext {
         // Configures the surface at that size, in the configuration's pixel format
         surface.configure(device, &config);
         // Creates the multisampled texture at the same size and pixel format
-        let msaa_view = GpuContext::create_msaa_view(device, &config);
+        let msaa_view = Self::create_msaa_view(device, &config);
         // Returns the context, which keeps the configuration for later resizes
         Self {
             window,
@@ -843,7 +826,7 @@ impl SurfaceContext {
         self.reconfigure(device);
         // Replaces the multisampled texture with one at the new size, since wgpu fixes a
         // texture's size when it creates the texture
-        self.msaa_view = GpuContext::create_msaa_view(device, &self.config);
+        self.msaa_view = Self::create_msaa_view(device, &self.config);
     }
 
     /// Rebuilds the surface's textures from the current configuration.
@@ -860,5 +843,48 @@ impl SurfaceContext {
     /// ```
     fn reconfigure(&self, device: &Device) {
         self.surface.configure(device, &self.config);
+    }
+
+    // ====================================================================================== \\
+    //                                     Helper Methods                                     \\
+    // ====================================================================================== \\
+    /// Creates a multisampled texture to match the surface, and returns a view of it.
+    ///
+    /// The texture has the size and pixel format of the surface. It stores
+    /// `GpuContext::SAMPLE_COUNT` samples for each pixel. A render pass draws into the texture
+    /// through the returned view.
+    ///
+    /// # Examples
+    ///
+    /// `SurfaceContext::new` calls it once it has configured the surface.
+    ///
+    /// ```ignore
+    /// // Configures the surface, then creates a multisampled texture to match it
+    /// surface.configure(device, &config);
+    /// let msaa_view = Self::create_msaa_view(device, &config);
+    /// ```
+    fn create_msaa_view(device: &Device, config: &SurfaceConfiguration) -> TextureView {
+        // Sizes the texture to match the surface, one layer deep
+        let size = Extent3d {
+            width: config.width,
+            height: config.height,
+            depth_or_array_layers: 1,
+        };
+        // Describes a two-dimensional texture that a render pass draws into, with several samples
+        // for each pixel
+        let descriptor = TextureDescriptor {
+            label: Some("MSAA colour"),
+            size,
+            mip_level_count: 1,
+            sample_count: GpuContext::SAMPLE_COUNT,
+            dimension: TextureDimension::D2,
+            format: config.format,
+            usage: TextureUsages::RENDER_ATTACHMENT,
+            view_formats: &[],
+        };
+        // Creates the texture on the device
+        let texture = device.create_texture(&descriptor);
+        // Returns a view of the whole texture, which the render pass draws through
+        texture.create_view(&TextureViewDescriptor::default())
     }
 }

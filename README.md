@@ -83,6 +83,7 @@ The format of an ADR is set out further down, under Conventions.
 | [0011](docs/adr/0011-archetype-component-storage.md)     | Archetype component storage     | The ECS stores each entity in a table for its exact set of components, one column per component     |
 | [0012](docs/adr/0012-stylised-art.md)                    | Stylised art                    | Sarx looks stylised, as Astro Bot does, and builds each villager from separate rigid parts          |
 | [0013](docs/adr/0013-miri-for-unsafe-code.md)            | Miri for unsafe code            | Tests for `unsafe` code also run under Miri, a nightly-only tool that detects undefined behaviour   |
+| [0014](docs/adr/0014-hand-poses-as-target-keyframes.md)  | Hand poses as target keyframes  | Each hand pose is a one-keyframe glTF animation, and each bone turns towards it by slerp            |
 
 ## Workspace
 

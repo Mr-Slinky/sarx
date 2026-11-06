@@ -434,6 +434,22 @@ impl ComponentVec {
         }
     }
 
+    pub(crate) fn reserve(&mut self, additional: usize) {
+        // Works out the capacity that the caller needs, and panics where it overflows `usize`
+        let required = self
+            .len
+            .checked_add(additional)
+            .expect("the required capacity should fit in a `usize`");
+        // Returns where the block already has the room, which always holds for a type of size zero
+        if required <= self.capacity {
+            return;
+        }
+
+        // Grows to at least double, which keeps repeated small reserves from copying every time
+        let doubled = self.capacity.saturating_mul(2);
+        self.increase_capacity(required.max(doubled));
+    }
+
     /// Doubles the capacity, or sets it to 4 components where the capacity is 0.
     ///
     /// The components keep their indices. Every pointer that [`data`](Self::data) and
@@ -446,23 +462,32 @@ impl ComponentVec {
     /// `isize::MAX` bytes. The program aborts where the allocator cannot supply the block.
     fn grow(&mut self) {
         // Keeps a type of size zero away from the allocator, which requires a size above zero
-        assert_ne!(
-            self.info.layout.size(),
-            0,
-            "a vector for a component type of size zero reached its limit of usize::MAX components"
-        );
+        self.assert_non_zero();
 
         let new_capacity = if self.capacity == 0 {
             4
         } else {
             self.capacity * 2
         };
+
+        self.increase_capacity(new_capacity);
+    }
+
+    fn increase_capacity(&mut self, new_capacity: usize) {
+        // Panics in a debug build where the caller asks for no more room than the block has
+        debug_assert!(
+            new_capacity > self.capacity,
+            "the new capacity must be above the current capacity"
+        );
+        // Keeps a type of size zero away from the allocator, which requires a size above zero
+        self.assert_non_zero();
+
         let new_layout = array_layout(self.info.layout, new_capacity);
 
         let new_data = if self.capacity == 0 {
             // SAFETY: `alloc` requires a layout with a size above zero. The assert above means the
-            // type takes at least one byte. `new_layout` therefore takes at least four bytes, one
-            // for each of its four components
+            // type takes at least one byte, and `new_capacity` is above a capacity of 0. As a
+            // result, `new_layout` takes at least one byte
             unsafe { alloc::alloc(new_layout) }
         } else {
             let old_layout = array_layout(self.info.layout, self.capacity);
@@ -470,7 +495,7 @@ impl ComponentVec {
             // above means the type takes at least one byte.
             //
             // - The global allocator allocated the block. The capacity is above zero, meaning an
-            //   earlier call to `grow` allocated it.
+            //   earlier call to `increase_capacity` allocated it.
             // - `old_layout` matches the layout of that allocation exactly. `array_layout` builds
             //   it from `self.capacity`, the capacity that the earlier call allocated.
             // - The new size is above zero, since the type takes at least one byte.
@@ -500,6 +525,21 @@ impl ComponentVec {
         );
     }
 
+    /// Checks that the component type takes at least one byte.
+    ///
+    /// A vector for a type of size zero starts with a capacity of `usize::MAX`. The only way it
+    /// reaches this check is through [`grow`](Self::grow), once it stores that many components.
+    ///
+    /// # Panics
+    ///
+    /// Panics where the component type has a size of zero.
+    fn assert_non_zero(&self) {
+        assert_ne!(
+            self.info.layout.size(),
+            0,
+            "a vector for a component type of size zero reached its limit of usize::MAX components"
+        );
+    }
 }
 
 impl Drop for ComponentVec {
@@ -643,7 +683,8 @@ fn array_layout(item: Layout, count: usize) -> Layout {
         .size()
         .checked_mul(count)
         .expect("the block size should fit in a `usize`");
-    Layout::from_size_align(size, item.align()).expect("the block should be at most isize::MAX bytes")
+    Layout::from_size_align(size, item.align())
+        .expect("the block should be at most isize::MAX bytes")
 }
 
 // ========================================================================================== \\
@@ -685,7 +726,13 @@ mod tests {
 
         // Pairs each `ComponentInfo` with the size, alignment and clean-up that it should report
         let cases = [
-            ("f32", ComponentInfo::of::<f32>(ComponentMask::single(0)), 4, 4, false),
+            (
+                "f32",
+                ComponentInfo::of::<f32>(ComponentMask::single(0)),
+                4,
+                4,
+                false,
+            ),
             (
                 "String",
                 ComponentInfo::of::<String>(ComponentMask::single(0)),
@@ -693,9 +740,27 @@ mod tests {
                 align_of::<String>(),
                 true,
             ),
-            ("()", ComponentInfo::of::<()>(ComponentMask::single(0)), 0, 1, false),
-            ("DropOnly", ComponentInfo::of::<DropOnly>(ComponentMask::single(0)), 0, 1, true),
-            ("Aligned", ComponentInfo::of::<Aligned>(ComponentMask::single(0)), 64, 64, false),
+            (
+                "()",
+                ComponentInfo::of::<()>(ComponentMask::single(0)),
+                0,
+                1,
+                false,
+            ),
+            (
+                "DropOnly",
+                ComponentInfo::of::<DropOnly>(ComponentMask::single(0)),
+                0,
+                1,
+                true,
+            ),
+            (
+                "Aligned",
+                ComponentInfo::of::<Aligned>(ComponentMask::single(0)),
+                64,
+                64,
+                false,
+            ),
         ];
 
         for (name, info, size, alignment, has_drop) in cases {
@@ -764,7 +829,8 @@ mod tests {
     /// Checks that `push` stores a `String` that the vector then owns, and reads it back unchanged
     #[test]
     fn push_with_manually_dropped_string_stores_value_for_as_slice() {
-        let mut components = ComponentVec::new(ComponentInfo::of::<String>(ComponentMask::single(0)));
+        let mut components =
+            ComponentVec::new(ComponentInfo::of::<String>(ComponentMask::single(0)));
         let value = ManuallyDrop::new(String::from("villager"));
         let bytes = ptr::from_ref(&*value).cast::<u8>();
 
@@ -811,7 +877,8 @@ mod tests {
         let cases = [(1_u32, 4), (4, 4), (5, 8), (8, 8), (9, 16)];
 
         for (count, capacity) in cases {
-            let mut components = ComponentVec::new(ComponentInfo::of::<u32>(ComponentMask::single(0)));
+            let mut components =
+                ComponentVec::new(ComponentInfo::of::<u32>(ComponentMask::single(0)));
 
             for value in 0..count {
                 components.push_typed(value);
@@ -841,7 +908,8 @@ mod tests {
     #[test]
     fn push_typed_with_growth_keeps_strings_readable() {
         let names = ["Ada", "Bo", "Cy", "Dee", "Eli"];
-        let mut components = ComponentVec::new(ComponentInfo::of::<String>(ComponentMask::single(0)));
+        let mut components =
+            ComponentVec::new(ComponentInfo::of::<String>(ComponentMask::single(0)));
 
         // Pushes 5 components, which makes the block grow from 4 to 8
         for name in names {
@@ -858,7 +926,8 @@ mod tests {
 
         for count in cases {
             let drops = Arc::new(AtomicUsize::new(0));
-            let mut components = ComponentVec::new(ComponentInfo::of::<DropCounter>(ComponentMask::single(0)));
+            let mut components =
+                ComponentVec::new(ComponentInfo::of::<DropCounter>(ComponentMask::single(0)));
             for _ in 0..count {
                 components.push_typed(DropCounter {
                     drops: Arc::clone(&drops),
@@ -875,7 +944,8 @@ mod tests {
     #[test]
     fn push_typed_with_growth_drops_no_components() {
         let drops = Arc::new(AtomicUsize::new(0));
-        let mut components = ComponentVec::new(ComponentInfo::of::<DropCounter>(ComponentMask::single(0)));
+        let mut components =
+            ComponentVec::new(ComponentInfo::of::<DropCounter>(ComponentMask::single(0)));
 
         // Pushes 9 components, which makes the block grow from 4 to 8, then from 8 to 16
         for _ in 0..9 {
@@ -976,7 +1046,8 @@ mod tests {
     #[test]
     fn move_component_with_drop_counters_drops_each_component_once() {
         let drops = Arc::new(AtomicUsize::new(0));
-        let mut source = ComponentVec::new(ComponentInfo::of::<DropCounter>(ComponentMask::single(0)));
+        let mut source =
+            ComponentVec::new(ComponentInfo::of::<DropCounter>(ComponentMask::single(0)));
         for _ in 0..5 {
             source.push_typed(DropCounter {
                 drops: Arc::clone(&drops),
@@ -1049,7 +1120,8 @@ mod tests {
             }
         }
 
-        let mut components = ComponentVec::new(ComponentInfo::of::<Marker>(ComponentMask::single(0)));
+        let mut components =
+            ComponentVec::new(ComponentInfo::of::<Marker>(ComponentMask::single(0)));
         for _ in 0..3 {
             components.push_typed(Marker);
         }
@@ -1117,7 +1189,8 @@ mod tests {
         #[repr(align(64))]
         struct Aligned(u8);
 
-        let mut components = ComponentVec::new(ComponentInfo::of::<Aligned>(ComponentMask::single(0)));
+        let mut components =
+            ComponentVec::new(ComponentInfo::of::<Aligned>(ComponentMask::single(0)));
 
         // Pushes 9 components, which makes the block grow from 4 to 8, then from 8 to 16
         for value in 0..9_u8 {
@@ -1257,8 +1330,10 @@ mod tests {
     /// Checks that a whole entity can change table, with its columns staying in step row by row
     #[test]
     fn move_component_with_two_columns_keeps_rows_together() {
-        let mut source_health = ComponentVec::new(ComponentInfo::of::<u32>(ComponentMask::single(0)));
-        let mut source_names = ComponentVec::new(ComponentInfo::of::<String>(ComponentMask::single(0)));
+        let mut source_health =
+            ComponentVec::new(ComponentInfo::of::<u32>(ComponentMask::single(0)));
+        let mut source_names =
+            ComponentVec::new(ComponentInfo::of::<String>(ComponentMask::single(0)));
         for (health, name) in [(10_u32, "Ada"), (20, "Bo"), (30, "Cy")] {
             source_health.push_typed(health);
             source_names.push_typed(String::from(name));

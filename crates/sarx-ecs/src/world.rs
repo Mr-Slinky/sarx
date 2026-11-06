@@ -291,35 +291,17 @@ impl World {
 
         // Finds or creates the table for the entity's types plus `T`
         let target_index = self.find_or_create_archetype_with::<T>(location.archetype);
-        // Lists the two tables to borrow: the entity's current table first, then the target
-        let indices = [location.archetype, target_index];
-        // Borrows both tables at once, after checking that the two positions differ
-        let [source_table, target_table] = self.archetypes.get_disjoint_mut(indices).expect(
-            "the target archetype should differ from the source, since the entity lacks a `T`",
-        );
-
-        // Records the entity's row in the target, which is the target's current number of rows
-        let row = target_table.len();
         // Moves the entity and every component that it has to the end of the target
-        // SAFETY: `move_entity_dropping` requires a row in range, and a push onto each new column in
-        // the target. `locate` returned this row for a living entity, and the line below pushes onto
-        // `T`, which is the only new column. The target stores every type in the source table, which
-        // means nothing gets dropped
-        let moved_ent = unsafe { source_table.move_entity_dropping(location.row, target_table) };
+        // SAFETY: `move_entity` requires the entity's current location, and a push onto each new
+        // column in the target. `locate` returned this location, and the lines below push onto `T`,
+        // which is the only new column
+        let target_table = unsafe { self.move_entity(entity, location, target_index) };
         // Finds the target's `T` column, which the source table lacked
         let target_column = target_table.mut_components_of(type_id).expect(
             "the target archetype should store `T`, since it was found or created with `T`",
         );
         // Pushes the new component, which fills the entity's row in that column
         target_column.push_typed(component);
-
-        // Describes where the entity now lives
-        let new_location = Location {
-            archetype: target_index,
-            row,
-        };
-        // Updates the slots of the moved entity, and of the entity that filled its old row
-        self.record_move(entity, moved_ent, location, new_location);
     }
 
     /// Removes the component of type `T` from `entity`, and drops it. The entity keeps every other
@@ -350,27 +332,12 @@ impl World {
 
         // Finds or creates the table for the entity's types minus `T`
         let target = self.find_or_create_archetype_without(location.archetype, type_id);
-        // Lists the two tables to borrow: the entity's current table first, then the target
-        let indices = [location.archetype, target];
-        // Borrows both tables at once, after checking that the two positions differ
-        let [source, target_archetype] = self.archetypes.get_disjoint_mut(indices).expect(
-            "the target archetype should differ from the source, since the entity has a `T`",
-        );
-
-        // Records the entity's row in the target, which is the target's current number of rows
-        let row = target_archetype.len();
         // Moves the entity's other components to the target, and drops its `T`
-        // SAFETY: `move_entity_dropping` requires a row in range, and a push onto each new column in
-        // the target. `locate` returned this row for a living entity, and the target's columns are
-        // this table's columns minus `T`, meaning the target has no new columns
-        let filled = unsafe { source.move_entity_dropping(location.row, target_archetype) };
-
-        // Describes where the entity now lives
-        let new = Location {
-            archetype: target,
-            row,
-        };
-        self.record_move(entity, filled, location, new);
+        // SAFETY: `move_entity` requires the entity's current location, and a push onto each new
+        // column in the target. `locate` returned this location, and the target's columns are the
+        // source table's columns minus `T`, meaning the target has no new columns
+        unsafe { self.move_entity(entity, location, target) };
+        // Reports that the entity had a `T`
         true
     }
 
@@ -484,6 +451,38 @@ impl World {
             // Builds a mask with one set bit, at the next free position
             ComponentMask::single(next_position)
         })
+    }
+
+    unsafe fn move_entity(
+        &mut self,
+        entity: Entity,
+        location: Location,
+        target: usize,
+    ) -> &mut Archetype {
+        // Lists the two tables to borrow: the entity's current table first, then the target
+        let indices = [location.archetype, target];
+        // Borrows both tables at once, after checking that the two positions differ
+        let [source_table, target_table] = self
+            .archetypes
+            .get_disjoint_mut(indices)
+            .expect("the target archetype should differ from the entity's own table");
+
+        // Records the entity's row in the target, which is the target's current number of rows
+        let row = target_table.len();
+        // Moves the entity to the end of the target
+        // SAFETY: `move_entity_dropping` requires a row in range, and a push onto each new column in
+        // the target. The caller MUST guarantee both, as the Safety section of this method sets out
+        let moved_ent = unsafe { source_table.move_entity_dropping(location.row, target_table) };
+
+        // Describes where the entity now lives
+        let new_location = Location {
+            archetype: target,
+            row,
+        };
+        // Updates the slots of the moved entity, and of the entity that filled its old row
+        self.record_move(entity, moved_ent, location, new_location);
+        // Returns the target, for the caller to push onto its new columns
+        &mut self.archetypes[target]
     }
 
     /// Updates the slots after `moved_ent` moves from `old_location` to `new_location`.

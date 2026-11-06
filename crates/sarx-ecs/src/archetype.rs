@@ -96,7 +96,7 @@ use std::{mem, process};
 /// A caller reaches a column by [`TypeId`], through [`components_of`](Self::components_of) or
 /// [`mut_components_of`](Self::mut_components_of). The module documentation sets out how a caller
 /// adds a row and moves one to another table.
-pub(crate) struct Archetype {
+pub struct Archetype {
     /// Stores one column for each component type, sorted by `TypeId`.
     components: Vec<ComponentVec>,
     /// Stores the entity that owns each row, in row order.
@@ -120,7 +120,8 @@ impl Archetype {
     ///
     /// # Panics
     ///
-    /// Panics where two entries in `infos` share a bit.
+    /// Panics in a debug build where two entries in `infos` share a bit. A release build skips that
+    /// check, since the world checks each list of types before passing it here.
     pub(crate) fn new(infos: &[ComponentInfo]) -> Self {
         let mut components: Vec<ComponentVec> =
             infos.iter().map(|info| ComponentVec::new(*info)).collect();
@@ -129,7 +130,7 @@ impl Archetype {
         let mut mask = ComponentMask::EMPTY;
         for info in infos {
             // Stops two types from sharing a bit, which would make queries treat them as one type
-            assert!(
+            debug_assert!(
                 !mask.intersects(info.bit()),
                 "two component types in one table share a mask bit"
             );
@@ -503,6 +504,7 @@ mod tests {
 
     /// Checks that a shared bit panics, since queries would then treat two types as one
     #[test]
+    #[cfg(debug_assertions)]
     #[should_panic]
     fn new_with_shared_bit_panics() {
         let position = ComponentInfo::of::<Position>(ComponentMask::single(0));

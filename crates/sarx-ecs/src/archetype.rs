@@ -17,9 +17,8 @@
 //!
 //! # Masks
 //!
-//! A table has a mask, which is a [`ComponentMask`] with one set bit for each component type that it
-//! stores.
-//! Each bit comes from the [`ComponentInfo`] for that type, which describes the type to the table.
+//! A table has a mask, which is a [`ComponentMask`] with one set bit for each component type that
+//! the table stores. Each bit comes from the [`ComponentInfo`] for that type, which describes the type to the table.
 //!
 //! A caller that wants a set of component types builds a mask of those types. It then passes that
 //! mask to [`Archetype::has_all`]. The method answers whether the table stores every one of those
@@ -121,8 +120,10 @@ impl Archetype {
     /// # Panics
     ///
     /// Panics in a debug build where two entries in `infos` share a bit. A release build skips that
-    /// check, since the world checks each list of types before passing it here.
+    /// check, since the world builds every list that it passes here with a different bit for each
+    /// type.
     pub(crate) fn new(infos: &[ComponentInfo]) -> Self {
+        // Creates one empty column for each entry in `infos`
         let mut components: Vec<ComponentVec> =
             infos.iter().map(|info| ComponentVec::new(*info)).collect();
         // Sorts the columns by `TypeId`, which the binary search in `find_index_of` requires
@@ -156,6 +157,11 @@ impl Archetype {
         self.components.iter().map(ComponentVec::info).collect()
     }
 
+    /// Returns the entity that owns each row, in row order.
+    ///
+    /// The entity at index `i` in the returned slice owns the component at index `i` in every
+    /// column. The slice borrows the table, meaning the compiler rejects any change to the table
+    /// while the slice is in use.
     pub(crate) fn entities(&self) -> &[Entity] {
         &self.entities
     }
@@ -177,13 +183,43 @@ impl Archetype {
     ///
     /// A caller that pushes onto the column, moves a component out of it or replaces the column MUST
     /// then leave every column with one component for each entity in the entity list, as the Rows
-    /// section in the module documentation sets out. A replacement column MUST also store the same component type, since
-    /// the search depends on the sorted order.
+    /// section in the module documentation sets out. A replacement column MUST also store the same
+    /// component type, since the search depends on the sorted order.
     pub(crate) fn mut_components_of(&mut self, type_id: TypeId) -> Option<&mut ComponentVec> {
         let index = self.find_index_of(type_id)?;
         Some(&mut self.components[index])
     }
 
+    /// Returns the columns for the `N` types in `type_ids`, in the same order, for the caller to
+    /// change all of them at once.
+    ///
+    /// Returns `None` where the table has no column for one of the types, or where `type_ids` lists
+    /// the same type twice. Two references to one column would let the caller change it through
+    /// both, which the borrow rules forbid.
+    ///
+    /// `N` is a const generic, which is a number that the caller fixes at compile time, in the way
+    /// that a type parameter fixes a type. A call with an array of two `TypeId` values returns an array of
+    /// two columns.
+    ///
+    /// Each returned reference borrows the table exclusively, meaning the compiler rejects any
+    /// other use of the table while any of them is in use. The rules in
+    /// [`mut_components_of`](Self::mut_components_of) apply to each column.
+    ///
+    /// # Examples
+    ///
+    /// The example borrows the `Position` and `Velocity` columns together, then moves the
+    /// position of the entity at row 0 by its velocity.
+    ///
+    /// ```ignore
+    /// // Borrows both columns at once, and panics where the table lacks either one
+    /// let [positions, velocities] = table
+    ///     .get_disjoint_components_mut([TypeId::of::<Position>(), TypeId::of::<Velocity>()])
+    ///     .expect("the table should store `Position` and `Velocity`");
+    ///
+    /// // Adds the velocity at row 0 to the position at row 0
+    /// let velocity = &velocities.as_mut_slice::<Velocity>()[0];
+    /// positions.as_mut_slice::<Position>()[0].0 += velocity.0;
+    /// ```
     pub(crate) fn get_disjoint_components_mut<const N: usize>(
         &mut self,
         type_ids: [TypeId; N],
@@ -235,8 +271,8 @@ impl Archetype {
     ///
     /// A missing component leaves that column one row short. Later entities then pair with the wrong
     /// components in that column. A later call to [`move_entity_dropping`](Self::move_entity_dropping)
-    /// can also pass an index past the end of the column, which then ends the program, as the Aborts
-    /// section of that method sets out.
+    /// can also pass an index past the end of the column. A debug build then panics before anything
+    /// changes. A release build ends the program, as the Aborts section of that method sets out.
     pub(crate) unsafe fn push_entity(&mut self, entity: Entity) {
         self.entities.push(entity);
     }
@@ -291,8 +327,9 @@ impl Archetype {
     /// Moves the entity at `row` to a new row at the end of `target`, **dropping each component that
     /// `target` has no column for**.
     ///
-    /// The method serves both moves between tables. Where the entity gains a component, `target`
-    /// has every column in this table plus one more, and the caller fills that column afterwards.
+    /// The method serves both moves between tables. Where the entity gains components, `target`
+    /// has every column in this table plus one or more others, and the caller fills those columns
+    /// afterwards.
     /// Where the entity loses a component, `target` lacks that one column, and the method drops the
     /// component.
     ///
@@ -319,7 +356,8 @@ impl Archetype {
     ///
     /// The caller MUST guarantee two things:
     ///
-    /// - `row` is below the length of every column. A column that is too short panics, and the
+    /// - `row` is below the length of every column. Where a column is too short, a debug build
+    ///   panics before anything changes. A release build panics partway through the move, and the
     ///   program then aborts, as the Aborts section sets out.
     /// - The caller pushes one component onto each column that `target` has and this table lacks,
     ///   before anything else uses `target`. A missing component leaves that column one row short,
@@ -355,9 +393,9 @@ impl Archetype {
             // Moves the entity's component where the target stores its type, and drops it otherwise
             match target.mut_components_of(type_id) {
                 // Moves the component to the end of the target's column for the same type
-                // SAFETY: `move_component` requires an index below the length and a target of the same
-                // type. The caller MUST guarantee that `row` is below the length of every column, and
-                // `mut_components_of` returns the target column with this `TypeId`
+                // SAFETY: `move_component` requires an index below the length and a target of the
+                // same type. The caller MUST guarantee that `row` is below the length of every
+                // column, and `mut_components_of` returns the target column with this `TypeId`
                 Some(target_components) => unsafe {
                     components.move_component(row, target_components);
                 },
@@ -365,6 +403,8 @@ impl Archetype {
                 None => components.swap_remove(row),
             }
         }
+        // Moves the entity itself from this list to the end of the target list, filling `row` with
+        // the last entity in this list
         let entity = self.entities.swap_remove(row);
         target.entities.push(entity);
         // Disarms the guard, since every component of the entity is now moved or dropped
@@ -426,6 +466,9 @@ mod tests {
     struct Health(u32);
 
     /// Adds 1 to a shared counter when dropped, which shows how many times clean-up code ran.
+    ///
+    /// Each `DropCounter` stores an `Arc`, a pointer that shares one counter between several
+    /// owners. The counter is freed once the last owner is dropped.
     struct DropCounter {
         drops: Arc<AtomicUsize>,
     }
@@ -456,6 +499,9 @@ mod tests {
     }
 
     /// Returns the column that stores `T`, as a slice of `T`.
+    ///
+    /// The slice borrows `table`, meaning the compiler rejects any change to the table while the
+    /// slice is in use.
     fn read_column<T: 'static>(table: &Archetype) -> &[T] {
         let column = table
             .components_of(TypeId::of::<T>())

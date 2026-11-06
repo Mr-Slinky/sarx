@@ -19,10 +19,10 @@
 //!
 //! A [`ComponentInfo`] describes those bytes to the vector. It stores the layout of the component
 //! type, which is its size and alignment. It also stores a function that runs the clean-up code for
-//! that type. The identity and name of the type are stored there as well, for the typed methods to
-//! check.
+//! that type. It stores the identity of the type as well, which the typed methods check. The name
+//! of the type is there for their panic message.
 //!
-//! A [`ComponentInfo`] also stores one bit for the table that the column belongs to. A table has a
+//! A [`ComponentInfo`] also stores one bit, which stands for its component type. A table has a
 //! mask, which is a [`ComponentMask`] with one set bit for each component type that the table
 //! stores. The table builds its mask from these bits. A [`ComponentVec`] never reads the bit.
 //!
@@ -66,12 +66,16 @@
 //! twice, which is undefined behaviour. Where the moved index is not the last index, a pointer to it
 //! now reaches a different component, namely the one that was last.
 //!
-//! A raw pointer has no lifetime, meaning the compiler accepts code that keeps one across a push, a
-//! move or the drop of the vector. A push can grow the block. The caller therefore MUST guarantee
-//! that it does not use any pointer from before a push, a move or the drop. To reach a component
-//! again, the caller requests a new pointer by index. Components keep their indices when the
-//! vector grows. After a move from an index other than the last, the component that was last is
-//! stored at the moved index.
+//! [`ComponentVec::swap_remove`] changes the addresses in `self` in the same way. It also drops the
+//! removed component, and the address of the old last component then contains a dropped value.
+//!
+//! A lifetime is the annotation that lets the compiler tie a reference to the value that it
+//! borrows. A raw pointer has no lifetime, meaning the compiler accepts code that keeps one across
+//! a push, a move, a removal or the drop of the vector. A push can grow the block. The caller
+//! therefore MUST guarantee that it does not use any pointer from before a push, a move, a removal
+//! or the drop. To reach a component again, the caller requests a new pointer by index. Components
+//! keep their indices when the vector grows. After a move or a removal from an index other than the
+//! last, the component that was last is stored at that index.
 //!
 //! # Examples
 //!
@@ -201,12 +205,14 @@ impl ComponentVec {
     /// `NonNull`, a pointer type that is never null.
     ///
     /// The pointer is always aligned for the component type. Until the vector allocates a block, the
-    /// pointer does not point at any memory. The pointer stops being valid when the vector grows its block or is
-    /// dropped. The Pointer validity section in the module documentation sets out every rule.
+    /// pointer does not point at any memory. The pointer stops being valid when the vector grows its
+    /// block or is dropped. The Pointer validity section in the module documentation sets out every
+    /// rule.
     pub(crate) fn data(&self) -> NonNull<u8> {
         self.data
     }
 
+    /// Returns the number of components in the vector.
     pub(crate) fn len(&self) -> usize {
         self.len
     }
@@ -257,9 +263,8 @@ impl ComponentVec {
         let end = self.ptr_at(self.len); // points just past the last component
         // SAFETY: `copy_nonoverlapping` requires two valid ranges that do not overlap. The caller
         // MUST guarantee that `value` is valid and lies outside the block, as the Safety section
-        // above sets out. `end` has room for one
-        // component, since the check above grows a full block. For a type of size zero, the copy
-        // covers zero bytes and does not touch any memory
+        // above sets out. `end` has room for one component, since the check above grows a full
+        // block. For a type of size zero, the copy covers zero bytes and does not touch any memory
         unsafe { ptr::copy_nonoverlapping(value, end, self.info.layout.size()) }
         self.len += 1;
     }
@@ -288,8 +293,8 @@ impl ComponentVec {
 
     /// Returns every component in the vector as a slice of `T`, in index order.
     ///
-    /// For an empty vector, the method returns an empty slice. The slice borrows the vector, meaning the compiler
-    /// rejects a push or a move while the slice is in use.
+    /// For an empty vector, the method returns an empty slice. The slice borrows the vector, meaning
+    /// the compiler rejects a push or a move while the slice is in use.
     ///
     /// # Panics
     ///
@@ -302,16 +307,17 @@ impl ComponentVec {
         // nothing changes while the slice exists. `assert_stores` confirms the type, `data` is
         // always aligned, and every index below `len` stores a live component. The borrow of `&self`
         // stops safe code from changing them. Code that writes through a raw pointer MUST guarantee
-        // that nothing else accesses them. An empty vector gives an empty slice, which does not read
-        // any memory
+        // that nothing else accesses them. The slice also MUST span at most `isize::MAX` bytes, and
+        // `array_layout` keeps every block within that size. An empty vector gives an empty slice,
+        // which does not read any memory
         unsafe { slice::from_raw_parts(self.data.as_ptr().cast::<T>(), self.len) }
     }
 
     /// Returns every component in the vector as a slice of `T` that allows changes, in index order.
     ///
     /// For an empty vector, the method returns an empty slice. The slice borrows the vector
-    /// exclusively, meaning
-    /// the compiler rejects any other use of the vector while the slice is in use.
+    /// exclusively, meaning the compiler rejects any other use of the vector while the slice is in
+    /// use.
     ///
     /// # Panics
     ///
@@ -361,11 +367,13 @@ impl ComponentVec {
             "both vectors must store the same component type"
         );
 
-        // SAFETY: `push` requires a live component of the type in `target`. The caller MUST
-        // guarantee both, under the Safety section above. Both references are exclusive, which makes `target` a separate vector.
-        // As a result, the pointer lies outside its block. The fill below overwrites the original,
-        // or the shorter length leaves it out of use. Nothing therefore uses or drops it
-        // afterwards
+        // SAFETY: `push` requires a live component of the type that `target` stores, outside the
+        // block of `target`, that nothing uses or drops afterwards. The first assert above confirms
+        // that `index` is below the length, which makes the component live. The second confirms
+        // that the two types match. `self` and `target` are both exclusive references, and two
+        // exclusive references never reach the same vector. As a result, the pointer lies outside
+        // the block of `target`. The fill below overwrites the original, or the shorter length puts
+        // it out of reach. Nothing therefore uses or drops it afterwards
         unsafe {
             target.push(self.ptr_at(index));
         }
@@ -406,19 +414,22 @@ impl ComponentVec {
         if index != last_idx {
             // Measures one component in bytes, which is how many bytes the swap exchanges
             let size = self.info.layout.size();
-            // SAFETY: `swap_nonoverlapping` requires two valid ranges that do not overlap. `index` and
-            // `last_idx` are different indices below the length, meaning each range lies inside the block,
-            // apart from the other. For a type of size zero, each range covers zero bytes
+            // SAFETY: `swap_nonoverlapping` requires two valid ranges that do not overlap. `index`
+            // and `last_idx` are different indices below the length, meaning each range lies
+            // inside the block, apart from the other. For a type of size zero, each range covers
+            // zero bytes
             unsafe { ptr::swap_nonoverlapping(self.ptr_at(index), self.ptr_at(last_idx), size) };
         }
-        // Shortens the vector by one, which puts the removed component, now at `last_idx`, out of reach
+        // Shortens the vector by one, which puts the removed component, now at `last_idx`, out of
+        // reach
         self.len = last_idx;
 
         // Runs the removed component's clean-up code, where its type has any
         if let Some(drop_component) = self.info.drop {
-            // SAFETY: `drop_component` requires a live, aligned component that nothing uses afterwards.
-            // Address `last_idx` stores the live component from `index`, and is aligned like every other
-            // index. The length now excludes it, meaning the vector never reaches it again
+            // SAFETY: `drop_component` requires a live, aligned component that nothing uses
+            // afterwards. The address at `last_idx` stores the live component from `index`, and is
+            // aligned like the address at every other index. The length now excludes `last_idx`,
+            // meaning the vector never reaches that component again
             unsafe { drop_component(self.ptr_at(last_idx)) };
         }
     }
@@ -551,7 +562,7 @@ unsafe impl Sync for ComponentVec {}
 /// let info = ComponentInfo::of::<f32>(ComponentMask::single(0));
 /// ```
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct ComponentInfo {
+pub struct ComponentInfo {
     /// Identifies the component type.
     type_id: TypeId,
     /// Stores the name of the component type, which a panic message reports.
@@ -731,7 +742,7 @@ mod tests {
         }
     }
 
-    /// Checks that a vector with no block of memory can still be viewed safely
+    /// Checks that a vector with no block of memory still returns a slice, which is empty
     #[test]
     fn as_slice_with_empty_vector_returns_empty_slice() {
         let components = ComponentVec::new(ComponentInfo::of::<f32>(ComponentMask::single(0)));

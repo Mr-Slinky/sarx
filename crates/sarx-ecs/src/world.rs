@@ -426,20 +426,13 @@ impl World {
         // Adds a description for `T`, with its bit
         infos.push(ComponentInfo::of::<T>(bit));
 
-        // Takes the next position in `archetypes`, where the new table goes
-        let index = self.archetypes.len();
-        // Creates the new table, with one empty column for each description
-        self.archetypes.push(Archetype::new(&infos));
-        // Files the new table under its mask, for the next lookup to find
-        self.indices.insert(mask, index);
-        // Returns the new table's position
-        index
+        // Creates the new table, and returns its position
+        self.create_archetype(&infos)
     }
 
     /// Returns the position in `archetypes` of the table for the types in table `source`, minus the
     /// type that `type_id` identifies. Creates that table where the world has none yet.
     fn find_or_create_archetype_without(&mut self, source: usize, type_id: TypeId) -> usize {
-        // Copies the descriptions of the source table's columns
         let mut infos = self.archetypes[source].infos();
         // Throws away the description for `type_id`, keeping every other one
         infos.retain(|info| info.type_id() != type_id);
@@ -453,12 +446,19 @@ impl World {
             return index;
         }
 
+        // Creates the new table, and returns its position
+        self.create_archetype(&infos)
+    }
+
+    fn create_archetype(&mut self, infos: &[ComponentInfo]) -> usize {
         // Takes the next position in `archetypes`, where the new table goes
         let index = self.archetypes.len();
-        // Creates the new table, with one empty column for each description that is left
-        self.archetypes.push(Archetype::new(&infos));
-        // Files the new table under its mask, for the next lookup to find
-        self.indices.insert(mask, index);
+        // Creates the new table, which builds its mask from `infos`
+        let archetype = Archetype::new(infos);
+        // Files the new table under its own mask, for the next lookup to find
+        self.indices.insert(archetype.mask(), index);
+        // Adds the new table at that position
+        self.archetypes.push(archetype);
         // Returns the new table's position
         index
     }

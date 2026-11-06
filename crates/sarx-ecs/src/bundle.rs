@@ -8,7 +8,7 @@ pub trait Bundle: Send + Sync + 'static {
     // Describes each type in the bundle, asking the world for each type's bit
     fn infos(world: &mut World) -> Vec<ComponentInfo>;
     // Pushes each value onto the column for its type
-    fn push_into(self, table: &mut Archetype);
+    fn push_into(self, table: &mut Archetype, row: usize);
 }
 
 fn push_or_replace<T: Send + Sync + 'static>(

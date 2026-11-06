@@ -52,10 +52,10 @@
 //! at the wrong row, a later call passes an index past the end of a column to `unsafe` code in
 //! [`Archetype`], which is undefined behaviour.
 
-use crate::Entity;
 use crate::archetype::Archetype;
 use crate::component::{ComponentInfo, ComponentVec};
 use crate::mask::ComponentMask;
+use crate::{Bundle, Entity};
 use std::any::TypeId;
 use std::collections::HashMap;
 
@@ -259,6 +259,34 @@ impl World {
         true
     }
 
+    pub fn add_components<B: Bundle>(&mut self, ent: Entity, components: B) {
+        let location = self
+            .locate(ent)
+            .expect("the entity should be alive in this world");
+
+        let infos = B::infos(self);
+        let target_index = self.find_or_create_archetype(location.archetype, &infos);
+
+        // Replaces the entity's components in place, where it already has every type in the bundle
+        if target_index == location.archetype {
+            // Every column holds a component at the entity's row, so each one gets replaced
+            components.push_into(&mut self.archetypes[target_index], location.row);
+            // Returns, since the entity stays in its table
+            return;
+        }
+
+        // Records the entity's row in the target, which is the target's current number of rows
+        let row = self.archetypes[target_index].len();
+        // Moves the entity and every component that it has to the end of the target
+        // SAFETY: `move_entity` requires the entity's current location, and a push onto each new
+        // column in the target. `locate` returned this location. The line below pushes onto each
+        // column for a bundle type that the entity lacked, which are the target's new columns. It
+        // replaces the component in each other column, which leaves that column's length unchanged
+        let target_table = unsafe { self.move_entity(ent, location, target_index) };
+        // Pushes the bundle's new components, and replaces the ones that the entity already had
+        components.push_into(target_table, row);
+    }
+
     /// Gives `entity` the component `component`, of type `T`.
     ///
     /// Where `entity` already has a `T`, `component` replaces it, and the world drops the old `T`.
@@ -369,7 +397,39 @@ impl World {
         components.as_mut_slice::<T>().get_mut(location.row)
     }
 
-    // private helpers:
+    // ------------------------------ private helpers -------------------------------- \\
+    fn find_or_create_archetype(&mut self, source: usize, bundle_infos: &[ComponentInfo]) -> usize {
+        let mut bundle_mask = ComponentMask::EMPTY;
+        for info in bundle_infos {
+            // Stops a bundle that lists a type twice
+            assert!(
+                !bundle_mask.intersects(info.bit()),
+                "a bundle lists the same component type twice"
+            );
+            bundle_mask |= info.bit();
+        }
+
+        // Finds the types that the entity already has
+        let source_mask = self.archetypes[source].mask();
+        // Builds the target table's mask: the entity's types, plus the bundle's types
+        let mask = source_mask | bundle_mask;
+        // Returns the table that already has that mask, if one exists
+        if let Some(&index) = self.indices.get(&mask) {
+            return index;
+        }
+
+        let mut infos = self.archetypes[source].infos();
+        // Selects the descriptions of the bundle's types that the entity does not already have.
+        // Each other bundle type overwrites a value in a column that the entity contains
+        let dedup_bundle_infos = bundle_infos
+            .iter()
+            .filter(|info| !source_mask.intersects(info.bit()));
+        // Adds those descriptions, one for each new column in the target table
+        infos.extend(dedup_bundle_infos);
+
+        // Creates the new table, and returns its position
+        self.create_archetype(&infos)
+    }
 
     /// Returns the position in `archetypes` of the table for the types in table `source`, plus `T`.
     /// Creates that table where the world has none yet.
@@ -437,7 +497,7 @@ impl World {
     ///
     /// Panics where the type has no bit yet, and the world already has [`ComponentMask::CAPACITY`]
     /// component types.
-    fn find_or_assign_bit(&mut self, type_id: TypeId) -> ComponentMask {
+    pub(crate) fn find_or_assign_bit(&mut self, type_id: TypeId) -> ComponentMask {
         // Counts the bits handed out so far, which is also the position of the next free bit
         let next_position = self.component_bits.len();
         // Returns the type's bit, first giving it the next free bit where it has none yet

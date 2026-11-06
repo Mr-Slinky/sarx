@@ -2,6 +2,7 @@
 //! components.
 
 mod archetype;
+mod bundle;
 mod component;
 mod entity;
 mod mask;
@@ -12,6 +13,8 @@ mod query;
 */
 
 pub use entity::Entity;
+pub use world::World;
+pub use bundle::Bundle;
 
 /*
 pub use query::Query;

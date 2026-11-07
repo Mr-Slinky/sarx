@@ -228,6 +228,9 @@ GPU. This first part ends with lit terrain on the screen. The Foundation list be
 
 Second, the author extends each layer on its own. The Later Work list covers that part.
 
+Improvements that come up along the way, and that no step below needs yet, go in
+[docs/todo_deferred.md](docs/todo_deferred.md).
+
 ### Foundation
 
 - [x] Open a window and run the event loop

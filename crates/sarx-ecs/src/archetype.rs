@@ -157,7 +157,43 @@ impl Archetype {
         self.components.iter().map(ComponentVec::info).collect()
     }
 
-    /// Returns the entity that owns each row, in row order.
+    /// Returns the mask of the table, with one set bit for each component type that it stores.
+    pub(crate) fn mask(&self) -> ComponentMask {
+        self.mask
+    }
+
+    /// Returns `true` where the table stores every component type in `query_mask`, and `false` where
+    /// it lacks at least one.
+    ///
+    /// A `query_mask` of [`ComponentMask::EMPTY`] does not ask for any component types, and the
+    /// method then returns `true` for every table.
+    pub(crate) fn has_all(&self, query_mask: ComponentMask) -> bool {
+        self.mask.contains_all(query_mask)
+    }
+
+    /// Adds `entity` to the end of the entity list, which gives it the row `len() - 1`, measured
+    /// after the call.
+    ///
+    /// # Panics
+    ///
+    /// Panics where the list is full and a larger block would exceed `isize::MAX` bytes. The program
+    /// aborts where the allocator cannot supply the larger block.
+    ///
+    /// # Safety
+    ///
+    /// The caller MUST guarantee that every column has one new component for this row. The caller
+    /// pushes those components through [`mut_components_of`](Self::mut_components_of), either before
+    /// this call or straight after it.
+    ///
+    /// A missing component leaves that column one row short. Later entities then pair with the wrong
+    /// components in that column. A later call to [`move_entity_dropping`](Self::move_entity_dropping)
+    /// can also pass an index past the end of the column. A debug build then panics before anything
+    /// changes. A release build ends the program, as the Aborts section of that method sets out.
+    pub(crate) unsafe fn push_entity(&mut self, entity: Entity) {
+        self.entities.push(entity);
+    }
+
+    /// Returns the entities in row order.
     ///
     /// The entity at index `i` in the returned slice owns the component at index `i` in every
     /// column. The slice borrows the table, meaning the compiler rejects any change to the table
@@ -231,50 +267,6 @@ impl Archetype {
         }
         // Borrows every requested column at once, and returns `None` where two positions are equal
         self.components.get_disjoint_mut(indices).ok()
-    }
-
-    /// Returns the position of the column for `type_id` in `components`, or `None` where the table
-    /// has no such column.
-    fn find_index_of(&self, type_id: TypeId) -> Option<usize> {
-        self.components
-            .binary_search_by_key(&type_id, |components| components.info().type_id())
-            .ok()
-    }
-
-    /// Returns the mask of the table, with one set bit for each component type that it stores.
-    pub(crate) fn mask(&self) -> ComponentMask {
-        self.mask
-    }
-
-    /// Returns `true` where the table stores every component type in `query_mask`, and `false` where
-    /// it lacks at least one.
-    ///
-    /// A `query_mask` of [`ComponentMask::EMPTY`] does not ask for any component types, and the
-    /// method then returns `true` for every table.
-    pub(crate) fn has_all(&self, query_mask: ComponentMask) -> bool {
-        self.mask.contains_all(query_mask)
-    }
-
-    /// Adds `entity` to the end of the entity list, which gives it the row `len() - 1`, measured
-    /// after the call.
-    ///
-    /// # Panics
-    ///
-    /// Panics where the list is full and a larger block would exceed `isize::MAX` bytes. The program
-    /// aborts where the allocator cannot supply the larger block.
-    ///
-    /// # Safety
-    ///
-    /// The caller MUST guarantee that every column has one new component for this row. The caller
-    /// pushes those components through [`mut_components_of`](Self::mut_components_of), either before
-    /// this call or straight after it.
-    ///
-    /// A missing component leaves that column one row short. Later entities then pair with the wrong
-    /// components in that column. A later call to [`move_entity_dropping`](Self::move_entity_dropping)
-    /// can also pass an index past the end of the column. A debug build then panics before anything
-    /// changes. A release build ends the program, as the Aborts section of that method sets out.
-    pub(crate) unsafe fn push_entity(&mut self, entity: Entity) {
-        self.entities.push(entity);
     }
 
     /// Removes the entity at `row` from the table, and drops its components.
@@ -422,6 +414,14 @@ impl Archetype {
         self.components
             .iter()
             .all(|components| components.len() == ent_count)
+    }
+
+    /// Returns the position of the column for `type_id` in `components`, or `None` where the table
+    /// has no such column.
+    fn find_index_of(&self, type_id: TypeId) -> Option<usize> {
+        self.components
+            .binary_search_by_key(&type_id, |components| components.info().type_id())
+            .ok()
     }
 }
 

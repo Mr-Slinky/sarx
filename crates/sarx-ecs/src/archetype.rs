@@ -193,6 +193,13 @@ impl Archetype {
         self.entities.push(entity);
     }
 
+    pub(crate) fn reserve(&mut self, additional: usize) {
+        for components in &mut self.components {
+            components.reserve(additional);
+        }
+        self.entities.reserve(additional);
+    }
+
     /// Returns the entities in row order.
     ///
     /// The entity at index `i` in the returned slice owns the component at index `i` in every

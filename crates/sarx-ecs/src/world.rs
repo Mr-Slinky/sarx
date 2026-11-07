@@ -129,7 +129,7 @@ struct Slot {
 #[derive(Clone, Copy, Debug)]
 struct Location {
     /// Stores the position in `World::archetypes` of the table that contains the entity.
-    archetype: usize,
+    arch_index: usize,
     /// Stores the row that the entity occupies in that table.
     row: usize,
 }
@@ -168,7 +168,7 @@ impl World {
     pub fn spawn_empty_ent(&mut self) -> Entity {
         // Places the new entity in the empty table, at the row just past its last entity
         let location = Location {
-            archetype: Self::EMPTY,
+            arch_index: Self::EMPTY,
             row: self.archetypes[Self::EMPTY].len(),
         };
 
@@ -222,7 +222,7 @@ impl World {
         };
 
         // Borrows the entity's table, to change it in place
-        let archetype_table = &mut self.archetypes[location.archetype];
+        let archetype_table = &mut self.archetypes[location.arch_index];
         // Deletes the entity's row, which moves the table's last entity into that row
         let filled_opt = archetype_table.remove_entity(location.row);
         // Records the new row of the entity that moved, where one did
@@ -290,10 +290,10 @@ impl World {
         // Describes each type in the bundle, giving a bit to each type that the world has not met
         let infos = B::infos(self);
         // Finds or creates the table for the entity's types plus the bundle's types
-        let target_index = self.find_or_create_archetype(location.archetype, &infos);
+        let target_index = self.find_or_create_archetype(location.arch_index, &infos);
 
         // Replaces the entity's components in place, where it already has every type in the bundle
-        if target_index == location.archetype {
+        if target_index == location.arch_index {
             // Replaces the component at the entity's row in the column for each bundle type
             components.push_into(&mut self.archetypes[target_index], location.row);
             // Returns, since the entity stays in its table
@@ -336,7 +336,7 @@ impl World {
         let type_id = TypeId::of::<T>();
 
         // Replaces the old `T` in place, where the entity's table already has a `T` column
-        if let Some(components) = self.archetypes[location.archetype].mut_components_of(type_id) {
+        if let Some(components) = self.archetypes[location.arch_index].mut_components_of(type_id) {
             // Overwrites the entity's `T`, which drops the old one
             components.as_mut_slice::<T>()[location.row] = component;
             // Returns, since the entity stays in its table
@@ -344,7 +344,7 @@ impl World {
         }
 
         // Finds or creates the table for the entity's types plus `T`
-        let target_index = self.find_or_create_archetype_with::<T>(location.archetype);
+        let target_index = self.find_or_create_archetype_with::<T>(location.arch_index);
         // Moves the entity and every component that it has to the end of the target
         // SAFETY: `move_entity` requires the entity's current location, and a push onto each new
         // column in the target. `locate` returned this location, and the lines below push onto the
@@ -377,7 +377,7 @@ impl World {
         // Finds the identity of `T`, which a table uses to look up its columns
         let type_id = TypeId::of::<T>();
         // Returns `false` where the entity's table has no `T` column, since there is nothing to drop
-        if self.archetypes[location.archetype]
+        if self.archetypes[location.arch_index]
             .components_of(type_id)
             .is_none()
         {
@@ -385,7 +385,7 @@ impl World {
         }
 
         // Finds or creates the table for the entity's types minus `T`
-        let target = self.find_or_create_archetype_without(location.archetype, type_id);
+        let target = self.find_or_create_archetype_without(location.arch_index, type_id);
         // Moves the entity's other components to the target, and drops its `T`
         // SAFETY: `move_entity` requires the entity's current location, and a push onto each new
         // column in the target. `locate` returned this location, and the target's columns are the
@@ -404,7 +404,7 @@ impl World {
         // Finds where the entity is stored, and returns `None` where it does not exist
         let location = self.locate(entity)?;
         // Finds the `T` column in the entity's table, and returns `None` where the table has none
-        let components = self.archetypes[location.archetype].components_of(TypeId::of::<T>())?;
+        let components = self.archetypes[location.arch_index].components_of(TypeId::of::<T>())?;
         // Returns the entity's `T`, from the entity's row in that column
         components.as_slice::<T>().get(location.row)
     }
@@ -418,7 +418,7 @@ impl World {
         // Finds where the entity is stored, and returns `None` where it does not exist
         let location = self.locate(entity)?;
         // Finds the `T` column in the entity's table, and returns `None` where the table has none
-        let components = self.archetypes[location.archetype].mut_components_of(TypeId::of::<T>())?;
+        let components = self.archetypes[location.arch_index].mut_components_of(TypeId::of::<T>())?;
         // Returns the entity's `T` for changing, from the entity's row in that column
         components.as_mut_slice::<T>().get_mut(location.row)
     }
@@ -621,7 +621,7 @@ impl World {
         target: usize,
     ) -> &mut Archetype {
         // Lists the two tables to borrow, with the entity's current table first and the target second
-        let indices = [location.archetype, target];
+        let indices = [location.arch_index, target];
         // Borrows both tables at once, after checking that the two positions differ
         let [source_table, target_table] = self
             .archetypes
@@ -638,7 +638,7 @@ impl World {
 
         // Describes where the entity now lives
         let new_location = Location {
-            archetype: target,
+            arch_index: target,
             row,
         };
         // Updates the slot of `entity`, and the slot of `moved_ent`, the entity that filled its old row
@@ -793,7 +793,7 @@ mod tests {
 
         for (row, entity) in entities.into_iter().enumerate() {
             let location = locate_alive(&world, entity);
-            assert_eq!(location.archetype, World::EMPTY, "table of entity {row}");
+            assert_eq!(location.arch_index, World::EMPTY, "table of entity {row}");
             assert_eq!(location.row, row, "row of entity {row}");
         }
     }
@@ -955,9 +955,9 @@ mod tests {
 
         let location = locate_alive(&world, entity);
         let bit = world.component_bits[&TypeId::of::<Position>()];
-        let mask = world.archetypes[location.archetype].mask();
+        let mask = world.archetypes[location.arch_index].mask();
         assert_eq!(world.archetypes.len(), 2, "number of tables");
-        assert_eq!(location.archetype, 1, "table of the entity");
+        assert_eq!(location.arch_index, 1, "table of the entity");
         assert_eq!(mask, bit, "mask of the new table");
         assert_eq!(
             world.archetypes[World::EMPTY].len(),
@@ -981,7 +981,7 @@ mod tests {
         world.add_component(entity, Health(100));
 
         let location = locate_alive(&world, entity);
-        let mask = world.archetypes[location.archetype].mask();
+        let mask = world.archetypes[location.arch_index].mask();
         assert_eq!(world.archetypes.len(), 3, "number of tables");
         assert_eq!(
             mask,
@@ -1012,7 +1012,7 @@ mod tests {
 
         let after = locate_alive(&world, entity);
         assert_eq!(world.archetypes.len(), 2, "number of tables");
-        assert_eq!(after.archetype, before.archetype, "table of the entity");
+        assert_eq!(after.arch_index, before.arch_index, "table of the entity");
         assert_eq!(after.row, before.row, "row of the entity");
         assert_eq!(world.get::<Health>(entity), Some(&Health(2)), "component");
     }
@@ -1045,7 +1045,7 @@ mod tests {
         let rows = [first_location.row, second_location.row];
         assert_eq!(world.archetypes.len(), 2, "number of tables");
         assert_eq!(
-            first_location.archetype, second_location.archetype,
+            first_location.arch_index, second_location.arch_index,
             "shared table"
         );
         assert_eq!(rows, [0, 1], "rows");
@@ -1063,8 +1063,8 @@ mod tests {
         world.add_component(second, Health(2));
         world.add_component(second, Position(2.0));
 
-        let first_table = locate_alive(&world, first).archetype;
-        let second_table = locate_alive(&world, second).archetype;
+        let first_table = locate_alive(&world, first).arch_index;
+        let second_table = locate_alive(&world, second).arch_index;
         let masks = world.indices.len();
         assert_eq!(first_table, second_table, "table of each entity");
         assert_eq!(masks, world.archetypes.len(), "one mask for each table");
@@ -1137,7 +1137,7 @@ mod tests {
         world.add_component(entity, Tag);
 
         assert_eq!(
-            locate_alive(&world, entity).archetype,
+            locate_alive(&world, entity).arch_index,
             1,
             "table of the entity"
         );
@@ -1207,7 +1207,7 @@ mod tests {
 
         let location = locate_alive(&world, entity);
         let position_bit = world.component_bits[&TypeId::of::<Position>()];
-        let mask = world.archetypes[location.archetype].mask();
+        let mask = world.archetypes[location.arch_index].mask();
         assert!(removed, "answer for a stored component");
         assert_eq!(world.get::<Health>(entity), None, "removed component");
         assert_eq!(
@@ -1228,7 +1228,7 @@ mod tests {
         world.remove::<Health>(entity);
 
         let location = locate_alive(&world, entity);
-        assert_eq!(location.archetype, World::EMPTY, "table of the entity");
+        assert_eq!(location.arch_index, World::EMPTY, "table of the entity");
         assert_eq!(world.archetypes.len(), 2, "number of tables");
     }
 
@@ -1244,8 +1244,8 @@ mod tests {
 
         world.remove::<Health>(entity);
 
-        let reference_table = locate_alive(&world, reference).archetype;
-        let entity_table = locate_alive(&world, entity).archetype;
+        let reference_table = locate_alive(&world, reference).arch_index;
+        let entity_table = locate_alive(&world, entity).arch_index;
         assert_eq!(entity_table, reference_table, "table of each entity");
         assert_eq!(world.archetypes.len(), 3, "number of tables");
     }
@@ -1262,7 +1262,7 @@ mod tests {
 
         let location = locate_alive(&world, entity);
         let health_bit = world.component_bits[&TypeId::of::<Health>()];
-        let mask = world.archetypes[location.archetype].mask();
+        let mask = world.archetypes[location.arch_index].mask();
         assert_eq!(world.archetypes.len(), 4, "number of tables");
         assert_eq!(mask, health_bit, "mask of the new table");
         assert_eq!(

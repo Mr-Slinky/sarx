@@ -244,6 +244,16 @@ impl World {
         true
     }
 
+    pub fn reserve<B: Bundle>(&mut self, additional: usize) {
+        // Describes each type in the bundle, giving a bit to each type that the world has not met
+        let infos = B::infos(self);
+        let arch_index = self.find_or_create_archetype(Self::EMPTY, &infos);
+        self.archetypes[arch_index].reserve(additional);
+
+        let new_slots = additional.saturating_sub(self.free_slots.len());
+        self.slots.reserve(new_slots);
+    }
+
     /// Gives `ent` every component in the bundle `components`, in one call.
     ///
     /// For each component in the bundle, the entity either gains it or has its existing component

@@ -7,7 +7,8 @@
 //!
 //! The world stores its entities in tables, as ADR 0011 sets out. Each table is an [`Archetype`].
 //! A table stores every entity that has one exact set of component types, with one column for each
-//! type. Every entity with a `Position` and a `Health`, for example, lives in the same table.
+//! type. Every entity with a `Position` and a `Health`, for example, lives in the same table. Every
+//! entity with a `Position`, `Health` and `Velocity`, live in another table.
 //!
 //! A new entity has no components. It therefore starts in the empty table, which has no columns.
 //! The empty table always takes position [`World::EMPTY`] in the list of tables.
@@ -38,9 +39,13 @@
 //! treats a handle with a different version as one that does not refer to any entity. As a result,
 //! an old handle never reaches the later entity that reuses its slot.
 //!
-//! A version stops at `u32::MAX`. A slot that reaches `u32::MAX` stays unused for the rest of the
-//! world's life. A further raise would wrap the version round to 0. An old handle at version 0
-//! might still exist, and that handle would then reach the later entity in the slot.
+//! A slot holds at most u32::MAX entities over the life of the world. Once a despawn raises the version in
+//! a slot to u32::MAX, the world retires the slot. It never reuses that slot, and its index stays unused
+//! for the rest of the world's life.
+//!
+//! The retirement protects old handles. If a further raise were allowed, it would wrap the version round to 0.
+//! A handle from the first entity in the slot, at version 0, could still exist. That handle would then incorrectly
+//! reach whichever entity took the slot next.
 //!
 //! # Rows after a move
 //!
@@ -49,7 +54,7 @@
 //! entities. One is the entity that left. The other is the entity that filled its row, unless the
 //! entity left the last row. The world updates the slot of each.
 //!
-//! Every method that moves an entity MUST update both slots. Where a method leaves a slot pointing
+//! Every method that moves an entity MUST update both slots. If a method leaves a slot pointing
 //! at the wrong row, a later call would read or change the components of a different entity. A row
 //! past the end of a column would instead make the later call panic, or end the program.
 
@@ -68,8 +73,8 @@ use std::collections::HashMap;
 ///
 /// # Examples
 ///
-/// The example creates a player with a position and health, takes 10 health from it, then despawns
-/// it.
+/// The example creates a player with a position and health, and takes 10 health from it. It then
+/// removes the position, and despawns the player with its health still in place.
 ///
 /// ```
 /// use sarx_ecs::World;
@@ -91,8 +96,11 @@ use std::collections::HashMap;
 /// let health = world.get::<Health>(player).map(|health| health.0);
 /// assert_eq!(health, Some(90));
 ///
-/// // Removes the player's position, then despawns the player
+/// // Removes the player's position, which leaves its health in place
 /// world.remove::<Position>(player);
+/// assert!(world.get::<Position>(player).is_none());
+///
+/// // Despawns the player, which drops its health along with it
 /// world.despawn_ent(player);
 ///
 /// // Checks that the old handle now reaches no entity
@@ -101,16 +109,13 @@ use std::collections::HashMap;
 pub struct World {
     /// Stores every table. Entry [`World::EMPTY`] is the table for entities with no components.
     archetypes: Vec<Archetype>,
-    /// Maps the mask of each table to its position in `archetypes`. A lookup in the map finds a
-    /// table without a search through every table.
+    /// Maps the mask of each table to its position in `archetypes`.
     indices: HashMap<ComponentMask, usize>,
-    /// Maps each component type to its bit, which is a mask with one set bit.
+    /// Maps each component type to its bit
     component_bits: HashMap<TypeId, ComponentMask>,
     /// Stores one slot for each entity index, at that index.
     slots: Vec<Slot>,
-    /// Stores the index of each slot that `spawn_empty_ent` can reuse. A slot joins the list when
-    /// its entity is despawned, where its version is still below `u32::MAX`. The last index pushed
-    /// is the first one reused.
+    /// Stores the index of each slot that `spawn_empty_ent` can reuse.
     free_slots: Vec<u32>,
 }
 
@@ -135,24 +140,24 @@ struct Location {
 }
 
 impl World {
-    /// Defines the position in `archetypes` of the table for entities with no components.
+    /// Defines the position in `archetypes` of the table for entities that have no components.
     const EMPTY: usize = 0;
 
-    /// Returns a world with no entities and no component types.
+    /// Returns a world with no entities nor component types.
     pub fn new() -> Self {
         // Starts the list of tables with one table, which has no columns
         let archetypes = vec![Archetype::new(&[])];
         // Creates the map from each table's mask to the table's position in `archetypes`
         let mut archetype_indices = HashMap::new();
-        // Files the empty mask, which stands for no component types, under the empty table
+        // Files the empty mask, which stands for "no component types", under the empty table
         archetype_indices.insert(ComponentMask::EMPTY, Self::EMPTY);
 
         Self {
-            archetypes,                     // stores the list built above
-            indices: archetype_indices,     // stores the map built above
-            component_bits: HashMap::new(), // starts with no component types, and so no bits
-            slots: Vec::new(),              // starts with no entities
-            free_slots: Vec::new(),         // starts with no slots to reuse
+            archetypes,
+            indices: archetype_indices,
+            component_bits: HashMap::new(),
+            slots: Vec::new(),
+            free_slots: Vec::new()
         }
     }
 
@@ -230,7 +235,6 @@ impl World {
             self.slots[filled.index()].location.row = location.row;
         }
 
-        // Finds the index of the slot that the dead entity occupied
         let index = entity.index();
         // Borrows that slot, to change it in place
         let slot = &mut self.slots[index];
@@ -306,7 +310,6 @@ impl World {
         if target_index == location.arch_index {
             // Replaces the component at the entity's row in the column for each bundle type
             components.push_into(&mut self.archetypes[target_index], location.row);
-            // Returns, since the entity stays in its table
             return;
         }
 
@@ -551,20 +554,28 @@ impl World {
 
     /// Returns the position in `archetypes` of the table for the types in table `source`, minus the
     /// type that `type_id` identifies. Creates that table where the world has none yet.
+    ///
+    /// The method builds the target mask from the bits alone, and copies the column descriptions
+    /// only where it has to create the table.
+    ///
+    /// # Panics
+    ///
+    /// Panics where the world has never given a bit to the type that `type_id` identifies. A caller
+    /// that has checked that table `source` stores the type never meets this case.
     fn find_or_create_archetype_without(&mut self, source: usize, type_id: TypeId) -> usize {
-        // Copies the descriptions of the source table's columns
-        let mut infos = self.archetypes[source].infos();
-        // Throws away the description for `type_id`, keeping every other one
-        infos.retain(|info| info.type_id() != type_id);
-
-        // Builds the target table's mask, by setting the bit of each type that is left
-        let mask = infos
-            .iter()
-            .fold(ComponentMask::EMPTY, |mask, info| mask | info.bit());
+        // Finds the bit of the type being removed
+        let bit = self.component_bits[&type_id];
+        // Builds the target table's mask, which is the source table's mask with that bit cleared
+        let mask = self.archetypes[source].mask().without(bit);
         // Returns the table that already has that mask, where one exists
         if let Some(&index) = self.indices.get(&mask) {
             return index;
         }
+
+        // Copies the descriptions of the source table's columns
+        let mut infos = self.archetypes[source].infos();
+        // Throws away the description for `type_id`, keeping every other one
+        infos.retain(|info| info.type_id() != type_id);
 
         // Creates the new table, and returns its position
         self.create_archetype(&infos)

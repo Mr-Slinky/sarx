@@ -89,6 +89,12 @@ impl ComponentMask {
     pub(crate) fn intersects(self, other: Self) -> bool {
         self.0 & other.0 != 0
     }
+
+    #[must_use]
+    pub(crate) fn without(mut self, other: Self) -> Self {
+        self.0 &= !other.0;
+        self
+    }
 }
 
 impl BitOr for ComponentMask {

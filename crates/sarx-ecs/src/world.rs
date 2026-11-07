@@ -205,24 +205,6 @@ impl World {
         entity
     }
 
-    /// Returns where `entity` is stored, or `None` where the handle does not refer to a living
-    /// entity.
-    ///
-    /// A handle does not refer to a living entity where its index lies past the last slot. It also does
-    /// not refer to one where its version differs from the version in its slot, as it does for a
-    /// despawned entity.
-    fn locate(&self, entity: Entity) -> Option<Location> {
-        // Finds the entity's slot, and returns `None` where the index lies past the last slot
-        let slot = self.slots.get(entity.index())?;
-        // Returns `None` where the versions differ, as they do once the entity is despawned
-        if slot.version != entity.version() {
-            return None;
-        }
-
-        // Returns where the living entity is stored
-        Some(slot.location)
-    }
-
     /// Removes `entity` from the world, and drops its components.
     ///
     /// Returns `true` where `entity` was alive. Returns `false` where the handle does not refer to a
@@ -441,9 +423,50 @@ impl World {
         components.as_mut_slice::<T>().get_mut(location.row)
     }
 
+    /// Returns the bit for the type that `type_id` identifies. Gives the type the next free bit where
+    /// it has none yet.
+    ///
+    /// # Panics
+    ///
+    /// Panics where the type has no bit yet, and the world already has [`ComponentMask::CAPACITY`]
+    /// component types.
+    pub(crate) fn find_or_assign_bit(&mut self, type_id: TypeId) -> ComponentMask {
+        // Counts the bits handed out so far, which is also the position of the next free bit
+        let next_position = self.component_bits.len();
+        // Returns the type's bit, first giving it the next free bit where it has none yet
+        *self.component_bits.entry(type_id).or_insert_with(|| {
+            // Panics where every bit is taken, since a mask has no bit left for another type
+            let capacity = ComponentMask::CAPACITY;
+            assert!(
+                next_position < capacity,
+                "a world has at most {capacity} component types"
+            );
+            // Builds a mask with one set bit, at the next free position
+            ComponentMask::single(next_position)
+        })
+    }
+
     // ========================================================================================== \\
     //                                       Helper Methods                                       \\
     // ========================================================================================== \\
+
+    /// Returns where `entity` is stored, or `None` where the handle does not refer to a living
+    /// entity.
+    ///
+    /// A handle does not refer to a living entity where its index lies past the last slot. It also does
+    /// not refer to one where its version differs from the version in its slot, as it does for a
+    /// despawned entity.
+    fn locate(&self, entity: Entity) -> Option<Location> {
+        // Finds the entity's slot, and returns `None` where the index lies past the last slot
+        let slot = self.slots.get(entity.index())?;
+        // Returns `None` where the versions differ, as they do once the entity is despawned
+        if slot.version != entity.version() {
+            return None;
+        }
+
+        // Returns where the living entity is stored
+        Some(slot.location)
+    }
 
     /// Returns the position in `archetypes` of the table for the types in table `source`, plus the
     /// types that `bundle_infos` describes. Creates that table where the world has none yet.
@@ -561,29 +584,6 @@ impl World {
         self.archetypes.push(archetype);
         // Returns the new table's position
         index
-    }
-
-    /// Returns the bit for the type that `type_id` identifies. Gives the type the next free bit where
-    /// it has none yet.
-    ///
-    /// # Panics
-    ///
-    /// Panics where the type has no bit yet, and the world already has [`ComponentMask::CAPACITY`]
-    /// component types.
-    pub(crate) fn find_or_assign_bit(&mut self, type_id: TypeId) -> ComponentMask {
-        // Counts the bits handed out so far, which is also the position of the next free bit
-        let next_position = self.component_bits.len();
-        // Returns the type's bit, first giving it the next free bit where it has none yet
-        *self.component_bits.entry(type_id).or_insert_with(|| {
-            // Panics where every bit is taken, since a mask has no bit left for another type
-            let capacity = ComponentMask::CAPACITY;
-            assert!(
-                next_position < capacity,
-                "a world has at most {capacity} component types"
-            );
-            // Builds a mask with one set bit, at the next free position
-            ComponentMask::single(next_position)
-        })
     }
 
     /// Moves `entity` from its table to the end of the table at position `target`, and returns

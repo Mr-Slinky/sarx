@@ -384,7 +384,7 @@ impl World {
         let type_id = TypeId::of::<T>();
 
         // Replaces the old `T` in place, where the entity's table already has a `T` column
-        if let Some(components) = self.archetypes[location.arch_index()].mut_components_of(type_id) {
+        if let Some(components) = self.archetypes[location.arch_index()].components_of_mut(type_id) {
             // Overwrites the entity's `T`, which drops the old one
             components.as_mut_slice::<T>()[location.row()] = component;
             // Returns, since the entity stays in its table
@@ -399,7 +399,7 @@ impl World {
         // `T` column, which is the only new column
         let target_table = unsafe { self.move_entity(entity, location, target_index) };
         // Finds the target's `T` column, which the source table lacked
-        let target_column = target_table.mut_components_of(type_id).expect(
+        let target_column = target_table.components_of_mut(type_id).expect(
             "the target archetype should store `T`, since it was found or created with `T`",
         );
         // Pushes the new component, which fills the entity's row in that column
@@ -466,7 +466,7 @@ impl World {
         // Finds where the entity is stored, and returns `None` where it does not exist
         let location = self.locate(entity)?;
         // Finds the `T` column in the entity's table, and returns `None` where the table has none
-        let components = self.archetypes[location.arch_index()].mut_components_of(TypeId::of::<T>())?;
+        let components = self.archetypes[location.arch_index()].components_of_mut(TypeId::of::<T>())?;
         // Returns the entity's `T` for changing, from the entity's row in that column
         components.as_mut_slice::<T>().get_mut(location.row())
     }

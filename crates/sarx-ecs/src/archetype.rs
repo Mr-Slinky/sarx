@@ -11,7 +11,7 @@
 //! component at index 5 in every column.
 //!
 //! The caller adds a row in two steps. It pushes one component onto every column, using
-//! [`Archetype::mut_components_of`]. It then pushes the entity with [`Archetype::push_entity`].
+//! [`Archetype::components_of_mut`]. It then pushes the entity with [`Archetype::push_entity`].
 //! The two steps can run in either order. Once both are finished, every column again has one
 //! component for each entity in the list.
 //!
@@ -56,7 +56,7 @@
 //! let second = Entity::new(1, 0);
 //! for (entity, x) in [(first, 1.0), (second, 2.0)] {
 //!     let positions = source
-//!         .mut_components_of(position.type_id())
+//!         .components_of_mut(position.type_id())
 //!         .expect("the table should store `Position`"); // &mut ComponentVec
 //!     positions.push_typed(Position(x));
 //!
@@ -71,7 +71,7 @@
 //! let filled = unsafe { source.move_entity_dropping(0, &mut target) };
 //!
 //! // Gives the moved entity its new component
-//! let healths = target.mut_components_of(health.type_id()).expect("the table should store `Health`");
+//! let healths = target.components_of_mut(health.type_id()).expect("the table should store `Health`");
 //! healths.push_typed(Health(100));
 //!
 //! // Checks that `second` now occupies row 0 in the source table, and that each table has one row
@@ -93,7 +93,7 @@ use std::{mem, process};
 /// Stores every entity with one set of component types, as rows across one column per type.
 ///
 /// A caller reaches a column by [`TypeId`], through [`components_of`](Self::components_of) or
-/// [`mut_components_of`](Self::mut_components_of). The module documentation sets out how a caller
+/// [`components_of_mut`](Self::components_of_mut). The module documentation sets out how a caller
 /// adds a row and moves one to another table.
 pub struct Archetype {
     /// Stores one column for each component type, sorted by `TypeId`.
@@ -182,7 +182,7 @@ impl Archetype {
     /// # Safety
     ///
     /// The caller MUST guarantee that every column has one new component for this row. The caller
-    /// pushes those components through [`mut_components_of`](Self::mut_components_of), either before
+    /// pushes those components through [`components_of_mut`](Self::components_of_mut), either before
     /// this call or straight after it.
     ///
     /// A missing component leaves that column one row short. Later entities then pair with the wrong
@@ -228,7 +228,7 @@ impl Archetype {
     /// then leave every column with one component for each entity in the entity list, as the Rows
     /// section in the module documentation sets out. A replacement column MUST also store the same
     /// component type, since the search depends on the sorted order.
-    pub(crate) fn mut_components_of(&mut self, type_id: TypeId) -> Option<&mut ComponentVec> {
+    pub(crate) fn components_of_mut(&mut self, type_id: TypeId) -> Option<&mut ComponentVec> {
         let index = self.find_index_of(type_id)?;
         Some(&mut self.components[index])
     }
@@ -246,7 +246,7 @@ impl Archetype {
     ///
     /// Each returned reference borrows the table exclusively, meaning the compiler rejects any
     /// other use of the table while any of them is in use. The rules in
-    /// [`mut_components_of`](Self::mut_components_of) apply to each column.
+    /// [`components_of_mut`](Self::components_of_mut) apply to each column.
     ///
     /// # Examples
     ///
@@ -390,11 +390,11 @@ impl Archetype {
             // Finds the component type that the column stores
             let type_id = components.info().type_id();
             // Moves the entity's component where the target stores its type, and drops it otherwise
-            match target.mut_components_of(type_id) {
+            match target.components_of_mut(type_id) {
                 // Moves the component to the end of the target's column for the same type
                 // SAFETY: `move_component` requires an index below the length and a target of the
                 // same type. The caller MUST guarantee that `row` is below the length of every
-                // column, and `mut_components_of` returns the target column with this `TypeId`
+                // column, and `components_of_mut` returns the target column with this `TypeId`
                 Some(target_components) => unsafe {
                     components.move_component(row, target_components);
                 },
@@ -489,7 +489,7 @@ mod tests {
     /// Pushes `value` onto the column that stores `T`, which leaves the entity list unchanged.
     fn push_component<T: 'static>(table: &mut Archetype, value: T) {
         let column = table
-            .mut_components_of(TypeId::of::<T>())
+            .components_of_mut(TypeId::of::<T>())
             .expect("the table should store the component type");
         column.push_typed(value);
     }
@@ -647,13 +647,13 @@ mod tests {
 
     /// Checks that a push through the returned column reaches that column and no other
     #[test]
-    fn mut_components_of_with_stored_type_returns_column_that_keeps_pushes() {
+    fn components_of_mut_with_stored_type_returns_column_that_keeps_pushes() {
         let position = ComponentInfo::of::<Position>(ComponentMask::single(0));
         let health = ComponentInfo::of::<Health>(ComponentMask::single(1));
         let mut table = Archetype::new(&[position, health]);
 
         let column = table
-            .mut_components_of(position.type_id())
+            .components_of_mut(position.type_id())
             .expect("the table should store `Position`");
         column.push_typed(Position(1.5));
 
@@ -667,10 +667,10 @@ mod tests {
 
     /// Checks that a type outside the table gives no column to change
     #[test]
-    fn mut_components_of_with_absent_type_returns_none() {
+    fn components_of_mut_with_absent_type_returns_none() {
         let mut table = Archetype::new(&[ComponentInfo::of::<Position>(ComponentMask::single(0))]);
 
-        let found = table.mut_components_of(TypeId::of::<Health>());
+        let found = table.components_of_mut(TypeId::of::<Health>());
 
         assert!(found.is_none());
     }

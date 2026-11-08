@@ -190,7 +190,7 @@ fn push_or_replace<T: Send + Sync + 'static>(
 ) -> Option<T> {
     // Finds the column for `T`, and panics where the table has none
     let column = table
-        .mut_components_of(TypeId::of::<T>())
+        .components_of_mut(TypeId::of::<T>())
         .expect("the table should have a column for every type in the bundle");
 
     // Replaces the component at `row`, where the column already contains one there

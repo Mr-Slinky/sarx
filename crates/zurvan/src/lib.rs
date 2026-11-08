@@ -1,7 +1,7 @@
 //! The game simulation.
 //!
 //! By design, the simulation advances the world in fixed steps of time. Each step updates the game
-//! state alone. Drawing that state is the job of `sarx-render`.
+//! state alone. Drawing that state is the job of `amaterasu`.
 //!
 //! For now, the one function here is the `add` function that `cargo new` generates.
 
@@ -17,7 +17,7 @@
 /// The example adds two and two.
 ///
 /// ```
-/// use sarx_sim::add;
+/// use zurvan::add;
 ///
 /// assert_eq!(add(2, 2), 4);
 /// ```

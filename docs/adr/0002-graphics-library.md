@@ -49,7 +49,7 @@ call with a readable message, and teaches the concepts that DirectX 12 and Vulka
 - Good, because wgpu checks every call against its rules. It reports each mistake with a readable
   message. A native API reports a mistake only once its debug or validation layers are switched on.
   Otherwise, the program often crashes or draws garbage.
-- Good, because wgpu accepts any window that provides raw window handles. As a result, `sarx-render`
+- Good, because wgpu accepts any window that provides raw window handles. As a result, `amaterasu`
   stays independent of winit.
 - Good, because a port runs the same renderer on the API of the new platform. The renderer then works
   within the limits that ADR 0003 sets out for that platform.
@@ -61,7 +61,7 @@ call with a readable message, and teaches the concepts that DirectX 12 and Vulka
 
 ### Confirmation
 
-`cargo tree -i wgpu --depth 1` lists `sarx-render` as the only Sarx crate that depends on wgpu
+`cargo tree -i wgpu --depth 1` lists `amaterasu` as the only Sarx crate that depends on wgpu
 directly.
 
 ## Pros and Cons of the Options

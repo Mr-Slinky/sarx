@@ -23,7 +23,7 @@
 //! such a tuple as the argument to `add_components`.
 
 use crate::archetype::Archetype;
-use crate::component::ComponentInfo;
+use crate::component::{Component, ComponentInfo};
 use crate::world::World;
 use std::any::TypeId;
 use std::mem;
@@ -34,8 +34,7 @@ use std::mem;
 
 /// Represents a group of components, written as a tuple with one field per component.
 ///
-/// The bound `Send + Sync + 'static` is the bound that [`World::add_component`] places on each
-/// component. The documentation of that method explains the bound.
+/// Each field of a bundle must implement [`Component`].
 ///
 /// The module documentation in `bundle.rs` shows how a caller passes a bundle to `World`.
 ///
@@ -59,10 +58,13 @@ use std::mem;
 /// accepts any bundle.
 ///
 /// ```
-/// use sarx_ecs::Bundle;
+/// use enki::{Bundle, Component};
 ///
 /// struct Position(f32, f32);
 /// struct Health(u32);
+///
+/// impl Component for Position {}
+/// impl Component for Health {}
 ///
 /// // Accepts any bundle
 /// fn accept<B: Bundle>(_bundle: B) {}
@@ -183,11 +185,7 @@ pub trait Bundle: Send + Sync + 'static {
 /// # Panics
 ///
 /// Panics where `table` has no column for `T`.
-fn push_or_replace<T: Send + Sync + 'static>(
-    table: &mut Archetype,
-    row: usize,
-    value: T,
-) -> Option<T> {
+fn push_or_replace<T: Component>(table: &mut Archetype, row: usize, value: T) -> Option<T> {
     // Finds the column for `T`, and panics where the table has none
     let column = table
         .components_of_mut(TypeId::of::<T>())
@@ -210,7 +208,7 @@ fn push_or_replace<T: Send + Sync + 'static>(
 /// Implements [`Bundle`] for every tuple with one field per listed type parameter.
 ///
 /// The call `impl_bundle!(A, B, C)` implements [`Bundle`] for `(A, B, C)`, where each of `A`, `B`
-/// and `C` is any type that is `Send + Sync + 'static`. The macro has no `#[macro_export]`,
+/// and `C` is any type that implements [`Component`]. The macro has no `#[macro_export]`,
 /// meaning code outside the crate cannot call it.
 ///
 /// # Pattern
@@ -250,11 +248,8 @@ fn push_or_replace<T: Send + Sync + 'static>(
 /// comments, to explain each line. The expansion itself has no comments.
 ///
 /// ```ignore
-/// // Implements `Bundle` for every tuple of three types, where each type is
-/// // `Send + Sync + 'static`
-/// impl<A: Send + Sync + 'static, B: Send + Sync + 'static, C: Send + Sync + 'static> Bundle
-///     for (A, B, C,)
-/// {
+/// // Implements `Bundle` for every tuple of three types, where each type implements `Component`
+/// impl<A: Component, B: Component, C: Component> Bundle for (A, B, C,) {
 ///     // Returns one `ComponentInfo` per type, in the order of the tuple fields
 ///     fn infos(world: &mut World) -> Vec<ComponentInfo> {
 ///         vec![
@@ -318,7 +313,7 @@ macro_rules! impl_bundle {
         // Declares one type parameter per name, each with the component bound, and implements
         // `Bundle` for the tuple of those parameters. The comma after each name turns a single
         // name into a tuple of one field
-        impl<$($name: Send + Sync + 'static),+> Bundle for ($($name,)+) {
+        impl<$($name: Component),+> Bundle for ($($name,)+) {
             fn infos(world: &mut World) -> Vec<ComponentInfo> {
                 // Builds one `ComponentInfo` per type, in the order of the tuple fields
                 vec![$({

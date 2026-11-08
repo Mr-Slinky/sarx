@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>sarx-render Structure Charts</title>
+<title>amaterasu Structure Charts</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+Condensed:wght@500;600&family=IBM+Plex+Sans:ital,wght@0,400;0,600;1,400&display=swap">
@@ -157,9 +157,9 @@ footer { border-top: 1px solid var(--rule); padding-top: 16px; color: var(--mute
 <div class="frame">
 
 <header class="masthead">
-  <span class="eyebrow">Structured Design &middot; crates/sarx-render</span>
-  <h1>sarx-render structure charts</h1>
-  <p class="lede">This page shows how the functions in the <code>sarx-render</code> crate call one another. The crate
+  <span class="eyebrow">Structured Design &middot; crates/amaterasu</span>
+  <h1>amaterasu structure charts</h1>
+  <p class="lede">This page shows how the functions in the <code>amaterasu</code> crate call one another. The crate
   draws each frame on the GPU, through the wgpu library. The page shows the calls with structure charts, a kind of diagram
   from Yourdon and Constantine&rsquo;s book <em>Structured Design</em>. A structure chart shows which modules call
   which. It also shows the values that pass between them on each call. The order of the statements inside a module
@@ -177,10 +177,10 @@ footer { border-top: 1px solid var(--rule); padding-top: 16px; color: var(--mute
     In Structured Design, a <em>module</em> is a named piece of code that a caller invokes, and that hands control back
     to the caller when it finishes. In Rust, a module in this sense is a function, a method or a closure. It is a
     different thing from a Rust module, the unit that <code>mod</code> declares. Below each symbol is a line from
-    <code>sarx-render</code> that the symbol stands for.</p>
+    <code>amaterasu</code> that the symbol stands for.</p>
   </div>
   <div class="key">
-<div class="key-item"><svg class="sc" viewBox="0 0 112 60" role="img" aria-label="A plain box"><rect class="box" x="6" y="15" width="100" height="30"/><text class="lbl" x="56" y="34" text-anchor="middle" style="font-size:11px">reconfigure</text></svg><div class="key-text"><strong>Module</strong><p>A plain box stands for one function or method in <code>sarx-render</code>. The chart shows only what the function does for its caller.</p></div><pre><code>fn reconfigure(&amp;self) {</code></pre></div>
+<div class="key-item"><svg class="sc" viewBox="0 0 112 60" role="img" aria-label="A plain box"><rect class="box" x="6" y="15" width="100" height="30"/><text class="lbl" x="56" y="34" text-anchor="middle" style="font-size:11px">reconfigure</text></svg><div class="key-text"><strong>Module</strong><p>A plain box stands for one function or method in <code>amaterasu</code>. The chart shows only what the function does for its caller.</p></div><pre><code>fn reconfigure(&amp;self) {</code></pre></div>
 <div class="key-item"><svg class="sc" viewBox="0 0 112 60" role="img" aria-label="An arrow from an upper box to a lower box"><rect class="box" x="30" y="2" width="52" height="14"/><line class="call" x1="56" y1="16" x2="56" y2="42"/><polygon class="head" points="56,44 51.5,35 60.5,35"/><rect class="box" x="30" y="44" width="52" height="14"/></svg><div class="key-text"><strong>Call</strong><p>An arrow runs from a module to a module that it calls. The caller is always drawn above.</p></div><pre><code>self.gpu.resize(width, height);   // in Renderer::resize</code></pre></div>
 <div class="key-item"><svg class="sc" viewBox="0 0 112 60" role="img" aria-label="A dashed arrow from an upper box to a lower box"><rect class="box" x="30" y="2" width="52" height="14"/><line class="call hidden" x1="56" y1="16" x2="56" y2="42"/><polygon class="head" points="56,44 51.5,35 60.5,35"/><rect class="box" x="30" y="44" width="52" height="14"/></svg><div class="key-text"><strong>Hidden call</strong><p>A dashed arrow is a call that never appears in the code. Sometimes a library makes the call. At other times, the compiler adds the call in place of an operator, such as <code>?</code>.</p></div><pre><code>let surface = instance.create_surface(Arc::clone(&amp;window))?;
 // on an error, ? calls From::from</code></pre></div>
@@ -191,8 +191,8 @@ footer { border-top: 1px solid var(--rule); padding-top: 16px; color: var(--mute
 }</code></pre></div>
 <div class="key-item"><svg class="sc" viewBox="0 0 112 60" role="img" aria-label="A curved arrow drawn across two call arrows below the caller"><rect class="box" x="20" y="0" width="72" height="12"/><line class="call" x1="46" y1="12" x2="28" y2="56"/><polygon class="head" points="27.2,58 25.4,48.8 33.6,52"/><line class="call" x1="66" y1="12" x2="84" y2="56"/><polygon class="head" points="84.8,58 78.4,52 86.6,48.8"/><path class="loop" d="M30,26 Q56,46 80,26"/><polygon class="head" points="82.5,24 77.3,32 74.2,25.6"/></svg><div class="key-text"><strong>Repeated calls</strong><p>A curved arrow marks a loop. It crosses every call that runs once on each pass of the loop.</p></div><pre><code>.flat_map(|coordinate| coordinate.to_ne_bytes())
 // collect calls the closure once per coordinate</code></pre></div>
-<div class="key-item"><svg class="sc" viewBox="0 0 112 60" role="img" aria-label="A box with a second line inside each side"><rect class="box" x="6" y="15" width="100" height="30"/><line class="libbar" x1="13" y1="15" x2="13" y2="45"/><line class="libbar" x1="99" y1="15" x2="99" y2="45"/><text class="lbl" x="56" y="34" text-anchor="middle" style="font-size:11px">Queue::submit</text></svg><div class="key-text"><strong>Library module</strong><p>A box with a second line inside each side is a library module. It is a function that wgpu or the standard library defines, and that <code>sarx-render</code> calls.</p></div><pre><code>queue.submit([encoder.finish()]);</code></pre></div>
-<div class="key-item"><svg class="sc" viewBox="0 0 112 60" role="img" aria-label="A box with a dashed outline"><rect class="box ext" x="6" y="15" width="100" height="30"/><text class="lbl ext" x="56" y="34" text-anchor="middle" style="font-size:11px">window_event</text></svg><div class="key-text"><strong>Module in another crate</strong><p>A dashed box is a function in another Sarx crate. It shows where the first call on a chart comes from. The <code>sarx-app</code> page has a chart for it.</p></div><pre><code>&amp;&amp; let Err(error) = renderer.render()   // in window_event, sarx-app</code></pre></div>
+<div class="key-item"><svg class="sc" viewBox="0 0 112 60" role="img" aria-label="A box with a second line inside each side"><rect class="box" x="6" y="15" width="100" height="30"/><line class="libbar" x1="13" y1="15" x2="13" y2="45"/><line class="libbar" x1="99" y1="15" x2="99" y2="45"/><text class="lbl" x="56" y="34" text-anchor="middle" style="font-size:11px">Queue::submit</text></svg><div class="key-text"><strong>Library module</strong><p>A box with a second line inside each side is a library module. It is a function that wgpu or the standard library defines, and that <code>amaterasu</code> calls.</p></div><pre><code>queue.submit([encoder.finish()]);</code></pre></div>
+<div class="key-item"><svg class="sc" viewBox="0 0 112 60" role="img" aria-label="A box with a dashed outline"><rect class="box ext" x="6" y="15" width="100" height="30"/><text class="lbl ext" x="56" y="34" text-anchor="middle" style="font-size:11px">window_event</text></svg><div class="key-text"><strong>Module in another crate</strong><p>A dashed box is a function in another Sarx crate. It shows where the first call on a chart comes from. The <code>atum</code> page has a chart for it.</p></div><pre><code>&amp;&amp; let Err(error) = renderer.render()   // in window_event, atum</code></pre></div>
   </div>
   <div class="rules">
     <p>The labels on the charts follow a few conventions. Each box shows the function&rsquo;s path in Rust syntax, such
@@ -204,7 +204,7 @@ footer { border-top: 1px solid var(--rule); padding-top: 16px; color: var(--mute
     the surface, the device and the configuration from <code>self</code>. Their call arrows therefore appear without
     couples.</p>
     <p>The charts also simplify the code in a few places. The <code>Clone::clone</code> box stands for the
-    <code>clone</code> method of whatever window type the caller passes. <code>sarx-app</code> passes an
+    <code>clone</code> method of whatever window type the caller passes. <code>atum</code> passes an
     <code>Arc&lt;Window&gt;</code>, and for that type the method is <code>Arc::clone</code>.</p>
     <p>A few calls are left off the charts. The first two are <code>Default::default</code> and
     <code>TextureViewDescriptor::default</code>. The struct literals that build each descriptor are left off too. So
@@ -289,7 +289,7 @@ footer { border-top: 1px solid var(--rule); padding-top: 16px; color: var(--mute
   <text class="clbl" x="683.7" y="733.9">buffer</text>
   <rect class="box ext" x="291.1" y="24.0" width="112.0" height="46.0"/>
   <text class="lbl ext" x="347.1" y="43.5" text-anchor="middle">resumed</text>
-  <text class="sub" x="347.1" y="58.5" text-anchor="middle">sarx-app</text>
+  <text class="sub" x="347.1" y="58.5" text-anchor="middle">atum</text>
   <rect class="box" x="285.0" y="274.0" width="124.2" height="46.0"/>
   <text class="lbl" x="347.1" y="301.0" text-anchor="middle">Renderer::new</text>
   <rect class="box" x="48.0" y="524.0" width="138.7" height="46.0"/>
@@ -377,7 +377,7 @@ footer { border-top: 1px solid var(--rule); padding-top: 16px; color: var(--mute
   <text class="clbl" x="619.8" y="756.0">length</text>
   <rect class="box ext" x="306.1" y="24.0" width="112.0" height="46.0"/>
   <text class="lbl ext" x="362.1" y="43.5" text-anchor="middle">resumed</text>
-  <text class="sub" x="362.1" y="58.5" text-anchor="middle">sarx-app</text>
+  <text class="sub" x="362.1" y="58.5" text-anchor="middle">atum</text>
   <rect class="box" x="300.0" y="274.0" width="124.2" height="46.0"/>
   <text class="lbl" x="362.1" y="301.0" text-anchor="middle">Renderer::new</text>
   <rect class="box" x="73.4" y="524.0" width="124.2" height="60.0"/>
@@ -404,10 +404,10 @@ footer { border-top: 1px solid var(--rule); padding-top: 16px; color: var(--mute
   <text class="lbl" x="588.8" y="801.0" text-anchor="middle">Vec::len</text>
 </svg>
   </div>
-  <figcaption><p><code>resumed</code> in <code>sarx-app</code> starts the renderer, by calling
+  <figcaption><p><code>resumed</code> in <code>atum</code> starts the renderer, by calling
   <code>Renderer::new</code> with the window and its size. <code>Renderer::new</code> is an <code>async fn</code>.
   Calling one returns a <em>future</em>, which is a value that stores the work without doing it yet. The call
-  therefore returns <code>renderer_setup</code>, a future. <code>block_on</code>, in <code>sarx-app</code>, then runs
+  therefore returns <code>renderer_setup</code>, a future. <code>block_on</code>, in <code>atum</code>, then runs
   that work to the end. The work is six calls, which the chart splits into two parts. First, <code>Renderer::new</code>
   passes the three values straight on to <code>GpuContext::new</code>, which Chart 2 continues. It stores the
   <code>gpu</code> that comes back. Second, it builds the triangle with <code>Mesh::triangle</code>. Third,
@@ -900,7 +900,7 @@ footer { border-top: 1px solid var(--rule); padding-top: 16px; color: var(--mute
   <text class="clbl" x="350.4" y="244.4">cause</text>
   <rect class="box ext" x="161.3" y="24.0" width="146.0" height="46.0"/>
   <text class="lbl ext" x="234.3" y="43.5" text-anchor="middle">App::print_error</text>
-  <text class="sub" x="234.3" y="58.5" text-anchor="middle">sarx-app</text>
+  <text class="sub" x="234.3" y="58.5" text-anchor="middle">atum</text>
   <rect class="box" x="77.0" y="274.0" width="116.9" height="46.0"/>
   <text class="lbl" x="135.5" y="293.5" text-anchor="middle">Display::fmt</text>
   <text class="sub" x="135.5" y="308.5" text-anchor="middle">RendererError</text>
@@ -913,7 +913,7 @@ footer { border-top: 1px solid var(--rule); padding-top: 16px; color: var(--mute
   <text class="sub" x="333.1" y="308.5" text-anchor="middle">RendererError</text>
 </svg>
   </div>
-  <figcaption><p><code>App::print_error</code> in <code>sarx-app</code> describes a failure through two methods of
+  <figcaption><p><code>App::print_error</code> in <code>atum</code> describes a failure through two methods of
   <code>RendererError</code>. The first is <code>Display::fmt</code>, which <code>eprintln!</code> calls. It picks the
   message for the variant. It then writes the message into the formatter <code>f</code> with
   <code>Formatter::write_str</code>. The second method is <code>Error::source</code>. It returns the wgpu error inside
@@ -1084,7 +1084,7 @@ footer { border-top: 1px solid var(--rule); padding-top: 16px; color: var(--mute
   <text class="clbl" x="832.7" y="496.3">view</text>
   <rect class="box ext" x="431.5" y="24.0" width="116.9" height="46.0"/>
   <text class="lbl ext" x="489.9" y="43.5" text-anchor="middle">window_event</text>
-  <text class="sub" x="489.9" y="58.5" text-anchor="middle">sarx-app</text>
+  <text class="sub" x="489.9" y="58.5" text-anchor="middle">atum</text>
   <rect class="box" x="416.9" y="274.0" width="146.0" height="46.0"/>
   <text class="lbl" x="489.9" y="301.0" text-anchor="middle">Renderer::render</text>
   <rect class="box" x="48.0" y="524.0" width="167.7" height="60.0"/>
@@ -1160,7 +1160,7 @@ footer { border-top: 1px solid var(--rule); padding-top: 16px; color: var(--mute
   <text class="clbl" x="872.5" y="485.8">slot, slice</text>
   <rect class="box ext" x="463.1" y="24.0" width="116.9" height="46.0"/>
   <text class="lbl ext" x="521.6" y="43.5" text-anchor="middle">window_event</text>
-  <text class="sub" x="521.6" y="58.5" text-anchor="middle">sarx-app</text>
+  <text class="sub" x="521.6" y="58.5" text-anchor="middle">atum</text>
   <rect class="box" x="448.6" y="274.0" width="146.0" height="46.0"/>
   <text class="lbl" x="521.6" y="301.0" text-anchor="middle">Renderer::render</text>
   <rect class="box" x="48.0" y="524.0" width="189.5" height="60.0"/>
@@ -1231,7 +1231,7 @@ footer { border-top: 1px solid var(--rule); padding-top: 16px; color: var(--mute
   <text class="clbl" x="849.6" y="485.7">frame</text>
   <rect class="box ext" x="440.8" y="24.0" width="116.9" height="46.0"/>
   <text class="lbl ext" x="499.2" y="43.5" text-anchor="middle">window_event</text>
-  <text class="sub" x="499.2" y="58.5" text-anchor="middle">sarx-app</text>
+  <text class="sub" x="499.2" y="58.5" text-anchor="middle">atum</text>
   <rect class="box" x="426.2" y="274.0" width="146.0" height="46.0"/>
   <text class="lbl" x="499.2" y="301.0" text-anchor="middle">Renderer::render</text>
   <rect class="box" x="48.0" y="524.0" width="146.0" height="46.0"/>
@@ -1261,7 +1261,7 @@ footer { border-top: 1px solid var(--rule); padding-top: 16px; color: var(--mute
   <text class="lbl" x="877.4" y="551.0" text-anchor="middle">Queue::present</text>
 </svg>
   </div>
-  <figcaption><p><code>window_event</code> in <code>sarx-app</code> calls <code>Renderer::render</code> for each redraw
+  <figcaption><p><code>window_event</code> in <code>atum</code> calls <code>Renderer::render</code> for each redraw
   request. The <code>result</code> that <code>render</code> returns is an error only where a lost surface could not be
   recreated. <code>render</code> starts by looking for the surface. While the app is suspended, <code>render</code>
   finds no surface, and returns at once. Otherwise, it asks the surface for the next texture to draw into. The surface
@@ -1337,7 +1337,7 @@ footer { border-top: 1px solid var(--rule); padding-top: 16px; color: var(--mute
   <text class="clbl" x="402.2" y="984.4">msaa_view</text>
   <rect class="box ext" x="219.4" y="24.0" width="116.9" height="46.0"/>
   <text class="lbl ext" x="277.9" y="43.5" text-anchor="middle">window_event</text>
-  <text class="sub" x="277.9" y="58.5" text-anchor="middle">sarx-app</text>
+  <text class="sub" x="277.9" y="58.5" text-anchor="middle">atum</text>
   <rect class="box" x="204.9" y="274.0" width="146.0" height="46.0"/>
   <text class="lbl" x="277.9" y="301.0" text-anchor="middle">Renderer::resize</text>
   <rect class="box" x="197.6" y="524.0" width="160.5" height="46.0"/>
@@ -1356,7 +1356,7 @@ footer { border-top: 1px solid var(--rule); padding-top: 16px; color: var(--mute
   <text class="note" x="394.8" y="1102.0" text-anchor="middle">continues in Chart 2</text>
 </svg>
   </div>
-  <figcaption><p><code>window_event</code> in <code>sarx-app</code> calls <code>Renderer::resize</code> with the
+  <figcaption><p><code>window_event</code> in <code>atum</code> calls <code>Renderer::resize</code> with the
   window&rsquo;s new size. <code>Renderer::resize</code> passes the size on to <code>GpuContext::resize</code>.
   <code>GpuContext::resize</code> checks two things before it goes further. The width and the height must both be above
   zero, and a surface must exist. A minimised window typically reports a size of zero, which therefore leaves the surface as it
@@ -1382,7 +1382,7 @@ footer { border-top: 1px solid var(--rule); padding-top: 16px; color: var(--mute
   <polygon class="head" points="131.8,524.0 127.3,515.0 136.3,515.0"/>
   <rect class="box ext" x="75.8" y="24.0" width="112.0" height="46.0"/>
   <text class="lbl ext" x="131.8" y="43.5" text-anchor="middle">suspended</text>
-  <text class="sub" x="131.8" y="58.5" text-anchor="middle">sarx-app</text>
+  <text class="sub" x="131.8" y="58.5" text-anchor="middle">atum</text>
   <rect class="box" x="55.2" y="274.0" width="153.2" height="46.0"/>
   <text class="lbl" x="131.8" y="301.0" text-anchor="middle">Renderer::suspend</text>
   <rect class="box" x="48.0" y="524.0" width="167.7" height="46.0"/>
@@ -1435,7 +1435,7 @@ footer { border-top: 1px solid var(--rule); padding-top: 16px; color: var(--mute
   <text class="clbl" x="313.5" y="733.8">surface_context</text>
   <rect class="box ext" x="147.4" y="24.0" width="112.0" height="46.0"/>
   <text class="lbl ext" x="203.4" y="43.5" text-anchor="middle">resumed</text>
-  <text class="sub" x="203.4" y="58.5" text-anchor="middle">sarx-app</text>
+  <text class="sub" x="203.4" y="58.5" text-anchor="middle">atum</text>
   <rect class="box" x="130.4" y="274.0" width="146.0" height="46.0"/>
   <text class="lbl" x="203.4" y="301.0" text-anchor="middle">Renderer::resume</text>
   <rect class="box" x="123.1" y="524.0" width="160.5" height="46.0"/>
@@ -1452,7 +1452,7 @@ footer { border-top: 1px solid var(--rule); padding-top: 16px; color: var(--mute
   </div>
   <figcaption><p>Both parts of this chart run only on a platform that can take the window away while the app runs,
   such as a phone. On Windows, winit never calls <code>suspended</code>. It calls <code>resumed</code> once, and that
-  call takes the path on Chart 1. Part 1 suspends the renderer. <code>suspended</code> in <code>sarx-app</code> calls
+  call takes the path on Chart 1. Part 1 suspends the renderer. <code>suspended</code> in <code>atum</code> calls
   <code>Renderer::suspend</code>, which calls <code>GpuContext::suspend</code>. <code>GpuContext::suspend</code>
   assigns <code>None</code> to <code>surface_context</code>. Rust drops the old <code>SurfaceContext</code> at that
   line, and the surface inside it. Part 2 resumes the renderer. <code>resumed</code> calls
@@ -1769,11 +1769,11 @@ footer { border-top: 1px solid var(--rule); padding-top: 16px; color: var(--mute
     <table>
       <thead><tr><th scope="col">Module</th><th scope="col">In</th><th scope="col">Called by</th><th scope="col">Out</th><th scope="col">Calls</th></tr></thead>
       <tbody>
-<tr><td><span class="mono">Renderer::new</span></td><td class="num">1</td><td><span class="mono">resumed (sarx-app)</span></td><td class="num">6</td><td><span class="mono">GpuContext::new, Mesh::triangle, GpuContext::create_vertex_buffer, GpuContext::create_shader, GpuContext::create_pipeline, Mesh::vertex_count</span></td></tr>
-<tr><td><span class="mono">Renderer::resize</span></td><td class="num">1</td><td><span class="mono">window_event (sarx-app)</span></td><td class="num">1</td><td><span class="mono">GpuContext::resize</span></td></tr>
-<tr><td><span class="mono">Renderer::suspend</span></td><td class="num">1</td><td><span class="mono">suspended (sarx-app)</span></td><td class="num">1</td><td><span class="mono">GpuContext::suspend</span></td></tr>
-<tr><td><span class="mono">Renderer::resume</span></td><td class="num">1</td><td><span class="mono">resumed (sarx-app)</span></td><td class="num">1</td><td><span class="mono">GpuContext::resume</span></td></tr>
-<tr class="hi"><td><span class="mono">Renderer::render</span></td><td class="num">1</td><td><span class="mono">window_event (sarx-app)</span></td><td class="num">14</td><td><span class="mono">Surface::get_current_texture, GpuContext::reconfigure, GpuContext::recreate, Texture::create_view, Device::create_command_encoder, CommandEncoder::begin_render_pass, RenderPass::set_pipeline, Buffer::slice, RenderPass::set_vertex_buffer, RenderPass::draw, drop, CommandEncoder::finish, Queue::submit, Queue::present</span></td></tr>
+<tr><td><span class="mono">Renderer::new</span></td><td class="num">1</td><td><span class="mono">resumed (atum)</span></td><td class="num">6</td><td><span class="mono">GpuContext::new, Mesh::triangle, GpuContext::create_vertex_buffer, GpuContext::create_shader, GpuContext::create_pipeline, Mesh::vertex_count</span></td></tr>
+<tr><td><span class="mono">Renderer::resize</span></td><td class="num">1</td><td><span class="mono">window_event (atum)</span></td><td class="num">1</td><td><span class="mono">GpuContext::resize</span></td></tr>
+<tr><td><span class="mono">Renderer::suspend</span></td><td class="num">1</td><td><span class="mono">suspended (atum)</span></td><td class="num">1</td><td><span class="mono">GpuContext::suspend</span></td></tr>
+<tr><td><span class="mono">Renderer::resume</span></td><td class="num">1</td><td><span class="mono">resumed (atum)</span></td><td class="num">1</td><td><span class="mono">GpuContext::resume</span></td></tr>
+<tr class="hi"><td><span class="mono">Renderer::render</span></td><td class="num">1</td><td><span class="mono">window_event (atum)</span></td><td class="num">14</td><td><span class="mono">Surface::get_current_texture, GpuContext::reconfigure, GpuContext::recreate, Texture::create_view, Device::create_command_encoder, CommandEncoder::begin_render_pass, RenderPass::set_pipeline, Buffer::slice, RenderPass::set_vertex_buffer, RenderPass::draw, drop, CommandEncoder::finish, Queue::submit, Queue::present</span></td></tr>
 <tr class="hi"><td><span class="mono">GpuContext::new</span></td><td class="num">1</td><td><span class="mono">Renderer::new</span></td><td class="num">18</td><td><span class="mono">Clone::clone, Box::new, InstanceDescriptor::new_with_display_handle, Instance::new, Arc::new, Arc::clone, Instance::create_surface, Instance::request_adapter, Limits::default, Adapter::request_device, Surface::get_default_config, Adapter::get_texture_format_features, TextureFormatFeatureFlags::sample_count_supported, SurfaceContext::new, From::from (three), Option::ok_or</span></td></tr>
 <tr><td><span class="mono">GpuContext::resize</span></td><td class="num">1</td><td><span class="mono">Renderer::resize</span></td><td class="num">1</td><td><span class="mono">SurfaceContext::resize</span></td></tr>
 <tr><td><span class="mono">GpuContext::reconfigure</span></td><td class="num">1</td><td><span class="mono">Renderer::render</span></td><td class="num">1</td><td><span class="mono">SurfaceContext::reconfigure</span></td></tr>
@@ -1792,8 +1792,8 @@ footer { border-top: 1px solid var(--rule); padding-top: 16px; color: var(--mute
 <tr><td><span class="mono">Mesh::vertex_count</span></td><td class="num">1</td><td><span class="mono">Renderer::new</span></td><td class="num">1</td><td><span class="mono">Vec::len</span></td></tr>
 <tr><td><span class="mono">Mesh::to_bytes</span></td><td class="num">1</td><td><span class="mono">GpuContext::create_vertex_buffer</span></td><td class="num">4</td><td><span class="mono">slice::iter, Iterator::flatten, Iterator::flat_map, Iterator::collect</span></td></tr>
 <tr><td><span class="mono">the closure in Mesh::to_bytes</span></td><td class="num">1</td><td><span class="mono">Iterator::collect</span></td><td class="num">1</td><td><span class="mono">f32::to_ne_bytes</span></td></tr>
-<tr><td><span class="mono">Display::fmt</span></td><td class="num">1</td><td><span class="mono">App::print_error (sarx-app)</span></td><td class="num">1</td><td><span class="mono">Formatter::write_str</span></td></tr>
-<tr><td><span class="mono">Error::source</span></td><td class="num">1</td><td><span class="mono">App::print_error (sarx-app)</span></td><td class="num">0</td><td><span class="mono">none</span></td></tr>
+<tr><td><span class="mono">Display::fmt</span></td><td class="num">1</td><td><span class="mono">App::print_error (atum)</span></td><td class="num">1</td><td><span class="mono">Formatter::write_str</span></td></tr>
+<tr><td><span class="mono">Error::source</span></td><td class="num">1</td><td><span class="mono">App::print_error (atum)</span></td><td class="num">0</td><td><span class="mono">none</span></td></tr>
 <tr><td><span class="mono">From::from (CreateSurfaceError)</span></td><td class="num">2</td><td><span class="mono">GpuContext::new, GpuContext::create_surface_context</span></td><td class="num">0</td><td><span class="mono">none</span></td></tr>
 <tr><td><span class="mono">From::from (RequestAdapterError)</span></td><td class="num">1</td><td><span class="mono">GpuContext::new</span></td><td class="num">0</td><td><span class="mono">none</span></td></tr>
 <tr><td><span class="mono">From::from (RequestDeviceError)</span></td><td class="num">1</td><td><span class="mono">GpuContext::new</span></td><td class="num">0</td><td><span class="mono">none</span></td></tr>
@@ -1810,19 +1810,19 @@ footer { border-top: 1px solid var(--rule); padding-top: 16px; color: var(--mute
     measure of it. Fewer and simpler couples mean looser coupling, and looser coupling makes a better design.</p>
   </div>
   <div class="notes">
-<article class="note-item"><h3>Tramp data through Renderer</h3><p><code>Renderer::new</code> passes <code>window</code>, <code>width</code> and <code>height</code> to <code>GpuContext::new</code> without reading them. <code>Renderer::resize</code> and <code>Renderer::resume</code> do the same with their arguments. <code>Renderer::suspend</code> takes no arguments, and only passes the call on. Yourdon and Constantine call data that a module only passes on <em>tramp data</em>. They usually count it against a design. Here it is a decision, taken to keep <code>GpuContext</code> private to <code>sarx-render</code>, together with the wgpu types inside it. <code>Renderer</code> and <code>RendererError</code> are the only public items in the crate. As a result, a change to the fields or methods of <code>GpuContext</code> affects no other crate.</p></article>
+<article class="note-item"><h3>Tramp data through Renderer</h3><p><code>Renderer::new</code> passes <code>window</code>, <code>width</code> and <code>height</code> to <code>GpuContext::new</code> without reading them. <code>Renderer::resize</code> and <code>Renderer::resume</code> do the same with their arguments. <code>Renderer::suspend</code> takes no arguments, and only passes the call on. Yourdon and Constantine call data that a module only passes on <em>tramp data</em>. They usually count it against a design. Here it is a decision, taken to keep <code>GpuContext</code> private to <code>amaterasu</code>, together with the wgpu types inside it. <code>Renderer</code> and <code>RendererError</code> are the only public items in the crate. As a result, a change to the fields or methods of <code>GpuContext</code> affects no other crate.</p></article>
 <article class="note-item"><h3>The fan-out of GpuContext::new</h3><p><code>GpuContext::new</code> calls eighteen modules, across Charts 2 and 3. Designers commonly keep fan-out to about seven, and eighteen is more than twice that. The couples on Chart 2 show why the calls come in a fixed order. Each wgpu call takes a value that an earlier call returned. <code>instance</code> creates <code>surface</code>. <code>surface</code> helps choose <code>adapter</code>, and <code>adapter</code> opens <code>device</code>. The comments in the code divide the body into six steps. They are creating the instance and the surface, choosing the adapter, opening the device, choosing the configuration, checking anti-aliasing, and building the <code>SurfaceContext</code>. Yourdon and Constantine call the moving of a job into a module of its own <em>factoring</em>. Factoring each step into a function of its own would bring the fan-out down to six. The couples of each new function would then state what its step needs and returns. <code>create_surface_context</code> on Chart 10 already performs the surface steps, for every later surface. <code>GpuContext::new</code> cannot call it for the first surface, however. <code>create_surface_context</code> checks the surface against <code>self.format</code>, and <code>GpuContext::new</code> reads that format from the first surface&rsquo;s configuration.</p></article>
 <article class="note-item"><h3>The stages of Renderer::render</h3><p><code>Renderer::render</code> calls fourteen modules. Most of them fall into four stages. First, it gets a texture with <code>Surface::get_current_texture</code> and <code>Texture::create_view</code>. Second, it starts recording with <code>Device::create_command_encoder</code> and <code>CommandEncoder::begin_render_pass</code>. Third, it records the draw with <code>RenderPass::set_pipeline</code>, <code>Buffer::slice</code>, <code>RenderPass::set_vertex_buffer</code> and <code>RenderPass::draw</code>. It then ends the pass with <code>drop</code>, and the recording with <code>CommandEncoder::finish</code>. Fourth, it hands the work to the GPU with <code>Queue::submit</code> and <code>Queue::present</code>. Yourdon and Constantine also describe a kind of module that explains the remaining calls. A <em>transaction centre</em> looks at the kind of its input, then passes the input to one of several actions. <code>Renderer::render</code> is one. Its input is the value that <code>Surface::get_current_texture</code> returns. The arms of the <code>match</code> on that value decide between drawing, reconfiguring, recreating and returning at once.</p></article>
 <article class="note-item"><h3>Shared modules</h3><p>Five modules have a fan-in of two. Four of them are <code>SurfaceContext::new</code>, <code>SurfaceContext::reconfigure</code>, <code>GpuContext::create_msaa_view</code> and <code>GpuContext::create_surface_context</code>. The fifth is the <code>From::from</code> that turns a <code>CreateSurfaceError</code> into a <code>RendererError</code>. Each of the five does a job that two callers need. <code>SurfaceContext::new</code>, for example, builds a <code>SurfaceContext</code> at start-up, and again for every later surface. Yourdon and Constantine count fan-in like this in a design&rsquo;s favour, since a change to the job happens in one place.</p></article>
 <article class="note-item"><h3>Ending the render pass</h3><p><code>CommandEncoder::begin_render_pass</code> returns a <code>RenderPass&lt;'encoder&gt;</code>. The <code>'encoder</code> is a lifetime. It tells the compiler that <code>render_pass</code> borrows <code>encoder</code> for as long as the pass exists. The borrow is mutable. While it lasts, no other code can use <code>encoder</code>. <code>CommandEncoder::finish</code> takes <code>encoder</code> by value. The compiler refuses to give away a value that is still borrowed. <code>render</code> therefore passes <code>render_pass</code> to <code>drop</code> first. Dropping the pass ends the borrow. The hidden call to its <code>Drop::drop</code> also ends the pass inside wgpu. Java has no counterpart. A Java object stays usable while anything refers to it, and nothing checks the order of such calls at compile time.</p></article>
 <article class="note-item"><h3>Errors through ?</h3><p>The <code>From::from</code> calls on Charts 3 and 10 never appear in the code. The <code>?</code> after a call makes the function return early on an error. On the way out, it converts the error to the function&rsquo;s own error type, through <code>From</code>. The nearest Java pattern catches an exception, wraps it, and throws the wrapper, as in <code>catch (IOException e) { throw new RendererException(e); }</code>. The two differ in how the conversion happens. Rust picks the <code>From</code> implementation at compile time, from the type of the error. The error then travels back as an ordinary return value, with no stack unwinding.</p></article>
-<article class="note-item"><h3>Box, Arc and dyn on Charts 2 and 8</h3><p><code>Box::new</code> moves the cloned window onto the heap. It returns a <code>Box</code>, the pointer that owns the window. <code>InstanceDescriptor::new_with_display_handle</code> takes a <code>Box</code> because it stores the display as a <em>trait object</em>. A trait object is a value known only by the traits that it implements. The compiler cannot know its size in advance, which is why it has to be reached through a pointer. An <code>Arc</code> is a pointer that several owners can share at once. Each <code>Arc::clone</code> adds one owner, and returns a new pointer to the same value. The value is freed when the last owner drops its pointer. The window that reaches <code>GpuContext::new</code> is already an <code>Arc&lt;Window&gt;</code>, from <code>sarx-app</code>. <code>Arc::new</code> wraps it in a second, outer <code>Arc</code>. <code>GpuContext::resume</code> on Chart 8 wraps the window in the same way. The surface receives a clone of the outer <code>Arc</code>. <code>SurfaceContext</code> keeps the outer <code>Arc</code> itself, as an <code>Arc&lt;dyn DisplayAndWindowHandle&gt;</code>. That type is another trait object. It lets <code>SurfaceContext</code> keep a window of any type, without a type parameter of its own. A Java field of an interface type works the same way. The two differ in the pointer. Every Java object is already reached through a reference. Rust asks for the <code>Box</code> or the <code>Arc</code> to be written out.</p></article>
+<article class="note-item"><h3>Box, Arc and dyn on Charts 2 and 8</h3><p><code>Box::new</code> moves the cloned window onto the heap. It returns a <code>Box</code>, the pointer that owns the window. <code>InstanceDescriptor::new_with_display_handle</code> takes a <code>Box</code> because it stores the display as a <em>trait object</em>. A trait object is a value known only by the traits that it implements. The compiler cannot know its size in advance, which is why it has to be reached through a pointer. An <code>Arc</code> is a pointer that several owners can share at once. Each <code>Arc::clone</code> adds one owner, and returns a new pointer to the same value. The value is freed when the last owner drops its pointer. The window that reaches <code>GpuContext::new</code> is already an <code>Arc&lt;Window&gt;</code>, from <code>atum</code>. <code>Arc::new</code> wraps it in a second, outer <code>Arc</code>. <code>GpuContext::resume</code> on Chart 8 wraps the window in the same way. The surface receives a clone of the outer <code>Arc</code>. <code>SurfaceContext</code> keeps the outer <code>Arc</code> itself, as an <code>Arc&lt;dyn DisplayAndWindowHandle&gt;</code>. That type is another trait object. It lets <code>SurfaceContext</code> keep a window of any type, without a type parameter of its own. A Java field of an interface type works the same way. The two differ in the pointer. Every Java object is already reached through a reference. Rust asks for the <code>Box</code> or the <code>Arc</code> to be written out.</p></article>
 <article class="note-item"><h3>Lazy iterators on Chart 5</h3><p><code>slice::iter</code>, <code>Iterator::flatten</code> and <code>Iterator::flat_map</code> each return at once, before they read a single coordinate. <code>slice::iter</code> returns an iterator over the vertices. <code>flatten</code> and <code>flat_map</code> each return an iterator that wraps the one before it. <code>Iterator::collect</code> does all of the work. It pulls one value at a time through the chain, and calls the closure for each coordinate. A Java <code>Stream</code> behaves the same way. <code>map</code> and <code>flatMap</code> describe the work, and a terminal operation such as <code>collect</code> runs it. The two differ in the code that actually runs. A Java stream builds an object for each stage, and calls through each one in turn. The Rust compiler can inline the whole chain into one plain loop, in a release build.</p></article>
   </div>
 </section>
 
 <footer>
-  Drawn from <span class="mono">crates/sarx-render/src/renderer.rs</span>,
+  Drawn from <span class="mono">crates/amaterasu/src/renderer.rs</span>,
   <span class="mono">mesh.rs</span> and <span class="mono">error.rs</span>.
 </footer>
 

@@ -1,9 +1,9 @@
 [package]
-name = "sarx-app"
+name = "atum"
 version.workspace = true
 edition.workspace = true
 publish.workspace = true
 
 [dependencies]
-sarx-render = { version = "0.1.0", path = "../sarx-render" }
+amaterasu = { version = "0.1.0", path = "../amaterasu" }
 winit = "0.30.13"

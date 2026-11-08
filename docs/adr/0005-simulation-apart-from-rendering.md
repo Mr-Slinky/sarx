@@ -29,7 +29,7 @@ How does the simulation advance in time, relative to the frames that the rendere
 
 - A player on any device plays the same game. A laptop with a 60 Hz screen and a desktop with a
   144 Hz monitor see the world change at the same rate.
-- The simulation has its own crate, `sarx-sim`, which does not depend on any graphics code.
+- The simulation has its own crate, `zurvan`, which does not depend on any graphics code.
 - The simulation loop is structure. The developer builds it by hand, and extends it as the ECS and
   the physics engine build on it.
 
@@ -56,7 +56,7 @@ The cap matters on a slow device. Such a device takes longer to compute a step t
 that the step covers. With the cap, it runs the game in slow motion. Without the cap, it would fall
 further behind on every frame, until the backlog of steps froze the game.
 
-The simulation lives in the `sarx-sim` crate, which does not depend on any graphics code. Today the
+The simulation lives in the `zurvan` crate, which does not depend on any graphics code. Today the
 crate contains only the `add` function that `cargo new` generates. The first fixed-step simulation
 arrives with the TODO item "Move the triangle from a fixed-step simulation with a minimal ECS".
 
@@ -72,7 +72,7 @@ Two questions remain open. This decision leaves both to a later discussion.
 - Good, because every system and the physics engine work with one constant step length. A physics
   step of the same length every time gives the same result from the same starting state.
 - Good, because a faster screen draws more frames, while the world moves at the same speed.
-- Good, because `sarx-sim` builds, and its tests run, without a window or a GPU.
+- Good, because `zurvan` builds, and its tests run, without a window or a GPU.
 - Bad, because the step rate and the frame rate rarely match. A frame can show the same state as the
   frame before it. A frame can also arrive after more than one step has run. Motion then judders.
   Interpolation is the usual remedy, and it remains open.
@@ -83,8 +83,8 @@ Two questions remain open. This decision leaves both to a later discussion.
 
 ### Confirmation
 
-`cargo tree -p sarx-sim` does not list a graphics crate, such as `wgpu`, `winit` or `sarx-render`.
-The `[dependencies]` table in `crates/sarx-sim/Cargo.toml` shows the same.
+`cargo tree -p zurvan` does not list a graphics crate, such as `wgpu`, `winit` or `amaterasu`.
+The `[dependencies]` table in `crates/zurvan/Cargo.toml` shows the same.
 
 Once the simulation exists, a reader also checks the code for four points:
 

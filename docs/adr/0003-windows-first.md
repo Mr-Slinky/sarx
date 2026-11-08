@@ -81,7 +81,7 @@ The code that a port would need stays in place. It consists of two pieces:
 
 ### Confirmation
 
-`GpuContext::new` in `crates/sarx-render/src/renderer.rs` requests `Limits::default()`.
+`GpuContext::new` in `crates/amaterasu/src/renderer.rs` requests `Limits::default()`.
 
 ## Pros and Cons of the Options
 

@@ -38,6 +38,13 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "683d7910e743518b0e34f1186f92494becacb047c7b6bf616c96772180fef923"
 
 [[package]]
+name = "amaterasu"
+version = "0.1.0"
+dependencies = [
+ "wgpu",
+]
+
+[[package]]
 name = "android-activity"
 version = "0.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -103,6 +110,14 @@ name = "atomic-waker"
 version = "1.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1505bd5d3d116872e7271a6d4e16d81d0c8570876c8de68093a09ac269d8aac0"
+
+[[package]]
+name = "atum"
+version = "0.1.0"
+dependencies = [
+ "amaterasu",
+ "winit",
+]
 
 [[package]]
 name = "autocfg"
@@ -370,6 +385,10 @@ name = "dpi"
 version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d8b14ccef22fc6f5a8f4d7d768562a182c04ce9a3b3157b91390b52ddfdf1a76"
+
+[[package]]
+name = "enki"
+version = "0.1.0"
 
 [[package]]
 name = "equivalent"
@@ -1440,29 +1459,6 @@ checksum = "93fc1dc3aaa9bfed95e02e6eadabb4baf7e3078b0bd1b4d7b6b0b68378900502"
 dependencies = [
  "winapi-util",
 ]
-
-[[package]]
-name = "sarx-app"
-version = "0.1.0"
-dependencies = [
- "sarx-render",
- "winit",
-]
-
-[[package]]
-name = "sarx-ecs"
-version = "0.1.0"
-
-[[package]]
-name = "sarx-render"
-version = "0.1.0"
-dependencies = [
- "wgpu",
-]
-
-[[package]]
-name = "sarx-sim"
-version = "0.1.0"
 
 [[package]]
 name = "scoped-tls"
@@ -2540,3 +2536,7 @@ dependencies = [
  "quote",
  "syn 2.0.119",
 ]
+
+[[package]]
+name = "zurvan"
+version = "0.1.0"

@@ -80,7 +80,7 @@ Several points remain open. The developer settles them once the simulation has c
 
 ### Confirmation
 
-Nothing in the code embodies this decision yet. `sarx-sim` is the crate for the simulation, and it
+Nothing in the code embodies this decision yet. `zurvan` is the crate for the simulation, and it
 contains only the function that `cargo new` generates.
 
 Once the simulation changes the world, a reviewer confirms three points:

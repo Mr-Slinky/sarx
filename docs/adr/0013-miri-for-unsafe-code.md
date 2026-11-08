@@ -8,7 +8,7 @@ decision-makers: Kheagen Haskins
 
 ## Context and Problem Statement
 
-`ComponentVec` in `sarx-ecs` stores components as raw bytes. It manages its own block of memory
+`ComponentVec` in `enki` stores components as raw bytes. It manages its own block of memory
 through `unsafe` code. A mistake in that code can cause undefined behaviour, such as reading freed
 memory or dropping a component twice.
 
@@ -40,7 +40,7 @@ Chosen option: "Plain `cargo test` plus Miri on the nightly toolchain", because 
 hide a fault in `unsafe` code, and Miri detects that fault.
 
 The nightly toolchain is an exception to the stable-only practice. The exception applies to the Miri
-check alone. Miri runs only the `sarx-ecs` tests. `rust-toolchain.toml` selects stable as the
+check alone. Miri runs only the `enki` tests. `rust-toolchain.toml` selects stable as the
 toolchain that builds and runs Sarx.
 
 ### Consequences
@@ -56,7 +56,7 @@ toolchain that builds and runs Sarx.
 
 ### Confirmation
 
-`cargo +nightly miri test -p sarx-ecs` passes, and `rust-toolchain.toml` selects the stable channel.
+`cargo +nightly miri test -p enki` passes, and `rust-toolchain.toml` selects the stable channel.
 
 ## Pros and Cons of the Options
 

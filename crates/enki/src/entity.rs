@@ -18,7 +18,7 @@
 /// original handle.
 ///
 /// ```
-/// use sarx_ecs::World;
+/// use enki::World;
 ///
 /// // Spawns an entity, and copies its handle
 /// let mut world = World::new();

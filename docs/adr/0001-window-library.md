@@ -12,7 +12,7 @@ Sarx needs a window to draw into. It also needs an event loop. An event loop is 
 receives input and other events from the operating system and passes them on to the game.
 
 Structure is code that other code builds on. The event loop is the first piece of structure in
-`sarx-app`. The GPU setup already builds on it. The fixed-step simulation will build on it in a later step.
+`atum`. The GPU setup already builds on it. The fixed-step simulation will build on it in a later step.
 
 Sarx is built and tested on Windows, as ADR 0003 records. A port to another platform stays possible,
 though none is planned.
@@ -46,7 +46,7 @@ documentation uses it, and the same code runs on the other platforms that a port
 
 - Good, because the examples in the wgpu repository open their windows with the same library.
 - Good, because a port to another platform keeps the same window layer.
-- Good, because only `sarx-app` depends on winit. The simulation and the renderer therefore stay
+- Good, because only `atum` depends on winit. The simulation and the renderer therefore stay
   independent of the window layer.
 - Bad, because Sarx follows the design of winit. `App` implements the `ApplicationHandler` trait from
   winit, and winit calls the methods of that trait for each event.
@@ -56,7 +56,7 @@ documentation uses it, and the same code runs on the other platforms that a port
 
 ### Confirmation
 
-`cargo tree -i winit` lists `sarx-app` as the only Sarx crate that depends on winit.
+`cargo tree -i winit` lists `atum` as the only Sarx crate that depends on winit.
 
 ## Pros and Cons of the Options
 

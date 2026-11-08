@@ -1,6 +1,6 @@
 ---
 status: accepted
-date: 2026-10-26
+date: 2026-11-08
 decision-makers: Kheagen Haskins
 ---
 
@@ -8,7 +8,7 @@ decision-makers: Kheagen Haskins
 
 ## Context and Problem Statement
 
-ADR 0009 settles that the developer writes the ECS by hand, in the `sarx-ecs` crate. That record
+ADR 0009 settles that the developer writes the ECS by hand, in the `enki` crate. That record
 leaves one question open: how the ECS stores its components. This record settles it.
 
 The layout of the components in memory decides how fast the systems run. The reason lies in how the
@@ -43,6 +43,8 @@ How does the ECS lay out its components in memory?
   read memory in order.
 - Entities gain and lose components while the game runs. The central AI assigning a task is one
   example.
+- Some systems work on a whole column at once. Such a system uses slice operations, or SIMD
+  instructions, which process several values in one CPU instruction.
 - The ECS is structure that other code builds on. Its first version follows the design that Sarx
   keeps. Later work extends that design rather than replacing it.
 
@@ -84,15 +86,39 @@ Sparse sets, a second way to store components, remain open as a later extension.
 would add them for one component type at a time. They would add them only where a measurement shows that
 moving entities between tables has become the slow part of a step.
 
+### Queries per Table
+
+A query hands a system one table at a time. For each matching table, the system receives one slice
+for each component type that it asks for. A query for `(&mut Position, &Velocity)`, for example,
+gives the system a `&mut [Position]` and a `&[Velocity]` for each table. Row 5 of each slice belongs
+to the same entity.
+
+The system then writes its own loop over the rows. It can also treat each slice as a whole, through
+slice operations or SIMD instructions.
+
+A second layer serves the systems that work on one entity at a time. It walks the slices of each
+table, and yields one row at a time. Its loop reads memory in the same order as a loop over the
+slices.
+
+The slices form the base because only that direction works. A row iterator takes a few lines of code
+on top of the slices. A system that receives one row at a time has no way to recover the slice that
+the row came from.
+
+flecs, an ECS written in C, appears to hand out queries per table in the same way. Unity's DOTS
+hands out chunks of rows. hecs and Bevy lead with an iterator that yields one entity at a time.
+
 ### Consequences
 
 - Good, because every query reads its tables in order. Row by row, the columns of a table line up
   on the same entity. A query therefore does not look anything up.
 - Good, because every query that a system writes reads in order, whichever component types it asks
   for.
+- Good, because a system can process a whole column at once, through slice operations or SIMD
+  instructions.
+- Good, because a later scheduler can split the tables of one query across threads.
 - Good, because the developer learns how a type that is known only at run time is laid out in
   memory. Each column of a table is raw bytes, laid out with the size and alignment of its component
-  type. `sarx-ecs` reads those bytes through `unsafe` code.
+  type. `enki` reads those bytes through `unsafe` code.
 - Bad, because adding a component to an entity, or removing one, moves the entity to another table.
   The move takes three steps. The ECS copies every component of the entity into the new table. It
   fills the old row with the last row of the table. It then updates the recorded location of the
@@ -102,10 +128,12 @@ moving entities between tables has become the slow part of a step.
   villager then walks eight short runs in place of one long one.
 - Bad, because the number of component types in one world has a limit. The ECS records the set of
   types in each table as a mask, with one bit for each type. A mask has a fixed number of bits,
-  which `ComponentMask::CAPACITY` in `sarx-ecs` defines. Every state component takes one of those
+  which `ComponentMask::CAPACITY` in `enki` defines. Every state component takes one of those
   bits, alongside the components of physics, the central AI and the villagers themselves.
 - Bad, because the compiler cannot check the `unsafe` code in the tables. A mistake in the size or
   alignment of a column corrupts memory, where safe code would fail to compile.
+- Bad, because the ECS builds each slice from a raw pointer and a row count, in `unsafe` code. A
+  wrong count gives the system a slice that runs past the end of its column.
 
 The number of moves is an estimate. Suppose each of 10,000 villagers changes state about once every
 five seconds. At 60 steps a second, the ECS then moves around 33 entities on each step. That is
@@ -114,8 +142,9 @@ measurement replaces it once the central AI exists.
 
 ### Confirmation
 
-A reader confirms this decision in `sarx-ecs`. There, the ECS stores the components of each entity
-in the table of its archetype, with one column per component type.
+A reader confirms this decision in `enki`. There, the ECS stores the components of each entity
+in the table of its archetype, with one column per component type. A query there hands a system one
+slice per component type for each table, and the row iterator builds on those slices.
 
 ## Pros and Cons of the Options
 

@@ -64,7 +64,7 @@ each point of the grid. The grid lies flat. Each height lifts the ground at its 
 
 ### Confirmation
 
-Nothing in the code embodies this decision yet. `sarx-render` draws a single triangle. `sarx-sim`
+Nothing in the code embodies this decision yet. `amaterasu` draws a single triangle. `zurvan`
 contains only the `add` function that `cargo new` generates.
 
 The foundation work in the README ends with lit heightmap terrain on screen. Once that step is done,

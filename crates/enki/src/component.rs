@@ -1,4 +1,5 @@
-//! Defines the vector that stores the components of one type.
+//! Defines [`Component`], the trait that marks a type as a component, and the vector that stores
+//! the components of one type.
 //!
 //! An archetype is one set of component types. Each archetype has a table, which stores its
 //! entities. The table has one column for each component type. A [`ComponentVec`] is one such
@@ -130,6 +131,40 @@ use std::{mem, ptr, slice};
 // ========================================================================================== \\
 //                                         Public API                                         \\
 // ========================================================================================== \\
+
+/// Marks a type as a component, which a [`World`](crate::World) can store on an entity.
+///
+/// The game makes a type a component by implementing this trait for it, with one empty `impl`.
+/// Every other type stays outside the world. As a result, a tuple passed to
+/// `World::add_component` by mistake fails to compile, as ADR 0016 sets out.
+///
+/// The trait requires three other traits of every component type:
+///
+/// - `'static` means that any reference inside the type stays valid for the whole program. The
+///   world can then keep a component for as long as it needs.
+/// - `Send` lets the world move its components to another thread.
+/// - `Sync` lets several threads read the same component at once.
+///
+/// # Examples
+///
+/// The example marks `Health` as a component, then gives an entity one.
+///
+/// ```
+/// use enki::{Component, World};
+///
+/// struct Health(u32);
+///
+/// // Marks `Health` as a component
+/// impl Component for Health {}
+///
+/// let mut world = World::new();
+/// let player = world.spawn_empty_ent();
+/// world.add_component(player, Health(100));
+///
+/// let health = world.get::<Health>(player).map(|health| health.0);
+/// assert_eq!(health, Some(100));
+/// ```
+pub trait Component: Send + Sync + 'static {}
 
 /// Stores components of one type as raw bytes, in one block of memory that grows as the vector
 /// fills.

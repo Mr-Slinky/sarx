@@ -9,7 +9,7 @@
 use std::error::Error;
 use std::sync::Arc;
 
-use sarx_render::Renderer;
+use amaterasu::Renderer;
 use winit::application::ApplicationHandler;
 use winit::event::WindowEvent;
 use winit::event_loop::ActiveEventLoop;

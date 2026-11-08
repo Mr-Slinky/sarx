@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>sarx-app Structure Charts</title>
+<title>atum Structure Charts</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+Condensed:wght@500;600&family=IBM+Plex+Sans:ital,wght@0,400;0,600;1,400&display=swap">
@@ -157,9 +157,9 @@ footer { border-top: 1px solid var(--rule); padding-top: 16px; color: var(--mute
 <div class="frame">
 
 <header class="masthead">
-  <span class="eyebrow">Structured Design &middot; crates/sarx-app</span>
-  <h1>sarx-app structure charts</h1>
-  <p class="lede">This page shows how the functions in the <code>sarx-app</code> crate call one another. The crate
+  <span class="eyebrow">Structured Design &middot; crates/atum</span>
+  <h1>atum structure charts</h1>
+  <p class="lede">This page shows how the functions in the <code>atum</code> crate call one another. The crate
   opens the window and runs the event loop. The page shows the calls with structure charts, a kind of diagram from Yourdon
   and Constantine&rsquo;s book <em>Structured Design</em>. A structure chart shows which modules call which. It also
   shows the values that pass between them on each call. The order of the statements inside a module stays off the
@@ -173,11 +173,11 @@ footer { border-top: 1px solid var(--rule); padding-top: 16px; color: var(--mute
     <p>Each chart is drawn with a few symbols, and this section explains them one at a time. The first is the module.
     In Structured Design, a <em>module</em> is a named piece of code that a caller invokes, and that hands control back
     to the caller when it finishes. In Rust, a module in this sense is a function or a method. It is a different thing
-    from a Rust module, the unit that <code>mod</code> declares. Below each symbol is a line from <code>sarx-app</code>
+    from a Rust module, the unit that <code>mod</code> declares. Below each symbol is a line from <code>atum</code>
     that the symbol stands for.</p>
   </div>
   <div class="key">
-<div class="key-item"><svg class="sc" viewBox="0 0 112 60" role="img" aria-label="A plain box"><rect class="box" x="6" y="15" width="100" height="30"/><text class="lbl" x="56" y="34" text-anchor="middle" style="font-size:11px">block_on</text></svg><div class="key-text"><strong>Module</strong><p>A plain box stands for one function or method in <code>sarx-app</code>. The chart shows only what the function does for its caller.</p></div><pre><code>pub(crate) fn block_on&lt;F: Future&gt;(future: F) -&gt; F::Output {</code></pre></div>
+<div class="key-item"><svg class="sc" viewBox="0 0 112 60" role="img" aria-label="A plain box"><rect class="box" x="6" y="15" width="100" height="30"/><text class="lbl" x="56" y="34" text-anchor="middle" style="font-size:11px">block_on</text></svg><div class="key-text"><strong>Module</strong><p>A plain box stands for one function or method in <code>atum</code>. The chart shows only what the function does for its caller.</p></div><pre><code>pub(crate) fn block_on&lt;F: Future&gt;(future: F) -&gt; F::Output {</code></pre></div>
 <div class="key-item"><svg class="sc" viewBox="0 0 112 60" role="img" aria-label="An arrow from an upper box to a lower box"><rect class="box" x="30" y="2" width="52" height="14"/><line class="call" x1="56" y1="16" x2="56" y2="42"/><polygon class="head" points="56,44 51.5,35 60.5,35"/><rect class="box" x="30" y="44" width="52" height="14"/></svg><div class="key-text"><strong>Call</strong><p>An arrow runs from a module to a module that it calls. The caller is always drawn above.</p></div><pre><code>match block_on(renderer_setup) {   // in resumed</code></pre></div>
 <div class="key-item"><svg class="sc" viewBox="0 0 112 60" role="img" aria-label="A dashed arrow from an upper box to a lower box"><rect class="box" x="30" y="2" width="52" height="14"/><line class="call hidden" x1="56" y1="16" x2="56" y2="42"/><polygon class="head" points="56,44 51.5,35 60.5,35"/><rect class="box" x="30" y="44" width="52" height="14"/></svg><div class="key-text"><strong>Hidden call</strong><p>A dashed arrow is a call that never appears in the code. A library makes the call instead. Sometimes the call comes from a macro, such as <code>println!</code>, which expands into code that makes it.</p></div><pre><code>impl ApplicationHandler for App {
 // winit calls resumed and window_event</code></pre></div>
@@ -189,8 +189,8 @@ footer { border-top: 1px solid var(--rule); padding-top: 16px; color: var(--mute
     match future.as_mut().poll(&amp;mut context) {
         Poll::Ready(output) =&gt; return output,
         Poll::Pending =&gt; thread::park(),</code></pre></div>
-<div class="key-item"><svg class="sc" viewBox="0 0 112 60" role="img" aria-label="A box with a second line inside each side"><rect class="box" x="6" y="15" width="100" height="30"/><line class="libbar" x1="13" y1="15" x2="13" y2="45"/><line class="libbar" x1="99" y1="15" x2="99" y2="45"/><text class="lbl" x="56" y="34" text-anchor="middle" style="font-size:11px">thread::park</text></svg><div class="key-text"><strong>Library module</strong><p>A box with a second line inside each side is a library module. It is a function that the standard library or winit defines, and that <code>sarx-app</code> calls.</p></div><pre><code>Poll::Pending =&gt; thread::park(),</code></pre></div>
-<div class="key-item"><svg class="sc" viewBox="0 0 112 60" role="img" aria-label="A box with a dashed outline"><rect class="box ext" x="6" y="15" width="100" height="30"/><text class="lbl ext" x="56" y="34" text-anchor="middle" style="font-size:11px">Renderer::new</text></svg><div class="key-text"><strong>Module in another crate</strong><p>A dashed box is a function in another Sarx crate. The <code>sarx-render</code> page has a chart for it.</p></div><pre><code>let renderer_setup = Renderer::new(Arc::clone(&amp;window), size.width, size.height);</code></pre></div>
+<div class="key-item"><svg class="sc" viewBox="0 0 112 60" role="img" aria-label="A box with a second line inside each side"><rect class="box" x="6" y="15" width="100" height="30"/><line class="libbar" x1="13" y1="15" x2="13" y2="45"/><line class="libbar" x1="99" y1="15" x2="99" y2="45"/><text class="lbl" x="56" y="34" text-anchor="middle" style="font-size:11px">thread::park</text></svg><div class="key-text"><strong>Library module</strong><p>A box with a second line inside each side is a library module. It is a function that the standard library or winit defines, and that <code>atum</code> calls.</p></div><pre><code>Poll::Pending =&gt; thread::park(),</code></pre></div>
+<div class="key-item"><svg class="sc" viewBox="0 0 112 60" role="img" aria-label="A box with a dashed outline"><rect class="box ext" x="6" y="15" width="100" height="30"/><text class="lbl ext" x="56" y="34" text-anchor="middle" style="font-size:11px">Renderer::new</text></svg><div class="key-text"><strong>Module in another crate</strong><p>A dashed box is a function in another Sarx crate. The <code>amaterasu</code> page has a chart for it.</p></div><pre><code>let renderer_setup = Renderer::new(Arc::clone(&amp;window), size.width, size.height);</code></pre></div>
   </div>
   <div class="rules">
     <p>The labels on the charts follow a few conventions. Each box shows the function&rsquo;s path in Rust syntax, such
@@ -430,7 +430,7 @@ footer { border-top: 1px solid var(--rule); padding-top: 16px; color: var(--mute
   <text class="lbl" x="104.0" y="551.0" text-anchor="middle">Arc::clone</text>
   <rect class="box ext" x="208.0" y="524.0" width="124.2" height="46.0"/>
   <text class="lbl ext" x="270.1" y="543.5" text-anchor="middle">Renderer::new</text>
-  <text class="sub" x="270.1" y="558.5" text-anchor="middle">sarx-render</text>
+  <text class="sub" x="270.1" y="558.5" text-anchor="middle">amaterasu</text>
   <rect class="box" x="380.2" y="524.0" width="112.0" height="46.0"/>
   <text class="lbl" x="436.2" y="551.0" text-anchor="middle">block_on</text>
   <text class="note" x="436.2" y="588.0" text-anchor="middle">continues in Chart 4</text>
@@ -509,7 +509,7 @@ footer { border-top: 1px solid var(--rule); padding-top: 16px; color: var(--mute
   <text class="lbl" x="312.5" y="551.0" text-anchor="middle">Arc::clone</text>
   <rect class="box ext" x="416.5" y="524.0" width="146.0" height="46.0"/>
   <text class="lbl ext" x="489.5" y="543.5" text-anchor="middle">Renderer::resume</text>
-  <text class="sub" x="489.5" y="558.5" text-anchor="middle">sarx-render</text>
+  <text class="sub" x="489.5" y="558.5" text-anchor="middle">amaterasu</text>
   <rect class="box" x="610.5" y="524.0" width="131.4" height="60.0"/>
   <line class="libbar" x1="617.5" y1="524.0" x2="617.5" y2="584.0"/>
   <line class="libbar" x1="734.9" y1="524.0" x2="734.9" y2="584.0"/>
@@ -606,10 +606,10 @@ footer { border-top: 1px solid var(--rule); padding-top: 16px; color: var(--mute
   <text class="lbl" x="124.6" y="564.5" text-anchor="middle">exit</text>
   <rect class="box ext" x="249.2" y="524.0" width="146.0" height="46.0"/>
   <text class="lbl ext" x="322.2" y="543.5" text-anchor="middle">Renderer::resize</text>
-  <text class="sub" x="322.2" y="558.5" text-anchor="middle">sarx-render</text>
+  <text class="sub" x="322.2" y="558.5" text-anchor="middle">amaterasu</text>
   <rect class="box ext" x="443.2" y="524.0" width="146.0" height="46.0"/>
   <text class="lbl ext" x="516.2" y="543.5" text-anchor="middle">Renderer::render</text>
-  <text class="sub" x="516.2" y="558.5" text-anchor="middle">sarx-render</text>
+  <text class="sub" x="516.2" y="558.5" text-anchor="middle">amaterasu</text>
   <rect class="box" x="637.2" y="524.0" width="146.0" height="46.0"/>
   <text class="lbl" x="710.2" y="551.0" text-anchor="middle">App::print_error</text>
   <text class="note" x="710.2" y="588.0" text-anchor="middle">continues in Chart 7</text>
@@ -758,7 +758,7 @@ footer { border-top: 1px solid var(--rule); padding-top: 16px; color: var(--mute
   <text class="lbl" x="110.1" y="551.0" text-anchor="middle">Future::poll</text>
   <rect class="box ext" x="48.0" y="774.0" width="124.2" height="46.0"/>
   <text class="lbl ext" x="110.1" y="793.5" text-anchor="middle">Renderer::new</text>
-  <text class="sub" x="110.1" y="808.5" text-anchor="middle">sarx-render</text>
+  <text class="sub" x="110.1" y="808.5" text-anchor="middle">amaterasu</text>
   <rect class="box" x="220.2" y="524.0" width="117.0" height="46.0"/>
   <line class="libbar" x1="227.2" y1="524.0" x2="227.2" y2="570.0"/>
   <line class="libbar" x1="330.2" y1="524.0" x2="330.2" y2="570.0"/>
@@ -841,12 +841,12 @@ footer { border-top: 1px solid var(--rule); padding-top: 16px; color: var(--mute
   <text class="lbl" x="128.2" y="301.0" text-anchor="middle">suspended</text>
   <rect class="box ext" x="51.7" y="524.0" width="153.2" height="46.0"/>
   <text class="lbl ext" x="128.2" y="543.5" text-anchor="middle">Renderer::suspend</text>
-  <text class="sub" x="128.2" y="558.5" text-anchor="middle">sarx-render</text>
+  <text class="sub" x="128.2" y="558.5" text-anchor="middle">amaterasu</text>
 </svg>
   </div>
   <figcaption><p>winit calls <code>suspended</code> when the app loses its window. That happens only on a platform
   that can take the window away while the app runs, such as a phone. Where a renderer exists, <code>suspended</code>
-  calls <code>Renderer::suspend</code>. The <code>sarx-render</code> page continues from there, in its Chart
+  calls <code>Renderer::suspend</code>. The <code>amaterasu</code> page continues from there, in its Chart
   8.</p></figcaption>
 </figure>
 
@@ -898,10 +898,10 @@ footer { border-top: 1px solid var(--rule); padding-top: 16px; color: var(--mute
   <text class="lbl" x="256.6" y="301.0" text-anchor="middle">App::print_error</text>
   <rect class="box ext" x="113.9" y="524.0" width="116.9" height="46.0"/>
   <text class="lbl ext" x="172.3" y="543.5" text-anchor="middle">Display::fmt</text>
-  <text class="sub" x="172.3" y="558.5" text-anchor="middle">sarx-render</text>
+  <text class="sub" x="172.3" y="558.5" text-anchor="middle">amaterasu</text>
   <rect class="box ext" x="278.8" y="524.0" width="124.2" height="46.0"/>
   <text class="lbl ext" x="340.9" y="543.5" text-anchor="middle">Error::source</text>
-  <text class="sub" x="340.9" y="558.5" text-anchor="middle">sarx-render</text>
+  <text class="sub" x="340.9" y="558.5" text-anchor="middle">amaterasu</text>
 </svg>
   </div>
   <figcaption><p><code>resumed</code> and <code>window_event</code> both report an error through
@@ -909,7 +909,7 @@ footer { border-top: 1px solid var(--rule); padding-top: 16px; color: var(--mute
   For the first line, <code>eprintln!</code> calls the error&rsquo;s <code>Display::fmt</code>, which writes the
   error&rsquo;s message. Next, <code>Error::source</code> returns the error that caused this one, as
   <code>cause</code>. Where <code>cause</code> is <code>Some</code>, a second <code>eprintln!</code> prints the cause
-  as well. Both callers pass a <code>RendererError</code>. The <code>sarx-render</code> page charts its two methods,
+  as well. Both callers pass a <code>RendererError</code>. The <code>amaterasu</code> page charts its two methods,
   in its Chart 4.</p></figcaption>
 </figure>
 
@@ -948,7 +948,7 @@ footer { border-top: 1px solid var(--rule); padding-top: 16px; color: var(--mute
     measure of it. Fewer and simpler couples mean looser coupling, and looser coupling makes a better design.</p>
   </div>
   <div class="notes">
-<article class="note-item"><h3>Calls from winit</h3><p><code>main</code> hands control to <code>EventLoop::run_app</code>, and gets it back only when the event loop ends. From then on, winit decides when the code in <code>sarx-app</code> runs. It does this by calling <code>resumed</code>, <code>window_event</code> and <code>suspended</code>. A structure chart usually has the program&rsquo;s own code at the top, calling everything below it. An event loop turns that around. This is why a library box is at the top of Charts 2, 3 and 6. Java&rsquo;s Swing works the same way. A program registers an <code>ActionListener</code>, and Swing calls it. The comparison stops at the thread. Swing runs its events on a thread of its own, beside <code>main</code>. <code>run_app</code> runs the event loop on the thread that called it. As a result, <code>main</code> stays inside <code>run_app</code> for the whole life of the program.</p></article>
+<article class="note-item"><h3>Calls from winit</h3><p><code>main</code> hands control to <code>EventLoop::run_app</code>, and gets it back only when the event loop ends. From then on, winit decides when the code in <code>atum</code> runs. It does this by calling <code>resumed</code>, <code>window_event</code> and <code>suspended</code>. A structure chart usually has the program&rsquo;s own code at the top, calling everything below it. An event loop turns that around. This is why a library box is at the top of Charts 2, 3 and 6. Java&rsquo;s Swing works the same way. A program registers an <code>ActionListener</code>, and Swing calls it. The comparison stops at the thread. Swing runs its events on a thread of its own, beside <code>main</code>. <code>run_app</code> runs the event loop on the thread that called it. As a result, <code>main</code> stays inside <code>run_app</code> for the whole life of the program.</p></article>
 <article class="note-item"><h3>The fan-out of resumed</h3><p><code>resumed</code> calls eleven modules. Designers commonly keep fan-out to about seven, which puts <code>resumed</code> four above the limit. The two paths on Chart 2 explain the count. The first path makes nine calls, to create the window and set up the renderer. The second path makes six calls, to give the renderer a new surface. Four of those six also appear on the first path. Yourdon and Constantine call the moving of a job into a module of its own <em>factoring</em>. <code>App::print_error</code> is one result of factoring already. It moves the printing of an error and its cause out of <code>resumed</code>. Factoring each path of <code>resumed</code> into a function of its own would bring its fan-out down to two. It would also give each path a name.</p></article>
 <article class="note-item"><h3>Shared reporting in App::print_error</h3><p><code>App::print_error</code> has a fan-in of two. <code>resumed</code> and <code>window_event</code> both report a <code>RendererError</code> through it. Every report therefore takes the same format. The first line starts with <code>Error:</code>. Where the error has a cause, a second line starts with <code>Caused by:</code>. A change to that format happens in one place. The parameter of <code>App::print_error</code> is a <code>&amp;dyn Error</code>. It accepts any type that implements the standard library&rsquo;s <code>Error</code> trait. As a result, <code>App::print_error</code> depends on that trait alone. It works unchanged for any error type that another crate adds later.</p></article>
 <article class="note-item"><h3>The poll couple</h3><p><code>Future::poll</code> returns <code>poll</code>, a value of the <code>Poll</code> enum. <code>Poll</code> has two variants. <code>Poll::Ready</code> contains the future&rsquo;s output. <code>Poll::Pending</code> contains no data. A Java method in this position would often return the output, or <code>null</code> where there is none yet. Yourdon and Constantine call a value that doubles as a signal in that way a <em>hybrid couple</em>. A chart can draw a hybrid couple only as plain data. A Rust enum instead gives each case its own variant. The compiler then rejects a <code>match</code> that leaves a variant out. A sealed interface in Java comes closest, since a <code>switch</code> over one must cover every case too.</p></article>
@@ -959,7 +959,7 @@ footer { border-top: 1px solid var(--rule); padding-top: 16px; color: var(--mute
 </section>
 
 <footer>
-  Drawn from <span class="mono">crates/sarx-app/src/main.rs</span>, <span class="mono">app.rs</span> and
+  Drawn from <span class="mono">crates/atum/src/main.rs</span>, <span class="mono">app.rs</span> and
   <span class="mono">executor.rs</span>.
 </footer>
 

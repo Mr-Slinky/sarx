@@ -66,7 +66,7 @@ impl Display for RendererError {
     /// The description of `UnsupportedSurface` starts in lower case.
     ///
     /// ```
-    /// use sarx_render::RendererError;
+    /// use amaterasu::RendererError;
     ///
     /// // Writes one line, starting in lower case
     /// let message = RendererError::UnsupportedSurface.to_string();
@@ -104,7 +104,7 @@ impl Error for RendererError {
     /// ```
     /// use std::error::Error;
     ///
-    /// use sarx_render::RendererError;
+    /// use amaterasu::RendererError;
     ///
     /// // Returns `None`, since the renderer detected the failure itself
     /// let error = RendererError::UnsupportedSampleCount;

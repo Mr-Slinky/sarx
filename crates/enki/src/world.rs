@@ -59,7 +59,7 @@
 //! past the end of a column would instead make the later call panic, or end the program.
 
 use crate::archetype::Archetype;
-use crate::component::{ComponentInfo, ComponentVec};
+use crate::component::{Component, ComponentInfo, ComponentVec};
 use crate::mask::ComponentMask;
 use crate::{Bundle, Entity};
 use std::any::TypeId;
@@ -81,10 +81,13 @@ use std::collections::HashMap;
 /// removes the position, and despawns the player with its health still in place.
 ///
 /// ```
-/// use sarx_ecs::World;
+/// use enki::{Component, World};
 ///
 /// struct Position(f32, f32);
 /// struct Health(u32);
+///
+/// impl Component for Position {}
+/// impl Component for Health {}
 ///
 /// // Creates an empty world, and a player with no components
 /// let mut world = World::new();
@@ -247,8 +250,7 @@ impl World {
     /// component that the bundle does not replace. The entity moves to another table at most once,
     /// whatever the number of components in the bundle.
     ///
-    /// Each component type in the bundle takes the bound that [`add_component`](Self::add_component)
-    /// places on `T`, for the same reasons.
+    /// Each component type in the bundle must implement [`Component`].
     ///
     /// Returns `true` where the entity now has every component in the bundle. Returns `false` where
     /// the handle does not refer to a living entity. The world is then left unchanged, and the bundle
@@ -266,10 +268,13 @@ impl World {
     /// The example gives a player a position and a velocity in one call.
     ///
     /// ```
-    /// use sarx_ecs::World;
+    /// use enki::{Component, World};
     ///
     /// struct Position(f32, f32);
     /// struct Velocity(f32, f32);
+    ///
+    /// impl Component for Position {}
+    /// impl Component for Velocity {}
     ///
     /// let mut world = World::new();
     /// let player = world.spawn_empty_ent();
@@ -319,9 +324,7 @@ impl World {
     /// Where `entity` already has a `T`, `component` replaces it, and the world drops the old `T`.
     /// Otherwise the entity gains a `T`, and keeps every component that it already has.
     ///
-    /// The bound `T: 'static` means that any reference inside a `T` stays valid for the whole
-    /// program. The world can then keep a `T` for as long as it needs. The bound `T: Send + Sync` lets the world
-    /// move its components between threads, and share them.
+    /// `T` must implement [`Component`], which sets out the bounds that every component type meets.
     ///
     /// Returns `true` where the entity now has `component`. Returns `false` where the handle does not
     /// refer to a living entity. The world is then left unchanged, and `component` is dropped.
@@ -330,11 +333,7 @@ impl World {
     ///
     /// Panics where the world has not met `T` before, and already has [`ComponentMask::CAPACITY`]
     /// component types. Also panics where the `Drop` implementation of a replaced `T` panics.
-    pub fn add_component<T: Send + Sync + 'static>(
-        &mut self,
-        entity: Entity,
-        component: T,
-    ) -> bool {
+    pub fn add_component<T: Component>(&mut self, entity: Entity, component: T) -> bool {
         // Finds where the entity is stored, and returns `false` where it does not exist
         let Some(location) = self.locate(entity) else {
             return false;
@@ -531,7 +530,7 @@ impl World {
     ///
     /// Panics where the world has not met `T` before, and already has [`ComponentMask::CAPACITY`]
     /// component types.
-    fn find_or_create_archetype_with<T: Send + Sync + 'static>(&mut self, source: usize) -> usize {
+    fn find_or_create_archetype_with<T: Component>(&mut self, source: usize) -> usize {
         // Finds the bit for `T`, giving `T` a new bit where this is the first time the world sees it
         let bit = self.find_or_assign_bit(TypeId::of::<T>());
         // Builds the target table's mask, which combines every type in the source table with `T`
@@ -769,13 +768,19 @@ mod tests {
     #[derive(Debug, PartialEq)]
     struct Position(f32);
 
+    impl Component for Position {}
+
     #[derive(Debug, PartialEq)]
     struct Health(u32);
+
+    impl Component for Health {}
 
     /// Adds 1 to a shared counter when dropped, which shows how many times clean-up code ran.
     struct DropCounter {
         drops: Arc<AtomicUsize>,
     }
+
+    impl Component for DropCounter {}
 
     impl Drop for DropCounter {
         fn drop(&mut self) {
@@ -1215,6 +1220,8 @@ mod tests {
     #[test]
     fn insert_with_zero_size_type_moves_entity_to_new_table() {
         struct Tag;
+
+        impl Component for Tag {}
 
         let mut world = World::new();
         let entity = world.spawn_empty_ent();

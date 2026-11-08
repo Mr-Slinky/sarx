@@ -85,6 +85,8 @@ The format of an ADR is set out further down, under Conventions.
 | [0013](docs/adr/0013-miri-for-unsafe-code.md)                        | Miri for unsafe code            | Tests for `unsafe` code also run under Miri, a nightly-only tool that detects undefined behaviour   |
 | [0014](docs/adr/0014-hand-poses-as-target-keyframes.md)              | Hand poses as target keyframes  | Each hand pose is a one-keyframe glTF animation, and each bone turns towards it by slerp            |
 | [0015](docs/adr/0015-hand-bone-turns-by-critically-damped-spring.md) | Hand bone turns by spring       | Each hand bone turns towards its pose by a critically damped spring, which eases in and out         |
+| [0016](docs/adr/0016-opt-in-component-trait.md)                      | Opt-in component trait          | Each component type must implement `Component` by hand, and the compiler rejects every other type   |
+| [0017](docs/adr/0017-god-names-for-crates.md)                        | God names for crates            | Each crate takes the name of a god, from any pantheon, whose domain matches the job of the crate    |
 
 ## Workspace
 
@@ -96,14 +98,29 @@ developer creates under `crates/` with `cargo new` joins the workspace with no f
 
 The workspace contains four crates today:
 
-| Crate         | Purpose                                                         |
-|---------------|-----------------------------------------------------------------|
-| `sarx-ecs`    | The entity component system                                     |
-| `sarx-sim`    | The game simulation, which does not depend on any graphics code |
-| `sarx-render` | The wgpu renderer                                               |
-| `sarx-app`    | The program that opens the window and runs the game             |
+| Crate       | Purpose                                                         |
+|-------------|-----------------------------------------------------------------|
+| `enki`      | The entity component system                                     |
+| `zurvan`    | The game simulation, which does not depend on any graphics code |
+| `amaterasu` | The wgpu renderer                                               |
+| `atum`      | The program that opens the window and runs the game             |
 
 The author adds crates as the project needs them.
+
+### Crate Names
+
+Each crate takes the name of a god whose domain matches the job of the crate. The god can come from
+any pantheon. [ADR 0017](docs/adr/0017-god-names-for-crates.md) records this convention.
+
+- **Enki** was the Mesopotamian god of wisdom and crafts. He kept the *me*, the decrees that defined
+  each art and institution of civilisation. `enki` keeps the components that define each entity in
+  the game.
+- **Zurvan** was the Persian god of infinite time. `zurvan` moves the world forward through time,
+  one fixed step after another.
+- **Amaterasu** is the Japanese goddess of the sun. When she hid in a cave, the world went dark.
+  `amaterasu` makes the world visible.
+- **Atum** was the first of the Egyptian gods. He created himself, then brought the other gods into
+  being. `atum` is the program that starts first, and brings up the rest of the game.
 
 ## Building
 
@@ -118,15 +135,15 @@ with the "Desktop development with C++" workload.
 
 A developer runs every command below from the repository root.
 
-| Task              | Command                                |
-|-------------------|----------------------------------------|
-| Build every crate | `cargo build`                          |
-| Run the game      | `cargo run -p sarx-app`                |
-| Test every crate  | `cargo test`                           |
-| Check unsafe code | `cargo +nightly miri test -p sarx-ecs` |
-| Build one crate   | `cargo build -p <crate>`               |
-| Lint every crate  | `cargo clippy --workspace`             |
-| Add a dependency  | `cargo add -p <crate> <dependency>`    |
+| Task              | Command                               |
+|-------------------|---------------------------------------|
+| Build every crate | `cargo build`                         |
+| Run the game      | `cargo run -p atum`                   |
+| Test every crate  | `cargo test`                          |
+| Check unsafe code | `cargo +nightly miri test -p enki`    |
+| Build one crate   | `cargo build -p <crate>`              |
+| Lint every crate  | `cargo clippy --workspace`            |
+| Add a dependency  | `cargo add -p <crate> <dependency>`   |
 
 The unsafe code check needs Miri, which runs on the nightly toolchain. A developer installs both once,
 with `rustup toolchain install nightly --component miri`.

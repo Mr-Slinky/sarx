@@ -121,12 +121,7 @@ impl ApplicationHandler for App {
     ///
     /// `render` returns an error when the renderer loses its surface and cannot create a new one.
     /// `window_event` then ends the program too.
-    fn window_event(
-        &mut self,
-        event_loop: &ActiveEventLoop,
-        _: WindowId,
-        event: WindowEvent,
-    ) {
+    fn window_event(&mut self, event_loop: &ActiveEventLoop, _: WindowId, event: WindowEvent) {
         match event {
             WindowEvent::CloseRequested => event_loop.exit(),
             WindowEvent::Resized(size) => {

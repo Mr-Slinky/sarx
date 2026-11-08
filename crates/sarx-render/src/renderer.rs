@@ -213,7 +213,12 @@ impl Renderer {
     /// // Asks winit for a frame, which `render` draws into the new surface
     /// window.request_redraw();
     /// ```
-    pub fn resume<W>(&mut self, window: Arc<W>, width: u32, height: u32) -> Result<(), RendererError>
+    pub fn resume<W>(
+        &mut self,
+        window: Arc<W>,
+        width: u32,
+        height: u32,
+    ) -> Result<(), RendererError>
     where
         W: RenderWindow,
     {
@@ -585,7 +590,7 @@ impl GpuContext {
     /// ```
     fn resume<W>(&mut self, window: Arc<W>, width: u32, height: u32) -> Result<(), RendererError>
     where
-        W: RenderWindow
+        W: RenderWindow,
     {
         // Drops the old surface first (where one exists) since Vulkan can refuse a second surface
         // for a window that already has one

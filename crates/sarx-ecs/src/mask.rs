@@ -56,7 +56,10 @@ impl ComponentMask {
     /// Panics where `position` is not below [`CAPACITY`](Self::CAPACITY).
     pub(crate) fn single(position: usize) -> Self {
         // Stops a shift past the last bit, which a release build would wrap round to a lower bit
-        assert!(position < Self::CAPACITY, "the position must be below the capacity of the mask");
+        assert!(
+            position < Self::CAPACITY,
+            "the position must be below the capacity of the mask"
+        );
         Self(1 << position)
     }
 
@@ -70,9 +73,7 @@ impl ComponentMask {
     pub(crate) fn from_positions(positions: &[usize]) -> Self {
         positions
             .iter()
-            .fold(Self::EMPTY, |mask, &position| {
-                mask | Self::single(position)
-            })
+            .fold(Self::EMPTY, |mask, &position| mask | Self::single(position))
     }
 
     /// Returns `true` where `self` contains every component type in `other`, and `false` where it

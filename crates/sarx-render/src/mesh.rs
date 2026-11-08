@@ -68,9 +68,9 @@ impl Mesh {
     pub(crate) fn build_triangle() -> Self {
         Self {
             vertices: vec![
-                [ 0.0,  0.5, 0.0], // top corner
+                [0.0, 0.5, 0.0],   // top corner
                 [-0.5, -0.5, 0.0], // bottom left corner
-                [ 0.5, -0.5, 0.0], // bottom right corner
+                [0.5, -0.5, 0.0],  // bottom right corner
             ],
         }
     }
@@ -114,5 +114,4 @@ impl Mesh {
             .flat_map(|coordinate| coordinate.to_ne_bytes())
             .collect()
     }
-
 }

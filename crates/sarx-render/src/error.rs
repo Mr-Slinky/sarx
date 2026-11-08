@@ -79,7 +79,9 @@ impl Display for RendererError {
             Self::Surface(_) => "failed to create a surface for the window",
             Self::Adapter(_) => "failed to find a GPU that can draw to the window",
             Self::Device(_) => "failed to open a device on the GPU",
-            Self::UnsupportedSurface => "the GPU cannot draw to the window's surface in the way that the renderer needs",
+            Self::UnsupportedSurface => {
+                "the GPU cannot draw to the window's surface in the way that the renderer needs"
+            }
             Self::UnsupportedSampleCount => {
                 "the GPU cannot anti-alias in the format for drawing to the window"
             }

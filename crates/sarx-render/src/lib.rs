@@ -31,8 +31,8 @@
 //! as ignored.
 
 mod error;
-mod renderer;
 mod mesh;
+mod renderer;
 
 pub use error::RendererError;
 pub use renderer::{RenderWindow, Renderer};

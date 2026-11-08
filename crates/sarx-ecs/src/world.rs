@@ -147,7 +147,8 @@ impl Location {
     /// Panics where either value exceeds `u32::MAX`.
     fn new(arch_index: usize, row: usize) -> Self {
         // Narrows the table's position to a `u32`, and panics where it does not fit
-        let arch_index = u32::try_from(arch_index).expect("a world should have fewer than 2^32 tables");
+        let arch_index =
+            u32::try_from(arch_index).expect("a world should have fewer than 2^32 tables");
         // Narrows the row to a `u32`, which always fits, since a world has at most 2^32 entities
         let row = u32::try_from(row).expect("a table should have fewer than 2^32 rows");
         Self { arch_index, row }
@@ -194,7 +195,7 @@ impl World {
             indices: archetype_indices,
             component_bits: HashMap::new(),
             slots: Vec::new(),
-            free_slots: Vec::new()
+            free_slots: Vec::new(),
         }
     }
 
@@ -383,7 +384,11 @@ impl World {
     ///
     /// Panics where the world has not met `T` before, and already has [`ComponentMask::CAPACITY`]
     /// component types. Also panics where the `Drop` implementation of a replaced `T` panics.
-    pub fn add_component<T: Send + Sync + 'static>(&mut self, entity: Entity, component: T) -> bool {
+    pub fn add_component<T: Send + Sync + 'static>(
+        &mut self,
+        entity: Entity,
+        component: T,
+    ) -> bool {
         // Finds where the entity is stored, and returns `false` where it does not exist
         let Some(location) = self.locate(entity) else {
             return false;
@@ -392,7 +397,8 @@ impl World {
         let type_id = TypeId::of::<T>();
 
         // Replaces the old `T` in place, where the entity's table already has a `T` column
-        if let Some(components) = self.archetypes[location.arch_index()].components_of_mut(type_id) {
+        if let Some(components) = self.archetypes[location.arch_index()].components_of_mut(type_id)
+        {
             // Overwrites the entity's `T`, which drops the old one
             components.as_mut_slice::<T>()[location.row()] = component;
             // Reports success, since the entity stays in its table with its new `T`
@@ -476,7 +482,8 @@ impl World {
         // Finds where the entity is stored, and returns `None` where it does not exist
         let location = self.locate(entity)?;
         // Finds the `T` column in the entity's table, and returns `None` where the table has none
-        let components = self.archetypes[location.arch_index()].components_of_mut(TypeId::of::<T>())?;
+        let components =
+            self.archetypes[location.arch_index()].components_of_mut(TypeId::of::<T>())?;
         // Returns the entity's `T` for changing, from the entity's row in that column
         components.as_mut_slice::<T>().get_mut(location.row())
     }
@@ -723,7 +730,9 @@ impl World {
     ) {
         // Points the slot of the entity that filled the old row at that row, where one did
         if let Some(swapped) = swapped_ent {
-            self.slots[swapped.index()].location.set_row(old_location.row());
+            self.slots[swapped.index()]
+                .location
+                .set_row(old_location.row());
         }
 
         // Points the moved entity's slot at its new table and row
@@ -1075,7 +1084,11 @@ mod tests {
 
         let after = locate_alive(&world, entity);
         assert_eq!(world.archetypes.len(), 2, "number of tables");
-        assert_eq!(after.arch_index(), before.arch_index(), "table of the entity");
+        assert_eq!(
+            after.arch_index(),
+            before.arch_index(),
+            "table of the entity"
+        );
         assert_eq!(after.row(), before.row(), "row of the entity");
         assert_eq!(world.get::<Health>(entity), Some(&Health(2)), "component");
     }
@@ -1108,7 +1121,8 @@ mod tests {
         let rows = [first_location.row(), second_location.row()];
         assert_eq!(world.archetypes.len(), 2, "number of tables");
         assert_eq!(
-            first_location.arch_index(), second_location.arch_index(),
+            first_location.arch_index(),
+            second_location.arch_index(),
             "shared table"
         );
         assert_eq!(rows, [0, 1], "rows");

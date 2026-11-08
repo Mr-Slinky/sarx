@@ -65,6 +65,10 @@ use crate::{Bundle, Entity};
 use std::any::TypeId;
 use std::collections::HashMap;
 
+// ========================================================================================== \\
+//                                         Public API                                         \\
+// ========================================================================================== \\
+
 /// Stores every entity and every component in one game.
 ///
 /// A caller creates an entity with [`spawn_empty_ent`](Self::spawn_empty_ent), which returns an
@@ -118,64 +122,6 @@ pub struct World {
     /// Stores the index of each slot that `spawn_empty_ent` can reuse.
     free_slots: Vec<u32>,
 }
-
-/// Records the version of one entity index, and where the entity with that version is stored.
-#[derive(Clone, Copy, Debug)]
-struct Slot {
-    /// Stores the version of the entity that occupies the slot. In a free slot, it stores the
-    /// version that the next entity in the slot will take.
-    version: u32,
-    /// Records where the entity is stored. In a free slot, the value is out of date until
-    /// `spawn_empty_ent` overwrites it.
-    location: Location,
-}
-
-/// Records the table and the row where one entity is stored.
-#[derive(Clone, Copy, Debug)]
-struct Location {
-    /// Stores the position in `World::archetypes` of the table that contains the entity.
-    arch_index: u32,
-    /// Stores the row that the entity occupies in that table.
-    row: u32,
-}
-
-impl Location {
-    /// Returns the location of row `row` in the table at position `arch_index`.
-    ///
-    /// # Panics
-    ///
-    /// Panics where either value exceeds `u32::MAX`.
-    fn new(arch_index: usize, row: usize) -> Self {
-        // Narrows the table's position to a `u32`, and panics where it does not fit
-        let arch_index =
-            u32::try_from(arch_index).expect("a world should have fewer than 2^32 tables");
-        // Narrows the row to a `u32`, which always fits, since a world has at most 2^32 entities
-        let row = u32::try_from(row).expect("a table should have fewer than 2^32 rows");
-        Self { arch_index, row }
-    }
-
-    /// Returns the position in `World::archetypes` of the table that contains the entity.
-    fn arch_index(self) -> usize {
-        self.arch_index as usize
-    }
-
-    /// Returns the row that the entity occupies in its table.
-    fn row(self) -> usize {
-        self.row as usize
-    }
-
-    /// Changes the row to `row`, and keeps the table.
-    ///
-    /// # Panics
-    ///
-    /// Panics where `row` exceeds `u32::MAX`.
-    fn set_row(&mut self, row: usize) {
-        *self = Self::new(self.arch_index(), row);
-    }
-}
-
-// Stops the build where a slot grows past 12 bytes: a 4-byte version and two 4-byte location fields
-const _: () = assert!(size_of::<Slot>() == 12);
 
 impl World {
     /// Defines the position in `archetypes` of the table for entities that have no components.
@@ -744,6 +690,68 @@ impl Default for World {
     /// Returns a world with no entities and no component types, as [`World::new`] does.
     fn default() -> Self {
         Self::new() // builds the same empty world as `new`
+    }
+}
+
+// ========================================================================================== \\
+//                                          Helpers                                           \\
+// ========================================================================================== \\
+
+/// Records the version of one entity index, and where the entity with that version is stored.
+#[derive(Clone, Copy, Debug)]
+struct Slot {
+    /// Stores the version of the entity that occupies the slot. In a free slot, it stores the
+    /// version that the next entity in the slot will take.
+    version: u32,
+    /// Records where the entity is stored. In a free slot, the value is out of date until
+    /// `spawn_empty_ent` overwrites it.
+    location: Location,
+}
+
+// Stops the build where a slot grows past 12 bytes: a 4-byte version and two 4-byte location fields
+const _: () = assert!(size_of::<Slot>() == 12);
+
+/// Records the table and the row where one entity is stored.
+#[derive(Clone, Copy, Debug)]
+struct Location {
+    /// Stores the position in `World::archetypes` of the table that contains the entity.
+    arch_index: u32,
+    /// Stores the row that the entity occupies in that table.
+    row: u32,
+}
+
+impl Location {
+    /// Returns the location of row `row` in the table at position `arch_index`.
+    ///
+    /// # Panics
+    ///
+    /// Panics where either value exceeds `u32::MAX`.
+    fn new(arch_index: usize, row: usize) -> Self {
+        // Narrows the table's position to a `u32`, and panics where it does not fit
+        let arch_index =
+            u32::try_from(arch_index).expect("a world should have fewer than 2^32 tables");
+        // Narrows the row to a `u32`, which always fits, since a world has at most 2^32 entities
+        let row = u32::try_from(row).expect("a table should have fewer than 2^32 rows");
+        Self { arch_index, row }
+    }
+
+    /// Returns the position in `World::archetypes` of the table that contains the entity.
+    fn arch_index(self) -> usize {
+        self.arch_index as usize
+    }
+
+    /// Returns the row that the entity occupies in its table.
+    fn row(self) -> usize {
+        self.row as usize
+    }
+
+    /// Changes the row to `row`, and keeps the table.
+    ///
+    /// # Panics
+    ///
+    /// Panics where `row` exceeds `u32::MAX`.
+    fn set_row(&mut self, row: usize) {
+        *self = Self::new(self.arch_index(), row);
     }
 }
 

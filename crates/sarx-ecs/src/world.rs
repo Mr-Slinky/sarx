@@ -303,12 +303,16 @@ impl World {
     /// Each component type in the bundle takes the bound that [`add_component`](Self::add_component)
     /// places on `T`, for the same reasons.
     ///
+    /// Returns `true` where the entity now has every component in the bundle. Returns `false` where
+    /// the handle does not refer to a living entity. The world is then left unchanged, and the bundle
+    /// is dropped.
+    ///
     /// # Panics
     ///
-    /// Panics where `ent` does not refer to a living entity. Also panics where the bundle lists the
-    /// same component type twice. Also panics where the bundle brings in more component types than
-    /// the world has room for, which [`ComponentMask::CAPACITY`] defines. Also panics where the
-    /// `Drop` implementation of a replaced component panics.
+    /// Panics where the bundle lists the same component type twice. Also panics where the bundle
+    /// brings in more component types than the world has room for, which
+    /// [`ComponentMask::CAPACITY`] defines. Also panics where the `Drop` implementation of a
+    /// replaced component panics.
     ///
     /// # Examples
     ///
@@ -330,11 +334,11 @@ impl World {
     /// let speed = world.get::<Velocity>(player).map(|velocity| velocity.0);
     /// assert_eq!(speed, Some(1.0));
     /// ```
-    pub fn add_components<B: Bundle>(&mut self, ent: Entity, components: B) {
-        // Finds where the entity is stored, and panics where it does not exist
-        let location = self
-            .locate(ent)
-            .expect("the entity should be alive in this world");
+    pub fn add_components<B: Bundle>(&mut self, ent: Entity, components: B) -> bool {
+        // Finds where the entity is stored, and returns `false` where it does not exist
+        let Some(location) = self.locate(ent) else {
+            return false;
+        };
 
         // Describes each type in the bundle, giving a bit to each type that the world has not met
         let infos = B::infos(self);
@@ -345,7 +349,7 @@ impl World {
         if target_index == location.arch_index() {
             // Replaces the component at the entity's row in the column for each bundle type
             components.push_into(&mut self.archetypes[target_index], location.row());
-            return;
+            return true;
         }
 
         // Records the entity's row in the target, which is the target's current number of rows
@@ -359,6 +363,8 @@ impl World {
         let target_table = unsafe { self.move_entity(ent, location, target_index) };
         // Pushes the bundle's new components, and replaces the ones that the entity already had
         components.push_into(target_table, row);
+        // Reports that the entity now has every component in the bundle
+        true
     }
 
     /// Gives `entity` the component `component`, of type `T`.
@@ -370,16 +376,18 @@ impl World {
     /// program. The world can then keep a `T` for as long as it needs. The bound `T: Send + Sync` lets the world
     /// move its components between threads, and share them.
     ///
+    /// Returns `true` where the entity now has `component`. Returns `false` where the handle does not
+    /// refer to a living entity. The world is then left unchanged, and `component` is dropped.
+    ///
     /// # Panics
     ///
-    /// Panics where `entity` does not refer to a living entity. Also panics where the world has not met `T`
-    /// before, and already has [`ComponentMask::CAPACITY`] component types. Also panics where the `Drop`
-    /// implementation of a replaced `T` panics.
-    pub fn add_component<T: Send + Sync + 'static>(&mut self, entity: Entity, component: T) {
-        // Finds where the entity is stored, and panics where it does not exist
-        let location = self
-            .locate(entity)
-            .expect("the entity should be alive in this world");
+    /// Panics where the world has not met `T` before, and already has [`ComponentMask::CAPACITY`]
+    /// component types. Also panics where the `Drop` implementation of a replaced `T` panics.
+    pub fn add_component<T: Send + Sync + 'static>(&mut self, entity: Entity, component: T) -> bool {
+        // Finds where the entity is stored, and returns `false` where it does not exist
+        let Some(location) = self.locate(entity) else {
+            return false;
+        };
         // Finds the identity of `T`, which a table uses to look up its columns
         let type_id = TypeId::of::<T>();
 
@@ -387,8 +395,8 @@ impl World {
         if let Some(components) = self.archetypes[location.arch_index()].components_of_mut(type_id) {
             // Overwrites the entity's `T`, which drops the old one
             components.as_mut_slice::<T>()[location.row()] = component;
-            // Returns, since the entity stays in its table
-            return;
+            // Reports success, since the entity stays in its table with its new `T`
+            return true;
         }
 
         // Finds or creates the table for the entity's types plus `T`
@@ -404,6 +412,8 @@ impl World {
         );
         // Pushes the new component, which fills the entity's row in that column
         target_column.push_typed(component);
+        // Reports that the entity now has the new `T`
+        true
     }
 
     /// Removes the component of type `T` from `entity`, and drops it. The entity keeps every other
@@ -1197,16 +1207,17 @@ mod tests {
         assert!(world.get::<Tag>(entity).is_some(), "component");
     }
 
-    /// Checks that `add_component` panics for an entity that is not alive, since the entity has no
-    /// row to fill
+    /// Checks that `add_component` returns `false` for an entity that is not alive, since the entity
+    /// has no row to fill
     #[test]
-    #[should_panic]
-    fn insert_with_despawned_entity_panics() {
+    fn add_component_with_despawned_entity_returns_false() {
         let mut world = World::new();
         let entity = world.spawn_empty_ent();
         world.despawn_ent(entity);
 
-        world.add_component(entity, Health(1));
+        let added = world.add_component(entity, Health(1));
+
+        assert!(!added, "answer for a despawned entity");
     }
 
     /// Checks that `add_component` panics on a 65th component type, since a mask has room for 64 bits

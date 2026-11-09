@@ -1,5 +1,5 @@
 [package]
-name = "sarx-sim"
+name = "zurvan"
 version.workspace = true
 edition.workspace = true
 publish.workspace = true

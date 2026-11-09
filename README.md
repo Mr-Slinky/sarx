@@ -87,6 +87,7 @@ The format of an ADR is set out further down, under Conventions.
 | [0015](docs/adr/0015-hand-bone-turns-by-critically-damped-spring.md) | Hand bone turns by spring       | Each hand bone turns towards its pose by a critically damped spring, which eases in and out         |
 | [0016](docs/adr/0016-opt-in-component-trait.md)                      | Opt-in component trait          | Each component type must implement `Component` by hand, and the compiler rejects every other type   |
 | [0017](docs/adr/0017-god-names-for-crates.md)                        | God names for crates            | Each crate takes the name of a god, from any pantheon, whose domain matches the job of the crate    |
+| [0018](docs/adr/0018-hand-written-gltf-reader.md)                    | Hand-written glTF reader        | The author writes the glTF reader, and `serde_json` turns its JSON text into Rust structs           |
 
 ## Workspace
 

@@ -71,8 +71,7 @@ update runs in the simulation step or in the renderer, and that decision must ag
   transforms by weight. Villagers do not need skinning, because ADR 0012 builds them from rigid
   parts.
 - Bad, because Sarx has to read the animations section of a glTF file, as well as its meshes and its
-  skin. The choice between the `gltf` crate and a hand-written parser applies to this section as
-  well.
+  skin. ADR 0018 sets out how Sarx reads the file.
 - Bad, because a pose stores only where the hand ends up. A move along a set path, such as a wave,
   needs more than one keyframe. It also needs a different way to play the move back.
 

@@ -281,15 +281,12 @@ mod tests {
             ComponentInfo::of::<Tag>(ComponentMask::single(3)),
         ]);
         for (index, &x) in values.iter().enumerate() {
-            push_component(&mut table, Position(x));
-            push_component(&mut table, Velocity(x * 10.0));
-            push_component(&mut table, Name(format!("row {x}")));
-            push_component(&mut table, Tag);
-
-            // SAFETY: `push_entity` requires one new component in every column. The four lines
-            // above push one onto `Position`, `Velocity`, `Name` and `Tag`, which are the only
-            // columns
-            unsafe { table.push_entity(Entity::new(index as u32, 0)) };
+            table.push_entity(Entity::new(index as u32, 0), |table, _| {
+                push_component(table, Position(x));
+                push_component(table, Velocity(x * 10.0));
+                push_component(table, Name(format!("row {x}")));
+                push_component(table, Tag);
+            });
         }
         table
     }

@@ -25,6 +25,9 @@ use std::ops::{BitOr, BitOrAssign};
 /// A test can also build a mask for several types in one call, with `from_positions`. That method
 /// exists in test builds alone.
 ///
+/// The type is `pub` because the public trait `Bundle` names it in the signature of `push_into`.
+/// The `mask` module is private, so code outside the crate still cannot write a path to the type.
+///
 /// # Examples
 ///
 /// The example builds a mask for two types, then checks which types it contains.
@@ -40,7 +43,7 @@ use std::ops::{BitOr, BitOrAssign};
 /// assert!(!table.contains_all(ComponentMask::single(1)));
 /// ```
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
-pub(crate) struct ComponentMask(u64);
+pub struct ComponentMask(u64);
 
 impl ComponentMask {
     /// Defines the number of component types that a mask has room for.

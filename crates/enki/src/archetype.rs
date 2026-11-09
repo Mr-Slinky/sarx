@@ -10,10 +10,10 @@
 //! A row number ties an entity to its components. The entity at row 5 in the list owns the
 //! component at index 5 in every column.
 //!
-//! The caller adds a row in two steps. It pushes one component onto every column, using
-//! [`Archetype::components_of_mut`]. It then pushes the entity with [`Archetype::push_entity`].
-//! The two steps can run in either order. Once both are finished, every column again has one
-//! component for each entity in the list.
+//! The caller adds a row with [`Archetype::push_entity`]. The method pushes the entity, then calls a
+//! closure from the caller, which pushes one component onto every column. Once the closure returns,
+//! the method checks that every column again has one component for each entity in the list, and
+//! panics where one does not. The gap between the two steps therefore never outlasts the call.
 //!
 //! # Masks
 //!
@@ -31,6 +31,10 @@
 //! cases with [`Archetype::move_entity_dropping`]. Where the target lacks a column for one of the
 //! entity's components, the method drops that component. The last row in the old table then fills
 //! the empty row, which keeps each column in one unbroken run.
+//!
+//! Where the target has a column that the old table lacks, the caller passes a closure that pushes
+//! one component onto each such column, as with `push_entity`. The method checks the target once
+//! the closure returns.
 //!
 //! The caller records a location for each entity, which is its table and its row. A move changes
 //! the location of the moved entity, and of the entity that fills the empty row, where there is
@@ -52,29 +56,26 @@
 //! let mut source = Archetype::new(&[position]);
 //! let mut target = Archetype::new(&[position, health]);
 //!
-//! // Adds two rows to the source table, pushing each component before its entity
+//! // Adds two rows to the source table, with the closure pushing each entity's `Position`
 //! let first = Entity::new(0, 0);
 //! let second = Entity::new(1, 0);
 //! for (entity, x) in [(first, 1.0), (second, 2.0)] {
-//!     let positions = source
-//!         .components_of_mut(position.type_id())
-//!         .expect("the table should store `Position`"); // &mut ComponentVec
-//!     positions.push_typed(Position(x));
-//!
-//!     // SAFETY: `push_entity` requires one new component in every column. The line above pushes
-//!     // one onto `Position`, which is the only column
-//!     unsafe { source.push_entity(entity) };
+//!     source.push_entity(entity, |table, _row| {
+//!         let positions = table
+//!             .components_of_mut(position.type_id())
+//!             .expect("the table should store `Position`"); // &mut ComponentVec
+//!         positions.push_typed(Position(x));
+//!     });
 //! }
 //!
-//! // Moves row 0 to the target table, and fills row 0 with the last row
-//! // SAFETY: `move_entity_dropping` requires a row in range, and a push onto each new column
-//! // in the target. Row 0 is below the length of 2, and the two statements below push onto
-//! // `Health`
-//! let filled = unsafe { source.move_entity_dropping(0, &mut target) };
-//!
-//! // Gives the moved entity its new component
-//! let healths = target.components_of_mut(health.type_id()).expect("the table should store `Health`");
-//! healths.push_typed(Health(100));
+//! // Moves row 0 to the target table, gives the moved entity its new `Health`, and fills row 0
+//! // with the last row
+//! let filled = source.move_entity_dropping(0, &mut target, |table, _row| {
+//!     let healths = table
+//!         .components_of_mut(health.type_id())
+//!         .expect("the table should store `Health`");
+//!     healths.push_typed(Health(100));
+//! });
 //!
 //! // Checks that `second` now occupies row 0 in the source table, and that each table has one row
 //! assert_eq!(filled, Some(second));
@@ -116,8 +117,9 @@ impl Archetype {
     /// The caller MUST pass each component type once, with a bit that follows the rules in
     /// [`ComponentInfo::of`]. A type passed twice with two different bits gets two columns. A search
     /// for that type returns one column every time, and which one is unspecified. Every push then
-    /// reaches the column that the search returns, and the other column stays empty. The table
-    /// thereby breaks the guarantee that [`push_entity`](Self::push_entity) requires.
+    /// reaches the column that the search returns, and the other column stays empty. The first
+    /// call to [`push_entity`](Self::push_entity) then panics, since that column lacks a component
+    /// for the new row.
     ///
     /// # Panics
     ///
@@ -173,26 +175,30 @@ impl Archetype {
         self.mask.contains_all(query_mask)
     }
 
-    /// Adds `entity` to the end of the entity list, which gives it the row `len() - 1`, measured
-    /// after the call.
+    /// Adds `entity` to the end of the entity list, then calls `fill` to push its components.
+    ///
+    /// The entity takes the row `len() - 1`, measured after the call. The method passes the table
+    /// and that row to `fill`, which MUST push one component onto every column. A table with no
+    /// columns takes a `fill` that does nothing, written `|_, _| {}`.
+    ///
+    /// The method calls `fill` once. Its bound, `FnOnce`, therefore lets the closure move the
+    /// components that it captures into the table.
     ///
     /// # Panics
     ///
-    /// Panics where the list is full and a larger block would exceed `isize::MAX` bytes. The program
+    /// Panics where any column lacks a component for the new row once `fill` returns. Also panics
+    /// where the list is full and a larger block would exceed `isize::MAX` bytes. The program
     /// aborts where the allocator cannot supply the larger block.
-    ///
-    /// # Safety
-    ///
-    /// The caller MUST guarantee that every column has one new component for this row. The caller
-    /// pushes those components through [`components_of_mut`](Self::components_of_mut), either before
-    /// this call or straight after it.
-    ///
-    /// A missing component leaves that column one row short. Later entities then pair with the wrong
-    /// components in that column. A later call to [`move_entity_dropping`](Self::move_entity_dropping)
-    /// can also pass an index past the end of the column. A debug build then panics before anything
-    /// changes. A release build ends the program, as the Aborts section of that method sets out.
-    pub(crate) unsafe fn push_entity(&mut self, entity: Entity) {
+    pub(crate) fn push_entity(&mut self, entity: Entity, fill: impl FnOnce(&mut Archetype, usize)) {
         self.entities.push(entity);
+        let row = self.entities.len() - 1;
+        fill(self, row);
+
+        // Panics where `fill` left a column without a component for the new row
+        assert!(
+            self.has_one_component_per_entity(),
+            "the fill must push one component onto every column"
+        );
     }
 
     /// Makes room for at least `additional` more entities, in every column and in the entity list.
@@ -340,9 +346,13 @@ impl Archetype {
     /// `target` has no column for**.
     ///
     /// The method serves both moves between tables. Where the entity gains components, `target`
-    /// has every column in this table plus one or more others, and the caller fills those columns
-    /// afterwards. Where the entity loses a component, `target` lacks that one column, and the
-    /// method drops the component.
+    /// has every column in this table plus one or more others. Where the entity loses a component,
+    /// `target` lacks that one column, and the method drops the component.
+    ///
+    /// Once every component is moved or dropped, the method passes `target` and the entity's new
+    /// row to `fill`. The closure MUST push one component onto each column that `target` has and
+    /// this table lacks. A move that adds no columns takes a `fill` that does nothing, written
+    /// `|_, _| {}`.
     ///
     /// The last row in this table then fills `row`, in the entity list and in every column.
     ///
@@ -353,30 +363,21 @@ impl Archetype {
     ///
     /// # Panics
     ///
-    /// Panics where `row` is not below the length of the entity list, before anything changes.
+    /// Panics where `row` is not below the length of the entity list, before anything changes. Also
+    /// panics where any column in `target` lacks a component for the new row once `fill` returns.
     ///
     /// # Aborts
     ///
-    /// The program aborts where any panic occurs once the move has started, such as a panic in the
-    /// `Drop` implementation of a dropped component. The panic message prints first. The method
-    /// moves one column at a time. Such a panic would therefore leave columns of different lengths,
-    /// in this table and in `target`. Ending the program stops any later call from using either
-    /// table in that state.
-    ///
-    /// # Safety
-    ///
-    /// The caller MUST guarantee two things:
-    ///
-    /// - `row` is below the length of every column. Where a column is too short, a debug build
-    ///   panics before anything changes. A release build panics partway through the move, and the
-    ///   program then aborts, as the Aborts section sets out.
-    /// - The caller pushes one component onto each column that `target` has and this table lacks,
-    ///   before anything else uses `target`. A missing component leaves that column one row short,
-    ///   with the effects that [`push_entity`](Self::push_entity) sets out.
-    pub(crate) unsafe fn move_entity_dropping(
+    /// The program aborts where any panic occurs once the move has started and before `fill` runs,
+    /// such as a panic in the `Drop` implementation of a dropped component. The panic message prints
+    /// first. The method moves one column at a time. Such a panic would therefore leave columns of
+    /// different lengths, in this table and in `target`. Ending the program stops any later call
+    /// from using either table in that state.
+    pub(crate) fn move_entity_dropping(
         &mut self,
         row: usize,
         target: &mut Archetype,
+        fill: impl FnOnce(&mut Archetype, usize),
     ) -> Option<Entity> {
         // Panics before anything changes, where `row` lies past the last entity
         assert!(
@@ -416,6 +417,15 @@ impl Archetype {
         target.entities.push(entity);
         // Disarms the guard, since every component of the entity is now moved or dropped
         mem::forget(guard);
+
+        let new_row = target.entities.len() - 1;
+        fill(target, new_row);
+
+        // Panics where `fill` left a new target column without a component for the new row
+        assert!(
+            target.has_one_component_per_entity(),
+            "the fill must push one component onto every new target column"
+        );
 
         // Returns the entity that now occupies `row`, or `None` where `row` was the last row
         self.entities.get(row).copied()
@@ -504,25 +514,15 @@ mod tests {
 
     /// Adds one row to a table whose only column stores `T`.
     fn push_row<T: 'static>(table: &mut Archetype, entity: Entity, value: T) {
-        // Stops a table with a second column from getting a row that the second column lacks
-        assert_eq!(table.infos().len(), 1, "the table must have one column");
-        push_component(table, value);
-
-        // SAFETY: `push_entity` requires one new component in every column. The assert above leaves
-        // one column, and the line above pushes onto it
-        unsafe { table.push_entity(entity) };
+        table.push_entity(entity, |table, _| push_component(table, value));
     }
 
     /// Adds one row to a table whose two columns store `A` and `B`.
     fn push_pair_row<A: 'static, B: 'static>(table: &mut Archetype, entity: Entity, a: A, b: B) {
-        // Stops a table with a third column from getting a row that the third column lacks
-        assert_eq!(table.infos().len(), 2, "the table must have two columns");
-        push_component(table, a);
-        push_component(table, b);
-
-        // SAFETY: `push_entity` requires one new component in every column. The assert above leaves
-        // two columns, and the two lines above push one onto each
-        unsafe { table.push_entity(entity) };
+        table.push_entity(entity, |table, _| {
+            push_component(table, a);
+            push_component(table, b);
+        });
     }
 
     /// Returns the column that stores `T`, as a slice of `T`.
@@ -760,10 +760,7 @@ mod tests {
         let entity = Entity::new(0, 0);
         let mut table = Archetype::new(&[ComponentInfo::of::<Health>(ComponentMask::single(0))]);
 
-        // SAFETY: `push_entity` requires one new component in every column. The line below pushes
-        // one onto `Health`, which is the only column
-        unsafe { table.push_entity(entity) };
-        push_component(&mut table, Health(100));
+        table.push_entity(entity, |table, _| push_component(table, Health(100)));
 
         assert_eq!(table.entities, [entity], "entity list");
         assert_eq!(read_column::<Health>(&table), [Health(100)], "column");
@@ -786,9 +783,7 @@ mod tests {
             push_row(&mut source, entity, Position(x));
         }
 
-        // SAFETY: `move_entity_dropping` requires a row in range, and a push onto each new column
-        // in the target. Row 1 is below the length of 4, and the target has no new columns
-        let filled = unsafe { source.move_entity_dropping(1, &mut target) };
+        let filled = source.move_entity_dropping(1, &mut target, |_, _| {});
 
         assert_eq!(filled, Some(fourth), "entity that fills the row");
         assert_eq!(source.entities, [first, fourth, third], "source entities");
@@ -819,10 +814,7 @@ mod tests {
             }
             let last = count - 1;
 
-            // SAFETY: `move_entity_dropping` requires a row in range, and a push onto each new
-            // column in the target. Each case moves its last row, and the target has no new
-            // columns
-            let filled = unsafe { source.move_entity_dropping(last as usize, &mut target) };
+            let filled = source.move_entity_dropping(last as usize, &mut target, |_, _| {});
 
             let remaining = last as usize;
             assert_eq!(filled, None, "entity that fills the row, {count} rows");
@@ -851,9 +843,7 @@ mod tests {
         push_row(&mut source, moved, Position(1.0));
         push_row(&mut target, resident, Position(2.0));
 
-        // SAFETY: `move_entity_dropping` requires a row in range, and a push onto each new column
-        // in the target. Row 0 is below the length of 1, and the target has no new columns
-        unsafe { source.move_entity_dropping(0, &mut target) };
+        source.move_entity_dropping(0, &mut target, |_, _| {});
 
         assert_eq!(target.entities, [resident, moved], "target entities");
         assert_eq!(
@@ -876,9 +866,7 @@ mod tests {
         let moved = Entity::new(4, 0);
         push_row(&mut source, moved, Health(4));
 
-        // SAFETY: `move_entity_dropping` requires a row in range, and a push onto each new column
-        // in the target. Row 0 is below the length of 1, and the target has no new columns
-        unsafe { source.move_entity_dropping(0, &mut target) };
+        source.move_entity_dropping(0, &mut target, |_, _| {});
 
         let moved_row = target.len() - 1;
         assert_eq!(target.entities[moved_row], moved, "last target entity");
@@ -902,16 +890,11 @@ mod tests {
         push_row(&mut source, second, Health(2));
         push_row(&mut source, third, Health(3));
 
-        // SAFETY: `move_entity_dropping` requires a row in range, and a push onto each new column
-        // in the target. Row 0 is below the lengths of 3, 2 and 1, and the target has no new
-        // columns
-        let filled = unsafe {
-            [
-                source.move_entity_dropping(0, &mut target),
-                source.move_entity_dropping(0, &mut target),
-                source.move_entity_dropping(0, &mut target),
-            ]
-        };
+        let filled = [
+            source.move_entity_dropping(0, &mut target, |_, _| {}),
+            source.move_entity_dropping(0, &mut target, |_, _| {}),
+            source.move_entity_dropping(0, &mut target, |_, _| {}),
+        ];
 
         assert_eq!(
             filled,
@@ -942,18 +925,12 @@ mod tests {
         let third = Entity::new(2, 0);
 
         for (entity, x, label) in [(first, 1.0, "Ada"), (second, 2.0, "Bo"), (third, 3.0, "Cy")] {
-            push_component(&mut source, Position(x));
-            push_component(&mut source, String::from(label));
-
-            // SAFETY: `push_entity` requires one new component in every column. The two lines above
-            // push one onto `Position` and one onto `String`, which are the only columns
-            unsafe { source.push_entity(entity) };
+            push_pair_row(&mut source, entity, Position(x), String::from(label));
         }
 
-        // SAFETY: `move_entity_dropping` requires a row in range, and a push onto each new column
-        // in the target. Row 0 is below the length of 3, and the line below pushes onto `Health`
-        let filled = unsafe { source.move_entity_dropping(0, &mut target) };
-        push_component(&mut target, Health(100));
+        let filled = source.move_entity_dropping(0, &mut target, |table, _| {
+            push_component(table, Health(100))
+        });
 
         assert_eq!(filled, Some(third), "entity that fills the row");
         assert_eq!(source.entities, [third, second], "source entities");
@@ -985,14 +962,10 @@ mod tests {
         let first = Entity::new(0, 0);
         let second = Entity::new(1, 0);
 
-        // SAFETY: `push_entity` requires one new component in every column, and the table has no
-        // columns. `move_entity_dropping` requires a row in range, and a push onto each new column
-        // in the target. Row 0 is below the length of 2, and the target has no new columns
-        let filled = unsafe {
-            source.push_entity(first);
-            source.push_entity(second);
-            source.move_entity_dropping(0, &mut target)
-        };
+        source.push_entity(first, |_, _| {});
+        source.push_entity(second, |_, _| {});
+
+        let filled = source.move_entity_dropping(0, &mut target, |_, _| {});
 
         assert_eq!(filled, Some(second), "entity that fills the row");
         assert_eq!(source.entities, [second], "source entities");
@@ -1010,9 +983,7 @@ mod tests {
         push_row(&mut source, Entity::new(0, 0), Tag);
         push_row(&mut source, Entity::new(1, 0), Tag);
 
-        // SAFETY: `move_entity_dropping` requires a row in range, and a push onto each new column
-        // in the target. Row 0 is below the length of 2, and the target has no new columns
-        unsafe { source.move_entity_dropping(0, &mut target) };
+        source.move_entity_dropping(0, &mut target, |_, _| {});
 
         assert_eq!(read_column::<Tag>(&source).len(), 1, "source column length");
         assert_eq!(read_column::<Tag>(&target).len(), 1, "target column length");
@@ -1032,9 +1003,7 @@ mod tests {
             push_row(&mut source, Entity::new(index, 0), value);
         }
 
-        // SAFETY: `move_entity_dropping` requires a row in range, and a push onto each new column
-        // in the target. Row 0 is below the length of 3, and the target has no new columns
-        unsafe { source.move_entity_dropping(0, &mut target) };
+        source.move_entity_dropping(0, &mut target, |_, _| {});
         let drops_after_move = drops.load(Ordering::Relaxed);
 
         drop(source);
@@ -1054,9 +1023,7 @@ mod tests {
         let mut target = Archetype::new(&[position]);
         push_row(&mut source, Entity::new(0, 0), Position(1.0));
 
-        // SAFETY: this call breaks the row requirement on purpose. The `assert` at the start of
-        // `move_entity_dropping` panics before any memory is read
-        unsafe { source.move_entity_dropping(1, &mut target) };
+        source.move_entity_dropping(1, &mut target, |_, _| {});
     }
 
     /// Checks that an entity list shorter than its columns panics in every build
@@ -1068,9 +1035,7 @@ mod tests {
         let mut target = Archetype::new(&[position]);
         push_component(&mut source, Position(1.0));
 
-        // SAFETY: this call breaks the row requirement on purpose, for the entity list alone. The
-        // `assert` at the start of `move_entity_dropping` panics before any memory is read
-        unsafe { source.move_entity_dropping(0, &mut target) };
+        source.move_entity_dropping(0, &mut target, |_, _| {});
     }
 
     /// Checks that dropping a table runs the clean-up code once for each component it stores
@@ -1417,12 +1382,8 @@ mod tests {
         let mut table = Archetype::new(&[]);
         let first = Entity::new(0, 0);
         let second = Entity::new(1, 0);
-        // SAFETY: `push_entity` requires one new component in every column, and the table has no
-        // columns
-        unsafe {
-            table.push_entity(first);
-            table.push_entity(second);
-        }
+        table.push_entity(first, |_, _| {});
+        table.push_entity(second, |_, _| {});
 
         let filled = table.remove_entity(0);
 
@@ -1510,10 +1471,8 @@ mod tests {
     fn remove_entity_with_short_column_panics() {
         let mut table = Archetype::new(&[ComponentInfo::of::<Health>(ComponentMask::single(0))]);
         push_row(&mut table, Entity::new(0, 0), Health(1));
-        // SAFETY: this call breaks the requirement of one new component in every column on
-        // purpose. The `debug_assert` at the start of `remove_entity` panics before any memory is
-        // read
-        unsafe { table.push_entity(Entity::new(1, 0)) };
+        // Adds an entity without its component, which `push_entity` would refuse
+        table.entities.push(Entity::new(1, 0));
 
         table.remove_entity(0);
     }
@@ -1537,9 +1496,7 @@ mod tests {
             push_pair_row(&mut source, entity, Position(x), value);
         }
 
-        // SAFETY: `move_entity_dropping` requires a row in range, and a push onto each new column
-        // in the target. Row 0 is below the length of 3, and the target has no new columns
-        let filled = unsafe { source.move_entity_dropping(0, &mut target) };
+        let filled = source.move_entity_dropping(0, &mut target, |_, _| {});
         let drops_after_move = drops.load(Ordering::Relaxed);
         let counters_left = source
             .components_of(counter.type_id())
@@ -1574,9 +1531,7 @@ mod tests {
         };
         push_row(&mut source, moved, value);
 
-        // SAFETY: `move_entity_dropping` requires a row in range, and a push onto each new column
-        // in the target. Row 0 is below the length of 1, and the target has no columns
-        let filled = unsafe { source.move_entity_dropping(0, &mut target) };
+        let filled = source.move_entity_dropping(0, &mut target, |_, _| {});
         let drops_after_move = drops.load(Ordering::Relaxed);
 
         assert_eq!(filled, None, "entity that fills the row");
@@ -1601,13 +1556,10 @@ mod tests {
         let mut target = Archetype::new(&[position]);
         push_row(&mut source, Entity::new(0, 0), Position(1.0));
 
-        // SAFETY: the first call breaks the requirement of one new component in every column, and
-        // the second breaks the row requirement, both on purpose. The `debug_assert` at the start
-        // of `move_entity_dropping` panics before any memory is read
-        unsafe {
-            source.push_entity(Entity::new(1, 0));
-            source.move_entity_dropping(0, &mut target);
-        }
+        // Adds an entity without its component, which `push_entity` would refuse
+        source.entities.push(Entity::new(1, 0));
+
+        source.move_entity_dropping(0, &mut target, |_, _| {});
     }
 
     /// Checks that a debug build catches a target column shorter than the target entity list,
@@ -1621,12 +1573,9 @@ mod tests {
         let mut target = Archetype::new(&[position]);
         push_row(&mut source, Entity::new(0, 0), Position(1.0));
 
-        // SAFETY: the first call breaks the requirement of one new component in every column of
-        // the target on purpose. The `debug_assert` at the start of `move_entity_dropping` panics
-        // before any memory is read
-        unsafe {
-            target.push_entity(Entity::new(1, 0));
-            source.move_entity_dropping(0, &mut target);
-        }
+        // Adds an entity to the target without its component, which `push_entity` would refuse
+        target.entities.push(Entity::new(1, 0));
+
+        source.move_entity_dropping(0, &mut target, |_, _| {});
     }
 }

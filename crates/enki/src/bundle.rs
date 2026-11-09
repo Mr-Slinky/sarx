@@ -24,6 +24,7 @@
 
 use crate::archetype::Archetype;
 use crate::component::{Component, ComponentInfo};
+use crate::mask::ComponentMask;
 use crate::world::World;
 use std::any::TypeId;
 use std::mem;
@@ -123,9 +124,10 @@ pub trait Bundle: Send + Sync + 'static {
 
     /// Stores each component in the bundle in `table`, at row `row`.
     ///
-    /// Each component goes into the column in `table` that stores its type. Where that column
-    /// already contains a component at `row`, the new component replaces it, and the method drops the
-    /// old one. Otherwise the method pushes the new component onto the end of the column.
+    /// Each component goes into the column in `table` that stores its type. Where `existing` has
+    /// the bit for that type, the entity already had a component of that type, and the new component
+    /// replaces the one at `row`. The method drops the old one. Otherwise the method pushes the new
+    /// component onto the end of the column.
     ///
     /// The method drops the replaced components only once every component is stored. A `Drop`
     /// implementation that panics therefore leaves every column at its new length.
@@ -136,13 +138,16 @@ pub trait Bundle: Send + Sync + 'static {
     ///
     /// * `table`: the table that receives the components. It MUST have a column for each type in
     ///   the bundle.
-    /// * `row`: the entity's row in `table`. Each column MUST contain either `row` components, for a
-    ///   push, or more than `row`, for a replacement.
+    /// * `row`: the entity's row in `table`. For a push, the column MUST contain `row` components,
+    ///   so that the push lands at `row`.
+    /// * `existing`: the mask of the table that the entity was in before this call. It has a bit
+    ///   for each type that the entity already had.
     ///
     /// # Panics
     ///
-    /// Panics where `table` has no column for one of the types in the bundle. Also panics where the
-    /// `Drop` implementation of a replaced component panics.
+    /// Panics where `table` has no column for one of the types in the bundle, or where a column for
+    /// a type in `existing` has no component at `row`. Also panics where the `Drop` implementation
+    /// of a replaced component panics.
     ///
     /// # Examples
     ///
@@ -151,7 +156,9 @@ pub trait Bundle: Send + Sync + 'static {
     ///
     /// The example stores a bundle of a `Position` and a `Health` in `target`, a table with a
     /// `Position` column and a `Health` column. The entity has already moved into `target`, at row
-    /// `row`. The entity had a `Health` before the move, and lacked a `Position`.
+    /// `row`. The entity had a `Health` before the move, and lacked a `Position`. `existing` is the
+    /// mask of the entity's old table, which has the bit for `Health` and lacks the bit for
+    /// `Position`.
     ///
     /// ```ignore
     /// // Creates a tuple of a `Position` and a `Health`. The tuple implements `Bundle`
@@ -161,13 +168,13 @@ pub trait Bundle: Send + Sync + 'static {
     /// let target: &mut Archetype = &mut self.archetypes[target_index];
     ///
     /// // Pushes the `Position` onto the `Position` column, and replaces the entity's `Health`
-    /// components.push_into(target, row);
+    /// components.push_into(target, row, existing);
     ///
     /// // `push_into` took `components` by value. The compiler therefore rejects any use of
     /// // `components` from here on
     /// ```
     #[doc(hidden)]
-    fn push_into(self, table: &mut Archetype, row: usize);
+    fn push_into(self, table: &mut Archetype, row: usize, existing: ComponentMask);
 }
 
 // ========================================================================================== \\
@@ -176,23 +183,30 @@ pub trait Bundle: Send + Sync + 'static {
 
 /// Stores `value` at row `row` of the column in `table` that stores `T`.
 ///
-/// Where the column contains more than `row` components, `value` replaces the component at `row`, and
-/// the function returns the replaced component. Otherwise the function pushes `value` onto the end
-/// of the column, and returns `None`.
+/// Where `existing` has the bit for `T`, the entity already had a `T`. `value` then replaces the
+/// component at `row`, and the function returns the replaced component. Otherwise the function
+/// pushes `value` onto the end of the column, and returns `None`.
 ///
 /// The caller owns the returned component, and decides when it drops.
 ///
 /// # Panics
 ///
-/// Panics where `table` has no column for `T`.
-fn push_or_replace<T: Component>(table: &mut Archetype, row: usize, value: T) -> Option<T> {
+/// Panics where `table` has no column for `T`, or where `existing` has the bit for `T` and the
+/// column has no component at `row`.
+fn push_or_replace<T: Component>(
+    table: &mut Archetype,
+    row: usize,
+    value: T,
+    existing: ComponentMask,
+) -> Option<T> {
     // Finds the column for `T`, and panics where the table has none
     let column = table
         .components_of_mut(TypeId::of::<T>())
         .expect("the table should have a column for every type in the bundle");
 
-    // Replaces the component at `row`, where the column already contains one there
-    if column.len() > row {
+    // Replaces the component at `row`, where the entity already had a `T`
+    let bit = column.info().bit();
+    if existing.intersects(bit) {
         // Finds the component at `row`
         let slot = &mut column.as_mut_slice::<T>()[row];
         // Puts `value` in its place, and returns the old component for the caller to drop
@@ -275,15 +289,15 @@ fn push_or_replace<T: Component>(table: &mut Archetype, row: usize, value: T) ->
 ///
 ///     // Allows the variables `A`, `B` and `C` below to have names in capitals
 ///     #[allow(non_snake_case)]
-///     fn push_into(self, table: &mut Archetype, row: usize) {
+///     fn push_into(self, table: &mut Archetype, row: usize, existing: ComponentMask) {
 ///         // Moves the three fields out of the tuple, into the variables `A`, `B` and `C`
 ///         let (A, B, C,) = self;
 ///
 ///         // Stores each value at `row`, and keeps each replaced value in the tuple `replaced`
 ///         let replaced = (
-///             push_or_replace(table, row, A),
-///             push_or_replace(table, row, B),
-///             push_or_replace(table, row, C),
+///             push_or_replace(table, row, A, existing),
+///             push_or_replace(table, row, B, existing),
+///             push_or_replace(table, row, C, existing),
 ///         );
 ///
 ///         // Drops the replaced values, now that every column has its new length
@@ -293,13 +307,14 @@ fn push_or_replace<T: Component>(table: &mut Archetype, row: usize, value: T) ->
 /// ```
 ///
 /// The compiler works out the type parameter of each `push_or_replace` call from the value that
-/// the call passes. The call `push_or_replace(table, row, A)` therefore runs with `T` as the type `A`.
+/// the call passes. The call `push_or_replace(table, row, A, existing)` therefore runs with `T` as
+/// the type `A`.
 ///
 /// In `push_into`, each type parameter name is also the name of a variable. The line
 /// `let (A, B, C,) = self;` creates the variables `A`, `B` and `C`. The variable `A` contains the
 /// field of type `A`. Rust looks up type names and variable names in separate namespaces. As a
-/// result, `TypeId::of::<A>()` refers to the type, while `push_or_replace(table, row, A)` refers
-/// to the variable.
+/// result, `TypeId::of::<A>()` refers to the type, while `push_or_replace(table, row, A, existing)`
+/// refers to the variable.
 ///
 /// The comma after the last name in `(A, B, C,)` changes the meaning only in the call with one
 /// name. Rust parses `(A)` as the type `A` in brackets, while `(A,)` is a tuple with one field.
@@ -327,11 +342,11 @@ macro_rules! impl_bundle {
 
             // Allows the variables below to take the type parameter names, which are in capitals
             #[allow(non_snake_case)]
-            fn push_into(self, table: &mut Archetype, row: usize) {
+            fn push_into(self, table: &mut Archetype, row: usize, existing: ComponentMask) {
                 // Moves each field out of the tuple, into a variable with the name of its type
                 let ($($name,)+) = self;
                 // Stores each component at `row`, and keeps each replaced component in `replaced`
-                let replaced = ($(push_or_replace(table, row, $name),)+);
+                let replaced = ($(push_or_replace(table, row, $name, existing),)+);
                 // Drops the replaced components, now that every column has its new length
                 drop(replaced);
             }
@@ -778,7 +793,8 @@ mod tests {
                 push_component(&mut table, Health(value));
             }
 
-            let replaced = push_or_replace(&mut table, count as usize, Health(99));
+            let replaced =
+                push_or_replace(&mut table, count as usize, Health(99), ComponentMask::EMPTY);
 
             let mut expected: Vec<Health> = (0..count).map(Health).collect();
             expected.push(Health(99));
@@ -808,7 +824,7 @@ mod tests {
                 push_component(&mut table, Health(value));
             }
 
-            let replaced = push_or_replace(&mut table, row, Health(99));
+            let replaced = push_or_replace(&mut table, row, Health(99), ComponentMask::single(0));
 
             assert_eq!(
                 replaced,
@@ -833,8 +849,8 @@ mod tests {
 
         let mut table = Archetype::new(&[ComponentInfo::of::<Tag>(ComponentMask::single(0))]);
 
-        let pushed = push_or_replace(&mut table, 0, Tag);
-        let replaced = push_or_replace(&mut table, 0, Tag);
+        let pushed = push_or_replace(&mut table, 0, Tag, ComponentMask::EMPTY);
+        let replaced = push_or_replace(&mut table, 0, Tag, ComponentMask::single(0));
 
         assert_eq!(pushed, None, "returned component for the push");
         assert_eq!(
@@ -851,7 +867,7 @@ mod tests {
     fn push_or_replace_with_missing_column_panics() {
         let mut table = Archetype::new(&[ComponentInfo::of::<Position>(ComponentMask::single(0))]);
 
-        push_or_replace(&mut table, 0, Health(1));
+        push_or_replace(&mut table, 0, Health(1), ComponentMask::EMPTY);
     }
 
     /// Checks that each component goes onto the end of its own column, whatever the field order
@@ -861,7 +877,7 @@ mod tests {
         let health = ComponentInfo::of::<Health>(ComponentMask::single(1));
         let mut table = Archetype::new(&[position, health]);
 
-        (Health(7), Position(1.5)).push_into(&mut table, 0);
+        (Health(7), Position(1.5)).push_into(&mut table, 0, ComponentMask::EMPTY);
 
         assert_eq!(
             read_column::<Position>(&table),
@@ -882,7 +898,9 @@ mod tests {
             push_component(&mut table, Health(value));
         }
 
-        (Position(9.0), Health(9)).push_into(&mut table, 1);
+        let existing = table.mask();
+
+        (Position(9.0), Health(9)).push_into(&mut table, 1, existing);
 
         assert_eq!(
             read_column::<Position>(&table),
@@ -909,7 +927,7 @@ mod tests {
         push_component(&mut table, Velocity(0.0));
         push_component(&mut table, Health(1));
 
-        (Velocity(9.0), Health(9), Position(9.0)).push_into(&mut table, 1);
+        (Velocity(9.0), Health(9), Position(9.0)).push_into(&mut table, 1, health.bit());
 
         assert_eq!(
             read_column::<Position>(&table),
@@ -938,7 +956,7 @@ mod tests {
         let mut table = Archetype::new(&[counter, health]);
         push_component(&mut table, build_counter(&drops));
 
-        (build_counter(&drops), Health(1)).push_into(&mut table, 0);
+        (build_counter(&drops), Health(1)).push_into(&mut table, 0, counter.bit());
         let drops_after_push = drops.load(Ordering::Relaxed);
         drop(table);
         let drops_after_table = drops.load(Ordering::Relaxed);
@@ -957,7 +975,9 @@ mod tests {
         push_component(&mut table, Volatile { panics: true });
         let bundle = (Volatile { panics: false }, Health(7));
 
-        let outcome = panic::catch_unwind(AssertUnwindSafe(|| bundle.push_into(&mut table, 0)));
+        let outcome = panic::catch_unwind(AssertUnwindSafe(|| {
+            bundle.push_into(&mut table, 0, volatile.bit());
+        }));
 
         let stored_panics: Vec<bool> = read_column::<Volatile>(&table)
             .iter()
@@ -973,8 +993,8 @@ mod tests {
     fn push_into_with_one_field_pushes_then_replaces() {
         let mut table = Archetype::new(&[ComponentInfo::of::<Health>(ComponentMask::single(0))]);
 
-        (Health(1),).push_into(&mut table, 0);
-        (Health(2),).push_into(&mut table, 0);
+        (Health(1),).push_into(&mut table, 0, ComponentMask::EMPTY);
+        (Health(2),).push_into(&mut table, 0, ComponentMask::single(0));
 
         assert_eq!(read_column::<Health>(&table), [Health(2)]);
     }
@@ -986,7 +1006,7 @@ mod tests {
         let infos = Bundle32::infos(&mut world);
         let mut table = Archetype::new(&infos);
 
-        build_bundle_32().push_into(&mut table, 0);
+        build_bundle_32().push_into(&mut table, 0, ComponentMask::EMPTY);
 
         let lengths: Vec<Option<usize>> = infos
             .iter()
@@ -1011,6 +1031,6 @@ mod tests {
     fn push_into_with_missing_column_panics() {
         let mut table = Archetype::new(&[ComponentInfo::of::<Position>(ComponentMask::single(0))]);
 
-        (Position(1.0), Health(1)).push_into(&mut table, 0);
+        (Position(1.0), Health(1)).push_into(&mut table, 0, ComponentMask::EMPTY);
     }
 }

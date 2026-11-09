@@ -187,10 +187,9 @@ impl World {
             }
         };
 
-        // Adds the entity to the end of the empty table, at the row that `location` records
-        // SAFETY: `push_entity` requires one new component in every column. This table has no
-        // columns, meaning there is nothing to push
-        unsafe { self.archetypes[Self::EMPTY].push_entity(entity) };
+        // Adds the entity to the end of the empty table, at the row that `location` records. The
+        // table has no columns, so there is nothing to push
+        self.archetypes[Self::EMPTY].push_entity(entity, |_, _| {});
         // Returns the handle to the caller
         entity
     }
@@ -343,24 +342,20 @@ impl World {
         // Finds or creates the table for the entity's types plus the bundle's types
         let target_index = self.find_or_create_archetype(location.arch_index(), &infos);
 
+        // Records the types that the entity has now, which `push_into` replaces rather than pushes
+        let existing = self.archetypes[location.arch_index()].mask();
+
         // Replaces the entity's components in place, where it already has every type in the bundle
         if target_index == location.arch_index() {
-            // Replaces the component at the entity's row in the column for each bundle type
-            components.push_into(&mut self.archetypes[target_index], location.row());
+            components.push_into(&mut self.archetypes[target_index], location.row(), existing);
             return true;
         }
 
-        // Records the entity's row in the target, which is the target's current number of rows
-        let row = self.archetypes[target_index].len();
-        // Moves the entity and every component that it has to the end of the target
-        // SAFETY: `move_entity` requires the entity's current location, and a push onto each new
-        // column in the target. `locate` returned this location. The target's new columns are those
-        // for the bundle types that the entity lacked, and the line below pushes onto each of them.
-        // That line also replaces the component in each column for a bundle type that the entity already had,
-        // which leaves that column's length unchanged
-        let target_table = unsafe { self.move_entity(ent, location, target_index) };
-        // Pushes the bundle's new components, and replaces the ones that the entity already had
-        components.push_into(target_table, row);
+        // Moves the entity to the end of the target, pushing the bundle's new components and
+        // replacing the ones that the entity already had
+        self.move_entity(ent, location, target_index, |table, row| {
+            components.push_into(table, row, existing);
+        });
         // Reports that the entity now has every component in the bundle
         true
     }
@@ -398,17 +393,14 @@ impl World {
 
         // Finds or creates the table for the entity's types plus `T`
         let target_index = self.find_or_create_archetype_with::<T>(location.arch_index());
-        // Moves the entity and every component that it has to the end of the target
-        // SAFETY: `move_entity` requires the entity's current location, and a push onto each new
-        // column in the target. `locate` returned this location, and the lines below push onto the
-        // `T` column, which is the only new column
-        let target_table = unsafe { self.move_entity(entity, location, target_index) };
-        // Finds the target's `T` column, which the source table lacked
-        let target_column = target_table.components_of_mut(type_id).expect(
-            "the target archetype should store `T`, since it was found or created with `T`",
-        );
-        // Pushes the new component, which fills the entity's row in that column
-        target_column.push_typed(component);
+        // Moves the entity and every component that it has to the end of the target, then pushes
+        // the new `T` onto the target's `T` column, the only column that the source table lacked
+        self.move_entity(entity, location, target_index, |table, _| {
+            let target_column = table.components_of_mut(type_id).expect(
+                "the target archetype should store `T`, since it was found or created with `T`",
+            );
+            target_column.push_typed(component);
+        });
         // Reports that the entity now has the new `T`
         true
     }
@@ -441,11 +433,9 @@ impl World {
 
         // Finds or creates the table for the entity's types minus `T`
         let target = self.find_or_create_archetype_without(location.arch_index(), type_id);
-        // Moves the entity's other components to the target, and drops its `T`
-        // SAFETY: `move_entity` requires the entity's current location, and a push onto each new
-        // column in the target. `locate` returned this location, and the target's columns are the
-        // source table's columns minus `T`, meaning the target has no new columns
-        unsafe { self.move_entity(entity, location, target) };
+        // Moves the entity's other components to the target, and drops its `T`. The target has no
+        // new columns, so there is nothing to push
+        self.move_entity(entity, location, target, |_, _| {});
         // Reports that the entity had a `T`
         true
     }
@@ -782,40 +772,33 @@ impl World {
         index
     }
 
-    /// Moves `entity` from its table to the end of the table at position `target`, and returns
-    /// the target table for the caller to fill.
+    /// Moves `entity` from its table to the end of the table at position `target`, and calls `fill`
+    /// to push the components that the target needs and the source table lacked.
     ///
-    /// The method drops each component that the target has no column for. It also updates the slot
-    /// of the moved entity, and the slot of the entity that fills its old row.
+    /// The method drops each component that the target has no column for. It passes `fill` on to
+    /// [`Archetype::move_entity_dropping`], which sets out what the closure MUST push. It also
+    /// updates the slot of the moved entity, and the slot of the entity that fills its old row.
     ///
-    /// The returned reference borrows the world exclusively, meaning the compiler rejects any other
-    /// use of the world until the caller has finished filling the target.
+    /// `location` MUST be where `entity` is stored now, as [`locate`](Self::locate) returns it. A
+    /// stale row could lie past the end of the entity list, which panics.
     ///
     /// # Panics
     ///
     /// Panics where `target` equals `location.arch_index()`, since `get_disjoint_mut` refuses to
-    /// borrow one table as both the source and the target.
+    /// borrow one table as both the source and the target. Also panics in the cases that
+    /// [`Archetype::move_entity_dropping`] sets out, such as a `fill` that misses a new column.
     ///
     /// # Aborts
     ///
     /// The program aborts where the `Drop` implementation of a dropped component panics, as
     /// [`Archetype::move_entity_dropping`] sets out.
-    ///
-    /// # Safety
-    ///
-    /// The caller MUST guarantee two things:
-    ///
-    /// - `location` is where `entity` is stored now, as [`locate`](Self::locate) returns it. A stale
-    ///   row could lie past the end of a column.
-    /// - The caller pushes one component onto each column that the target has and the source table
-    ///   lacks, before anything else uses the target. A missing component leaves that column one
-    ///   row short, as [`Archetype::push_entity`] sets out.
-    unsafe fn move_entity(
+    fn move_entity(
         &mut self,
         entity: Entity,
         location: Location,
         target: usize,
-    ) -> &mut Archetype {
+        fill: impl FnOnce(&mut Archetype, usize),
+    ) {
         // Lists the two tables to borrow, with the entity's current table first and the target
         // second
         let indices = [location.arch_index(), target];
@@ -827,19 +810,15 @@ impl World {
 
         // Records the entity's row in the target, which is the target's current number of rows
         let row = target_table.len();
-        // Moves the entity to the end of the target, and finds the entity that fills its old row,
-        // where one does
-        // SAFETY: `move_entity_dropping` requires a row in range, and a push onto each new column in
-        // the target. The caller MUST guarantee both, as the Safety section of this method sets out
-        let moved_ent = unsafe { source_table.move_entity_dropping(location.row(), target_table) };
+        // Moves the entity to the end of the target and fills its new columns, then finds the entity
+        // that fills its old row, where one does
+        let moved_ent = source_table.move_entity_dropping(location.row(), target_table, fill);
 
         // Describes where the entity now lives
         let new_location = Location::new(target, row);
         // Updates the slot of `entity`, and the slot of `moved_ent`, which is the entity that filled
         // its old row
         self.record_move(entity, moved_ent, location, new_location);
-        // Returns the target, for the caller to push onto its new columns
-        &mut self.archetypes[target]
     }
 
     /// Updates the slots after `moved_ent` moves from `old_location` to `new_location`.

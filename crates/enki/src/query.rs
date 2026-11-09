@@ -121,7 +121,10 @@ pub unsafe trait Query {
     /// - Nothing outside the query reads or changes the columns of `archetype` during `'w`. A
     ///   caller that borrows the world through `&mut World` for `'w` meets this guarantee.
     /// - `check_access` has already returned for the query type, without a panic.
-    /// - The caller calls the method at most once for each table during `'w`.
+    /// - The caller calls the method at most once for each table during `'w`. A pair calls the
+    ///   method of each part once. It thereby calls the method of `&T` twice where both parts are
+    ///   `&T`, as in `(&Position, &Position)`. That repeat builds two shared slices of one column,
+    ///   which Rust allows, and `check_access` rejects any repeat that involves a `&mut T`.
     ///
     /// A broken guarantee lets a mutable slice reach a component that another reference also
     /// reaches, which is undefined behaviour.
@@ -134,6 +137,8 @@ pub unsafe trait Query {
     fn split_rows<'w>(columns: Self::Columns<'w>) -> impl Iterator<Item = Self::Item<'w>>;
 }
 
+// SAFETY: `add_access` pushes one `Access::Read` entry for `T`, which is the one type that
+// `find_columns` borrows. `find_columns` borrows only the `T` column of the table that it receives
 unsafe impl<T: Component> Query for &T {
     type Columns<'w> = &'w [T];
     type Item<'w> = &'w T;
@@ -152,6 +157,9 @@ unsafe impl<T: Component> Query for &T {
     }
 }
 
+// SAFETY: `add_access` pushes one `Access::Write` entry for `T`, which is the one type that
+// `find_columns` borrows, and borrows mutably. `find_columns` borrows only the `T` column of the
+// table that it receives
 unsafe impl<T: Component> Query for &mut T {
     type Columns<'w> = &'w mut [T];
     type Item<'w> = &'w mut T;
@@ -164,6 +172,24 @@ unsafe impl<T: Component> Query for &mut T {
         let components = archetype.components_of(TypeId::of::<T>())?;
         let start = components.data().cast::<T>();
         let len = components.len();
+
+        // SAFETY: `from_raw_parts_mut` requires an aligned pointer to `len` live values of `T`.
+        // `components_of` returned the column for the `TypeId` of `T`, `data` is always aligned, and
+        // every index below `len` stores a live component. The slice also has to span at most
+        // `isize::MAX` bytes, and `array_layout` keeps every block within that size.
+        //
+        // `from_raw_parts_mut` also requires that nothing else reads or changes those components
+        // during `'w`. A shared reference forbids changes only to the memory that it points at
+        // directly. The components lie in a separate block, which the column reaches through the
+        // raw pointer `data`. The borrow of `archetype` therefore leaves that block open to a write
+        // through `start`. Three guarantees from the caller keep every other reference off it:
+        //
+        // - The caller holds `&mut World` for `'w`, meaning nothing outside the query reaches any
+        //   table.
+        // - `check_access` has passed, meaning `T` appears once in the query. Every other part of the
+        //   query borrows a column of another type, which has its own block.
+        // - The caller visits each table once, meaning no later call builds a second slice of this
+        //   column.
         Some(unsafe { slice::from_raw_parts_mut(start.as_ptr(), len) })
     }
 
@@ -172,6 +198,9 @@ unsafe impl<T: Component> Query for &mut T {
     }
 }
 
+// SAFETY: `A` and `B` each implement `Query`, and thereby meet both guarantees on their own.
+// `add_access` pushes every entry of `A`, then every entry of `B`. `find_columns` borrows the
+// columns that `A` and `B` borrow, from the one table that it receives
 unsafe impl<A: Query, B: Query> Query for (A, B) {
     type Columns<'w> = (A::Columns<'w>, B::Columns<'w>);
     type Item<'w> = (A::Item<'w>, B::Item<'w>);
@@ -182,6 +211,9 @@ unsafe impl<A: Query, B: Query> Query for (A, B) {
     }
 
     unsafe fn find_columns<'w>(archetype: &'w Archetype) -> Option<Self::Columns<'w>> {
+        // SAFETY: `find_columns` requires the three guarantees in its Safety section. The caller
+        // gives them for the pair, and they carry over to each part. `check_access` for the pair
+        // covers every entry of `A` and of `B`. Each part is called once for this table
         let a = unsafe { A::find_columns(archetype) }?;
         let b = unsafe { B::find_columns(archetype) }?;
         Some((a, b))

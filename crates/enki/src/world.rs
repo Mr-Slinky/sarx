@@ -546,6 +546,9 @@ impl World {
         self.archetypes
             .iter()
             .filter(move |archetype| archetype.len() > 0 && archetype.has_all(query_mask))
+            // SAFETY: `find_columns` requires three guarantees. `&mut self` keeps every other
+            // reference off the world for as long as the iterator lives, `check_access` passed
+            // above, and the iterator visits each table once
             .filter_map(|archetype| unsafe { Q::find_columns(archetype) })
     }
 

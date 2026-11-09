@@ -539,7 +539,7 @@ impl World {
     /// world.add_components(player, (Position(0.0, 0.0), Velocity(1.0, 2.0)));
     ///
     /// // Moves each position by its velocity, working through the columns of each table
-    /// for (positions, velocities) in world.query_tables_mut::<(&mut Position, &Velocity)>() {
+    /// for (positions, velocities) in world.query_archetype_mut::<(&mut Position, &Velocity)>() {
     ///     for (position, velocity) in positions.iter_mut().zip(velocities) {
     ///         position.0 += velocity.0;
     ///         position.1 += velocity.1;
@@ -549,7 +549,7 @@ impl World {
     /// let moved = world.get::<Position>(player).map(|position| (position.0, position.1));
     /// assert_eq!(moved, Some((1.0, 2.0)));
     /// ```
-    pub fn query_tables_mut<Q: Query>(&mut self) -> impl Iterator<Item = Q::Columns<'_>> {
+    pub fn query_archetype_mut<Q: Query>(&mut self) -> impl Iterator<Item = Q::Columns<'_>> {
         // Panics where `Q` changes a component type that it also asks for elsewhere
         query::check_access::<Q>();
         let query_mask = self.find_query_mask::<Q>();
@@ -609,7 +609,7 @@ impl World {
     /// assert_eq!(tree_position, Some((5.0, 5.0)));
     /// ```
     pub fn query_mut<Q: Query>(&mut self) -> impl Iterator<Item = Q::Item<'_>> {
-        self.query_tables_mut::<Q>().flat_map(Q::split_rows)
+        self.query_archetype_mut::<Q>().flat_map(Q::split_rows)
     }
 
     // ========================================================================================== \\
@@ -2426,10 +2426,10 @@ mod tests {
         let _items = world.query_mut::<&Health>();
     }
 
-    /// Checks that `query_tables_mut` returns one item for each matching table, with its whole
+    /// Checks that `query_archetype_mut` returns one item for each matching table, with its whole
     /// column
     #[test]
-    fn query_tables_mut_with_several_matching_tables_returns_one_column_per_table() {
+    fn query_archetype_mut_with_several_matching_tables_returns_one_column_per_table() {
         let mut world = World::new();
         let entities = [
             world.spawn_empty_ent(),
@@ -2443,7 +2443,7 @@ mod tests {
         world.add_component(entities[3], Health(4));
 
         let mut lengths: Vec<usize> = world
-            .query_tables_mut::<&Position>()
+            .query_archetype_mut::<&Position>()
             .map(|positions| positions.len())
             .collect();
         lengths.sort_unstable();
@@ -2451,9 +2451,9 @@ mod tests {
         assert_eq!(lengths, [1, 2]);
     }
 
-    /// Checks that `query_tables_mut` skips a matching table once its last entity has left
+    /// Checks that `query_archetype_mut` skips a matching table once its last entity has left
     #[test]
-    fn query_tables_mut_with_emptied_table_skips_it() {
+    fn query_archetype_mut_with_emptied_table_skips_it() {
         let mut world = World::new();
         let leaver = world.spawn_empty_ent();
         let stayer = world.spawn_empty_ent();
@@ -2462,23 +2462,23 @@ mod tests {
         world.add_components(stayer, (Position(2.0), Health(2)));
 
         let columns: Vec<Vec<f32>> = world
-            .query_tables_mut::<&Position>()
+            .query_archetype_mut::<&Position>()
             .map(|positions| positions.iter().map(|position| position.0).collect())
             .collect();
 
         assert_eq!(columns, [[2.0]]);
     }
 
-    /// Checks that a change to a column from `query_tables_mut` stays in the world
+    /// Checks that a change to a column from `query_archetype_mut` stays in the world
     #[test]
-    fn query_tables_mut_with_mutable_column_keeps_changes_for_get() {
+    fn query_archetype_mut_with_mutable_column_keeps_changes_for_get() {
         let mut world = World::new();
         let first = world.spawn_empty_ent();
         let second = world.spawn_empty_ent();
         world.add_components(first, (Position(1.0), Health(10)));
         world.add_components(second, (Position(2.0), Health(20)));
 
-        for (positions, healths) in world.query_tables_mut::<(&mut Position, &Health)>() {
+        for (positions, healths) in world.query_archetype_mut::<(&mut Position, &Health)>() {
             for (position, health) in positions.iter_mut().zip(healths) {
                 position.0 += health.0 as f32;
             }
@@ -2496,15 +2496,15 @@ mod tests {
         );
     }
 
-    /// Checks that `query_tables_mut` panics on a nested query that changes a type it also reads
+    /// Checks that `query_archetype_mut` panics on a nested query that changes a type it also reads
     #[test]
     #[should_panic]
-    fn query_tables_mut_with_nested_write_of_read_type_panics() {
+    fn query_archetype_mut_with_nested_write_of_read_type_panics() {
         let mut world = World::new();
         let entity = world.spawn_empty_ent();
         world.add_components(entity, (Position(1.0), Health(1)));
 
-        let _columns = world.query_tables_mut::<((&Position, &Health), &mut Position)>();
+        let _columns = world.query_archetype_mut::<((&Position, &Health), &mut Position)>();
     }
 
     /// Checks that a location keeps the table and the row that it receives, up to `u32::MAX`

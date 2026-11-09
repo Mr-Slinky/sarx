@@ -232,9 +232,75 @@ type is one of `feat`, `fix`, `docs`, `style`, `refactor`, `test` and `chore`.
 
 ### Branches
 
-The author develops on the `dev` branch. Once a stage is finished, the author squash-merges `dev`
-into `main`. A squash merge combines every commit in the stage into one. As a result, `main` gains one
-commit per stage.
+The author develops on the `dev` branch, which keeps the full history of the work. The `main` branch
+is the stable changelog. Each commit on `main` describes one finished piece of work, such as a crate
+or the decision records.
+
+A commit on `main` contains the finished files from `dev`, without the history behind them. Each
+commit on `main` therefore reads as an independent piece of work, rather than as a merge from `dev`.
+
+#### Bringing main up to date
+
+GitHub accepts a change to `main` only through a pull request. The pull request also has to pass two
+checks, `cargo test` and `cargo miri test`. The workflow in `.github/workflows/enki.yml` runs both
+checks on every pull request into `main`.
+
+A developer brings `main` up to date in five steps, starting from a clean working tree.
+
+1. The developer creates a branch from `main` for the update:
+
+   ```bash
+   git switch -c stage/<name> main
+   ```
+
+2. The developer makes one commit for each piece of work. Each commit copies the finished files from
+   `dev`. Where the work replaces files on `main`, such as a crate under a new name, the same commit
+   deletes the old files:
+
+   ```bash
+   git rm -r crates/<old-crate>
+   git checkout dev -- crates/<new-crate>
+   git commit
+   ```
+
+   The commits go in an order in which each one builds. A crate comes after every crate that it
+   depends on. A workflow arrives in the same commit as the code that it tests.
+
+   The author of every commit on `main` is the developer, even where the commit contains an agent's
+   work.
+3. The developer runs `cargo test --workspace` on the branch. The developer then pushes the branch to
+   GitHub, and opens a pull request into `main`.
+4. Once both checks pass, the developer merges the pull request. The merge method depends on how
+   many pieces of work the update brings in. One crate is one piece of work, as are the files in
+   `docs/` and the files at the root of the repository.
+
+   | Update                            | Merge method         | Result on `main`                       |
+   |-----------------------------------|----------------------|----------------------------------------|
+   | Brings in one piece of work       | **Squash and merge** | One commit, which shows Verified       |
+   | Brings in several pieces of work  | **Rebase and merge** | One commit per piece of work, unsigned |
+
+   An update with several pieces of work needs one commit for each piece on `main`. A squash merge
+   would combine them into one, meaning only a rebase merge keeps them apart.
+
+   A squash merge combines the commits on the branch into one commit. GitHub signs that commit with
+   its own key, and the commit therefore shows a Verified badge. The developer gives the squash commit
+   a message in the Conventional Commits format.
+
+   A rebase merge writes a new copy of each commit onto `main`, keeping the commits apart. GitHub
+   does not sign those copies, meaning the commits on `main` show no Verified badge, although the
+   commits on the branch were signed.
+5. The developer returns to `dev`, deletes the branch, and moves the local `main` to match GitHub:
+
+   ```bash
+   git switch dev
+   git push origin --delete stage/<name>
+   git branch -D stage/<name>
+   git fetch --prune origin
+   git branch -f main origin/main
+   ```
+
+   Both merge methods give the commits on `main` new IDs. The last command therefore points the local
+   `main` at the commits on GitHub, in place of the commits on the branch.
 
 ## TODO
 

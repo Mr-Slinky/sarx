@@ -230,7 +230,8 @@ signs in to a work account by default. The points below set out how an agent wor
   GH_TOKEN=$(gh auth token -u Mr-Slinky) gh <command>
   ```
 
-- An agent squash-merges `dev` into `main` only when the developer asks.
+- An agent brings `main` up to date only when the developer asks. It follows the process in the
+  README, under Branches.
 
 ---
 
@@ -239,13 +240,16 @@ signs in to a work account by default. The points below set out how an agent wor
 Agents write commit messages in the format that the README sets out, following the
 `prose` skill.
 
-The developer's work and an agent's work go in separate commits. The git author field on each
-commit records whose work it contains:
+On `dev`, the developer's work and an agent's work go in separate commits. The git author field on
+each commit records whose work it contains:
 
 | Work            | Author                                 |
 |-----------------|----------------------------------------|
 | The developer's | The developer, as `git config` sets it |
 | An agent's      | `Claude <noreply@anthropic.com>`       |
+
+A commit on `main` is the exception. The developer is the author of every commit on `main`, as the
+README sets out under Branches.
 
 An agent commits its own changes only after the developer has reviewed them and says to commit.
 Until then, the agent reports that the change is ready for review, and stops.

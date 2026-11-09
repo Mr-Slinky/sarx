@@ -8,7 +8,7 @@
 //! The world stores its entities in tables, as ADR 0011 sets out. Each table is an [`Archetype`].
 //! A table stores every entity that has one exact set of component types, with one column for each
 //! type. Every entity with a `Position` and a `Health`, for example, lives in the same table. Every
-//! entity with a `Position`, `Health` and `Velocity`, live in another table.
+//! entity with a `Position`, a `Health` and a `Velocity` lives in another table.
 //!
 //! A new entity has no components. It therefore starts in the empty table, which has no columns.
 //! The empty table always takes position [`World::EMPTY`] in the list of tables.
@@ -24,9 +24,9 @@
 //! [`ComponentMask`] that combines the bits of a set of types. A world has room for as many
 //! component types as a mask has bits, which [`ComponentMask::CAPACITY`] defines.
 //!
-//! Each table has a mask, which combines the bits of its types. The world keeps a map from each mask to its table.
-//! It finds the table for a set of types by building the mask of that set, then looking the mask up
-//! in the map.
+//! Each table has a mask, which combines the bits of its types. The world keeps a map from each mask
+//! to its table. It finds the table for a set of types by building the mask of that set, then
+//! looking the mask up in the map.
 //!
 //! # Slots and versions
 //!
@@ -39,13 +39,13 @@
 //! treats a handle with a different version as one that does not refer to any entity. As a result,
 //! an old handle never reaches the later entity that reuses its slot.
 //!
-//! A slot holds at most u32::MAX entities over the life of the world. Once a despawn raises the version in
-//! a slot to u32::MAX, the world retires the slot. It never reuses that slot, and its index stays unused
-//! for the rest of the world's life.
+//! A slot serves at most `u32::MAX` entities over the life of the world. Once a despawn raises the
+//! version in a slot to `u32::MAX`, the world retires the slot. The world never reuses that slot,
+//! and its index stays unused for the rest of the world's life.
 //!
-//! The retirement protects old handles. If a further raise were allowed, it would wrap the version round to 0.
-//! A handle from the first entity in the slot, at version 0, could still exist. That handle would then incorrectly
-//! reach whichever entity took the slot next.
+//! The retirement protects old handles. A further raise would wrap the version round to 0. A handle
+//! from the first entity in the slot, at version 0, could still exist. That handle would then
+//! incorrectly reach whichever entity took the slot next.
 //!
 //! # Rows after a move
 //!
@@ -61,7 +61,7 @@
 use crate::archetype::Archetype;
 use crate::component::{Component, ComponentInfo, ComponentVec};
 use crate::mask::ComponentMask;
-use crate::{query, Bundle, Entity, Query};
+use crate::{Bundle, Entity, Query, query};
 use std::any::TypeId;
 use std::collections::HashMap;
 
@@ -118,7 +118,7 @@ pub struct World {
     archetypes: Vec<Archetype>,
     /// Maps the mask of each table to its position in `archetypes`.
     indices: HashMap<ComponentMask, usize>,
-    /// Maps each component type to its bit
+    /// Maps each component type to its bit.
     component_bits: HashMap<TypeId, ComponentMask>,
     /// Stores one slot for each entity index, at that index.
     slots: Vec<Slot>,
@@ -130,13 +130,13 @@ impl World {
     /// Defines the position in `archetypes` of the table for entities that have no components.
     const EMPTY: usize = 0;
 
-    /// Returns a world with no entities nor component types.
+    /// Returns a world with no entities and no component types.
     pub fn new() -> Self {
         // Starts the list of tables with one table, which has no columns
         let archetypes = vec![Archetype::new(&[])];
         // Creates the map from each table's mask to the table's position in `archetypes`
         let mut archetype_indices = HashMap::new();
-        // Files the empty mask, which stands for "no component types", under the empty table
+        // Files the empty mask, which has no bits set, under the empty table
         archetype_indices.insert(ComponentMask::EMPTY, Self::EMPTY);
 
         Self {
@@ -173,7 +173,7 @@ impl World {
                 Entity::new(index, slot.version)
             }
             None => {
-                // Takes the next index, which equals the number of slots, and panics past u32::MAX
+                // Takes the next index, which equals the number of slots, and panics past `u32::MAX`
                 let index = u32::try_from(self.slots.len()).expect(
                     "the number of slots should fit in a `u32`, the type of an entity index",
                 );
@@ -221,7 +221,7 @@ impl World {
         }
 
         let index = entity.index();
-        // Borrows that slot, to change it in place
+        // Borrows the entity's slot, to change it in place
         let slot = &mut self.slots[index];
         // Raises the version, which makes `locate` refuse every copy of the dead handle
         slot.version += 1;
@@ -233,6 +233,52 @@ impl World {
         true
     }
 
+    /// Makes room for at least `additional` more entities that have exactly the component types in
+    /// the bundle type `B`.
+    ///
+    /// The world finds or creates the table for the types in `B`. It then makes room in every
+    /// column of that table, and in its entity list. It also makes room in the list of slots, for
+    /// each of the `additional` entities that a freed slot will not take.
+    ///
+    /// The table and the list of slots then keep their blocks of memory while the caller spawns
+    /// the next `additional` entities and gives each one a `B`. The empty table, where each new
+    /// entity starts, grows as usual.
+    ///
+    /// The world gives a bit to each type in `B` that it has not met before. It keeps the table
+    /// from then on, as it keeps every other table.
+    ///
+    /// # Panics
+    ///
+    /// Panics where `B` lists the same component type twice. Also panics where `B` brings in more
+    /// component types than the world has room for, which [`ComponentMask::CAPACITY`] defines.
+    ///
+    /// Also panics where the required capacity overflows a `usize`, or where a larger block would
+    /// exceed `isize::MAX` bytes. The program aborts where the allocator cannot supply the block.
+    ///
+    /// # Examples
+    ///
+    /// The example makes room for 100 entities with a position and health, then creates them.
+    ///
+    /// ```
+    /// use enki::{Component, World};
+    ///
+    /// struct Position(f32, f32);
+    /// struct Health(u32);
+    ///
+    /// impl Component for Position {}
+    /// impl Component for Health {}
+    ///
+    /// let mut world = World::new();
+    ///
+    /// // Makes room for 100 entities with a `Position` and a `Health`
+    /// world.reserve::<(Position, Health)>(100);
+    ///
+    /// // Creates the 100 entities, which the reserved table takes without growing
+    /// for _ in 0..100 {
+    ///     let entity = world.spawn_empty_ent();
+    ///     world.add_components(entity, (Position(0.0, 0.0), Health(100)));
+    /// }
+    /// ```
     pub fn reserve<B: Bundle>(&mut self, additional: usize) {
         // Describes each type in the bundle, giving a bit to each type that the world has not met
         let infos = B::infos(self);
@@ -310,7 +356,7 @@ impl World {
         // SAFETY: `move_entity` requires the entity's current location, and a push onto each new
         // column in the target. `locate` returned this location. The target's new columns are those
         // for the bundle types that the entity lacked, and the line below pushes onto each of them.
-        // It replaces the component in each column for a bundle type that the entity already had,
+        // That line also replaces the component in each column for a bundle type that the entity already had,
         // which leaves that column's length unchanged
         let target_table = unsafe { self.move_entity(ent, location, target_index) };
         // Pushes the bundle's new components, and replaces the ones that the entity already had
@@ -456,6 +502,53 @@ impl World {
         })
     }
 
+    /// Returns an iterator with one item for each table that stores every component type in the
+    /// query `Q`. The item contains the columns that `Q` asks for from that table.
+    ///
+    /// Each item contains whole columns, such as a `&mut [Position]`, rather than one entity. A
+    /// caller that works on a column at a time uses this method. A caller that works on one entity
+    /// at a time uses [`query_mut`](Self::query_mut) instead. Every table that the iterator visits
+    /// has at least one entity.
+    ///
+    /// The iterator borrows the world exclusively, meaning the compiler rejects any other use of
+    /// the world while the iterator or a column is in use. The method takes `&mut self` even for a
+    /// query that only reads, since it can give a bit to a type that the world has not met before.
+    ///
+    /// # Panics
+    ///
+    /// Panics where `Q` changes a component type that it also asks for elsewhere, as in
+    /// `(&mut Position, &Position)`. Also panics where `Q` brings in more component types than the
+    /// world has room for, which [`ComponentMask::CAPACITY`] defines.
+    ///
+    /// # Examples
+    ///
+    /// The example moves each entity that has a position and a velocity by its velocity, one table
+    /// at a time.
+    ///
+    /// ```
+    /// use enki::{Component, World};
+    ///
+    /// struct Position(f32, f32);
+    /// struct Velocity(f32, f32);
+    ///
+    /// impl Component for Position {}
+    /// impl Component for Velocity {}
+    ///
+    /// let mut world = World::new();
+    /// let player = world.spawn_empty_ent();
+    /// world.add_components(player, (Position(0.0, 0.0), Velocity(1.0, 2.0)));
+    ///
+    /// // Moves each position by its velocity, working through the columns of each table
+    /// for (positions, velocities) in world.query_tables_mut::<(&mut Position, &Velocity)>() {
+    ///     for (position, velocity) in positions.iter_mut().zip(velocities) {
+    ///         position.0 += velocity.0;
+    ///         position.1 += velocity.1;
+    ///     }
+    /// }
+    ///
+    /// let moved = world.get::<Position>(player).map(|position| (position.0, position.1));
+    /// assert_eq!(moved, Some((1.0, 2.0)));
+    /// ```
     pub fn query_tables_mut<Q: Query>(&mut self) -> impl Iterator<Item = Q::Columns<'_>> {
         // Panics where `Q` changes a component type that it also asks for elsewhere
         query::check_access::<Q>();
@@ -463,11 +556,58 @@ impl World {
         self.archetypes
             .iter()
             .filter(move |archetype| archetype.len() > 0 && archetype.has_all(query_mask))
-            .filter_map(|archetype| {
-                unsafe { Q::find_columns(archetype) }
-            })
+            .filter_map(|archetype| unsafe { Q::find_columns(archetype) })
     }
 
+    /// Returns an iterator with one item for each entity that has every component type in the
+    /// query `Q`.
+    ///
+    /// The item for a query `&T` is a `&T`, and for `&mut T` it is a `&mut T`. For a pair, the
+    /// item is a pair that contains the item for each part. The iterator visits the entities one
+    /// table at a time, and in row order within each table.
+    ///
+    /// The iterator borrows the world exclusively, meaning the compiler rejects any other use of
+    /// the world while the iterator or an item is in use.
+    ///
+    /// # Panics
+    ///
+    /// Panics where `Q` changes a component type that it also asks for elsewhere, as in
+    /// `(&mut Position, &Position)`. Also panics where `Q` brings in more component types than the
+    /// world has room for, which [`ComponentMask::CAPACITY`] defines.
+    ///
+    /// # Examples
+    ///
+    /// The example moves every entity that has a position and a velocity by its velocity. An entity
+    /// with a position alone stays where it is.
+    ///
+    /// ```
+    /// use enki::{Component, World};
+    ///
+    /// struct Position(f32, f32);
+    /// struct Velocity(f32, f32);
+    ///
+    /// impl Component for Position {}
+    /// impl Component for Velocity {}
+    ///
+    /// let mut world = World::new();
+    /// let player = world.spawn_empty_ent();
+    /// world.add_components(player, (Position(0.0, 0.0), Velocity(1.0, 2.0)));
+    /// let tree = world.spawn_empty_ent();
+    /// world.add_component(tree, Position(5.0, 5.0));
+    ///
+    /// // Moves each entity that has both components by its velocity
+    /// for (position, velocity) in world.query_mut::<(&mut Position, &Velocity)>() {
+    ///     position.0 += velocity.0;
+    ///     position.1 += velocity.1;
+    /// }
+    ///
+    /// let player_position = world
+    ///     .get::<Position>(player)
+    ///     .map(|position| (position.0, position.1));
+    /// let tree_position = world.get::<Position>(tree).map(|position| (position.0, position.1));
+    /// assert_eq!(player_position, Some((1.0, 2.0)));
+    /// assert_eq!(tree_position, Some((5.0, 5.0)));
+    /// ```
     pub fn query_mut<Q: Query>(&mut self) -> impl Iterator<Item = Q::Item<'_>> {
         self.query_tables_mut::<Q>().flat_map(Q::split_rows)
     }
@@ -476,6 +616,14 @@ impl World {
     //                                       Helper Methods                                       \\
     // ========================================================================================== \\
 
+    /// Returns the mask with one set bit for each component type that the query `Q` asks for.
+    ///
+    /// Gives a bit to each of those types that the world has not met before.
+    ///
+    /// # Panics
+    ///
+    /// Panics where `Q` brings in more component types than the world has room for, which
+    /// [`ComponentMask::CAPACITY`] defines.
     fn find_query_mask<Q: Query>(&mut self) -> ComponentMask {
         let mut accesses = Vec::new();
         Q::add_access(&mut accesses);
@@ -493,9 +641,9 @@ impl World {
     /// Returns where `entity` is stored, or `None` where the handle does not refer to a living
     /// entity.
     ///
-    /// A handle does not refer to a living entity where its index lies past the last slot. It also does
-    /// not refer to one where its version differs from the version in its slot, as it does for a
-    /// despawned entity.
+    /// A handle does not refer to a living entity where its index lies past the last slot. It also
+    /// does not refer to one where its version differs from the version in its slot, as it does for
+    /// a despawned entity.
     fn locate(&self, entity: Entity) -> Option<Location> {
         // Finds the entity's slot, and returns `None` where the index lies past the last slot
         let slot = self.slots.get(entity.index())?;
@@ -534,7 +682,7 @@ impl World {
         let source_mask = self.archetypes[source].mask();
         // Builds the target table's mask, which combines the entity's types with the bundle's types
         let mask = source_mask | bundle_mask;
-        // Returns the table that already has that mask, if one exists
+        // Returns the table that already has that mask, where one exists
         if let Some(&index) = self.indices.get(&mask) {
             return index;
         }
@@ -645,8 +793,8 @@ impl World {
     ///
     /// # Panics
     ///
-    /// Panics where `target` equals `location.arch_index()`, since `get_disjoint_mut` refuses to borrow
-    /// one table as both the source and the target.
+    /// Panics where `target` equals `location.arch_index()`, since `get_disjoint_mut` refuses to
+    /// borrow one table as both the source and the target.
     ///
     /// # Aborts
     ///
@@ -668,7 +816,8 @@ impl World {
         location: Location,
         target: usize,
     ) -> &mut Archetype {
-        // Lists the two tables to borrow, with the entity's current table first and the target second
+        // Lists the two tables to borrow, with the entity's current table first and the target
+        // second
         let indices = [location.arch_index(), target];
         // Borrows both tables at once, after checking that the two positions differ
         let [source_table, target_table] = self
@@ -686,7 +835,8 @@ impl World {
 
         // Describes where the entity now lives
         let new_location = Location::new(target, row);
-        // Updates the slot of `entity`, and the slot of `moved_ent`, the entity that filled its old row
+        // Updates the slot of `entity`, and the slot of `moved_ent`, which is the entity that filled
+        // its old row
         self.record_move(entity, moved_ent, location, new_location);
         // Returns the target, for the caller to push onto its new columns
         &mut self.archetypes[target]
@@ -694,8 +844,8 @@ impl World {
 
     /// Updates the slots after `moved_ent` moves from `old_location` to `new_location`.
     ///
-    /// `swapped_ent` is the entity that filled the row that `moved_ent` left, or `None` where that row
-    /// was the last one in its table.
+    /// `swapped_ent` is the entity that filled the row that `moved_ent` left, or `None` where that
+    /// row was the last one in its table.
     fn record_move(
         &mut self,
         moved_ent: Entity,
@@ -718,7 +868,7 @@ impl World {
 impl Default for World {
     /// Returns a world with no entities and no component types, as [`World::new`] does.
     fn default() -> Self {
-        Self::new() // builds the same empty world as `new`
+        Self::new() // Builds the same empty world as `new`
     }
 }
 
@@ -737,7 +887,8 @@ struct Slot {
     location: Location,
 }
 
-// Stops the build where a slot grows past 12 bytes: a 4-byte version and two 4-byte location fields
+// Stops the build where the size of a slot differs from 12 bytes. A slot needs 4 bytes for its
+// version, and 4 bytes for each of its two location fields
 const _: () = assert!(size_of::<Slot>() == 12);
 
 /// Records the table and the row where one entity is stored.
@@ -1279,7 +1430,8 @@ mod tests {
         assert!(!added, "answer for a despawned entity");
     }
 
-    /// Checks that `add_component` panics on a 65th component type, since a mask has room for 64 bits
+    /// Checks that `add_component` panics on a 65th component type, since a mask has room for 64
+    /// bits
     #[test]
     #[should_panic]
     fn insert_with_65th_component_type_panics() {
@@ -1355,7 +1507,8 @@ mod tests {
         assert_eq!(world.archetypes.len(), 2, "number of tables");
     }
 
-    /// Checks that removal finds the table that `add_component` built, rather than building a second one
+    /// Checks that removal finds the table that `add_component` built, rather than building a second
+    /// one
     #[test]
     fn remove_with_existing_target_table_reuses_table() {
         let mut world = World::new();
@@ -1436,7 +1589,8 @@ mod tests {
         assert_eq!(drops.load(Ordering::Relaxed), 1);
     }
 
-    /// Checks that moving one entity out leaves the entity that fills its row with its own components
+    /// Checks that moving one entity out leaves the entity that fills its row with its own
+    /// components
     #[test]
     fn remove_with_entity_leaving_first_row_keeps_other_components_in_place() {
         let mut world = World::new();

@@ -18,7 +18,8 @@
 //! # Masks
 //!
 //! A table has a mask, which is a [`ComponentMask`] with one set bit for each component type that
-//! the table stores. Each bit comes from the [`ComponentInfo`] for that type, which describes the type to the table.
+//! the table stores. Each bit comes from the [`ComponentInfo`] for that type. A `ComponentInfo`
+//! describes one component type to the table.
 //!
 //! A caller that wants a set of component types builds a mask of those types. It then passes that
 //! mask to [`Archetype::has_all`]. The method answers whether the table stores every one of those
@@ -66,8 +67,9 @@
 //! }
 //!
 //! // Moves row 0 to the target table, and fills row 0 with the last row
-//! // SAFETY: `move_entity_dropping` requires a row in range, and a push onto each new column in the
-//! // target. Row 0 is below the length of 2, and the two statements below push onto `Health`
+//! // SAFETY: `move_entity_dropping` requires a row in range, and a push onto each new column
+//! // in the target. Row 0 is below the length of 2, and the two statements below push onto
+//! // `Health`
 //! let filled = unsafe { source.move_entity_dropping(0, &mut target) };
 //!
 //! // Gives the moved entity its new component
@@ -113,9 +115,9 @@ impl Archetype {
     ///
     /// The caller MUST pass each component type once, with a bit that follows the rules in
     /// [`ComponentInfo::of`]. A type passed twice with two different bits gets two columns. A search
-    /// for that type returns one column every time, and which one is unspecified. The other column
-    /// is then never pushed to, and the table breaks the guarantee that
-    /// [`push_entity`](Self::push_entity) requires.
+    /// for that type returns one column every time, and which one is unspecified. Every push then
+    /// reaches the column that the search returns, and the other column stays empty. The table
+    /// thereby breaks the guarantee that [`push_entity`](Self::push_entity) requires.
     ///
     /// # Panics
     ///
@@ -193,6 +195,16 @@ impl Archetype {
         self.entities.push(entity);
     }
 
+    /// Makes room for at least `additional` more entities, in every column and in the entity list.
+    ///
+    /// The next `additional` entities that the caller pushes then fit without a larger block of
+    /// memory. Where a column moves to a larger block, every pointer into its old block stops being
+    /// valid.
+    ///
+    /// # Panics
+    ///
+    /// Panics where the required capacity overflows a `usize`, or where a larger block would exceed
+    /// `isize::MAX` bytes. The program aborts where the allocator cannot supply the block.
     pub(crate) fn reserve(&mut self, additional: usize) {
         for components in &mut self.components {
             components.reserve(additional);
@@ -241,8 +253,8 @@ impl Archetype {
     /// both, which the borrow rules forbid.
     ///
     /// `N` is a const generic, which is a number that the caller fixes at compile time, in the way
-    /// that a type parameter fixes a type. A call with an array of two `TypeId` values returns an array of
-    /// two columns.
+    /// that a type parameter fixes a type. A call with an array of two `TypeId` values returns an
+    /// array of two columns.
     ///
     /// Each returned reference borrows the table exclusively, meaning the compiler rejects any
     /// other use of the table while any of them is in use. The rules in
@@ -281,8 +293,8 @@ impl Archetype {
     /// The last row in this table then fills `row`, in the entity list and in every column.
     ///
     /// The method returns the entity that now occupies `row`, or `None` where `row` was the last
-    /// row, since no other entity changes row. The caller MUST update the location that it records
-    /// for the returned entity, as the module documentation sets out.
+    /// row, since every other entity then keeps its row. The caller MUST update the location that it
+    /// records for the returned entity, as the module documentation sets out.
     ///
     /// # Panics
     ///
@@ -307,7 +319,8 @@ impl Archetype {
             "every column must have one component for each row"
         );
 
-        // Ends the program where anything below panics, since the columns would then differ in length
+        // Ends the program where anything below panics, since the columns would then differ in
+        // length
         let guard = AbortOnUnwind;
         // Visits each column in the table
         for components in &mut self.components {
@@ -328,16 +341,15 @@ impl Archetype {
     ///
     /// The method serves both moves between tables. Where the entity gains components, `target`
     /// has every column in this table plus one or more others, and the caller fills those columns
-    /// afterwards.
-    /// Where the entity loses a component, `target` lacks that one column, and the method drops the
-    /// component.
+    /// afterwards. Where the entity loses a component, `target` lacks that one column, and the
+    /// method drops the component.
     ///
     /// The last row in this table then fills `row`, in the entity list and in every column.
     ///
     /// The method returns the entity that now occupies `row`, or `None` where `row` was the last row,
-    /// since no other entity changes row. The moved entity now occupies row `target.len() - 1`. The
-    /// caller MUST update the location that it records for both entities, as the module documentation
-    /// sets out.
+    /// since every other entity then keeps its row. The moved entity now occupies row
+    /// `target.len() - 1`. The caller MUST update the location that it records for both entities, as
+    /// the module documentation sets out.
     ///
     /// # Panics
     ///
@@ -376,7 +388,8 @@ impl Archetype {
             self.has_one_component_per_entity(),
             "every column must have one component for each row"
         );
-        // Panics in a debug build, where a target column and the target entity list differ in length
+        // Panics in a debug build, where a target column and the target entity list differ in
+        // length
         debug_assert!(
             target.has_one_component_per_entity(),
             "every target column must have one component for each row"
@@ -444,8 +457,8 @@ impl Archetype {
 /// thereby aborts the program. Any code that would catch the panic never runs, meaning nothing can
 /// use the table while its columns differ in length.
 ///
-/// The abort rests on the decision that `ComponentVec` also takes, which treats a panicking `Drop`
-/// as a bug in the component.
+/// The abort follows a decision that `ComponentVec` also takes. That decision treats a panicking
+/// `Drop` as a bug in the component.
 struct AbortOnUnwind;
 
 impl Drop for AbortOnUnwind {
@@ -766,8 +779,8 @@ mod tests {
             push_row(&mut source, entity, Position(x));
         }
 
-        // SAFETY: `move_entity_dropping` requires a row in range, and a push onto each new column in the
-        // target. Row 1 is below the length of 4, and the target has no new columns
+        // SAFETY: `move_entity_dropping` requires a row in range, and a push onto each new column
+        // in the target. Row 1 is below the length of 4, and the target has no new columns
         let filled = unsafe { source.move_entity_dropping(1, &mut target) };
 
         assert_eq!(filled, Some(fourth), "entity that fills the row");
@@ -799,8 +812,9 @@ mod tests {
             }
             let last = count - 1;
 
-            // SAFETY: `move_entity_dropping` requires a row in range, and a push onto each new column in the
-            // target. Each case moves its last row, and the target has no new columns
+            // SAFETY: `move_entity_dropping` requires a row in range, and a push onto each new
+            // column in the target. Each case moves its last row, and the target has no new
+            // columns
             let filled = unsafe { source.move_entity_dropping(last as usize, &mut target) };
 
             let remaining = last as usize;
@@ -830,8 +844,8 @@ mod tests {
         push_row(&mut source, moved, Position(1.0));
         push_row(&mut target, resident, Position(2.0));
 
-        // SAFETY: `move_entity_dropping` requires a row in range, and a push onto each new column in the
-        // target. Row 0 is below the length of 1, and the target has no new columns
+        // SAFETY: `move_entity_dropping` requires a row in range, and a push onto each new column
+        // in the target. Row 0 is below the length of 1, and the target has no new columns
         unsafe { source.move_entity_dropping(0, &mut target) };
 
         assert_eq!(target.entities, [resident, moved], "target entities");
@@ -855,8 +869,8 @@ mod tests {
         let moved = Entity::new(4, 0);
         push_row(&mut source, moved, Health(4));
 
-        // SAFETY: `move_entity_dropping` requires a row in range, and a push onto each new column in the
-        // target. Row 0 is below the length of 1, and the target has no new columns
+        // SAFETY: `move_entity_dropping` requires a row in range, and a push onto each new column
+        // in the target. Row 0 is below the length of 1, and the target has no new columns
         unsafe { source.move_entity_dropping(0, &mut target) };
 
         let moved_row = target.len() - 1;
@@ -881,8 +895,9 @@ mod tests {
         push_row(&mut source, second, Health(2));
         push_row(&mut source, third, Health(3));
 
-        // SAFETY: `move_entity_dropping` requires a row in range, and a push onto each new column in the
-        // target. Row 0 is below the lengths of 3, 2 and 1, and the target has no new columns
+        // SAFETY: `move_entity_dropping` requires a row in range, and a push onto each new column
+        // in the target. Row 0 is below the lengths of 3, 2 and 1, and the target has no new
+        // columns
         let filled = unsafe {
             [
                 source.move_entity_dropping(0, &mut target),
@@ -928,8 +943,8 @@ mod tests {
             unsafe { source.push_entity(entity) };
         }
 
-        // SAFETY: `move_entity_dropping` requires a row in range, and a push onto each new column in the
-        // target. Row 0 is below the length of 3, and the line below pushes onto `Health`
+        // SAFETY: `move_entity_dropping` requires a row in range, and a push onto each new column
+        // in the target. Row 0 is below the length of 3, and the line below pushes onto `Health`
         let filled = unsafe { source.move_entity_dropping(0, &mut target) };
         push_component(&mut target, Health(100));
 
@@ -964,8 +979,8 @@ mod tests {
         let second = Entity::new(1, 0);
 
         // SAFETY: `push_entity` requires one new component in every column, and the table has no
-        // columns. `move_entity_dropping` requires a row in range, and a push onto each new column in the
-        // target. Row 0 is below the length of 2, and the target has no new columns
+        // columns. `move_entity_dropping` requires a row in range, and a push onto each new column
+        // in the target. Row 0 is below the length of 2, and the target has no new columns
         let filled = unsafe {
             source.push_entity(first);
             source.push_entity(second);
@@ -977,7 +992,7 @@ mod tests {
         assert_eq!(target.entities, [first], "target entities");
     }
 
-    /// Checks that a column of a type that takes no memory moves by count alone
+    /// Checks that a column of a zero-sized type moves by count alone
     #[test]
     fn move_entity_dropping_with_zero_size_type_moves_count() {
         struct Tag;
@@ -988,8 +1003,8 @@ mod tests {
         push_row(&mut source, Entity::new(0, 0), Tag);
         push_row(&mut source, Entity::new(1, 0), Tag);
 
-        // SAFETY: `move_entity_dropping` requires a row in range, and a push onto each new column in the
-        // target. Row 0 is below the length of 2, and the target has no new columns
+        // SAFETY: `move_entity_dropping` requires a row in range, and a push onto each new column
+        // in the target. Row 0 is below the length of 2, and the target has no new columns
         unsafe { source.move_entity_dropping(0, &mut target) };
 
         assert_eq!(read_column::<Tag>(&source).len(), 1, "source column length");
@@ -1010,8 +1025,8 @@ mod tests {
             push_row(&mut source, Entity::new(index, 0), value);
         }
 
-        // SAFETY: `move_entity_dropping` requires a row in range, and a push onto each new column in the
-        // target. Row 0 is below the length of 3, and the target has no new columns
+        // SAFETY: `move_entity_dropping` requires a row in range, and a push onto each new column
+        // in the target. Row 0 is below the length of 3, and the target has no new columns
         unsafe { source.move_entity_dropping(0, &mut target) };
         let drops_after_move = drops.load(Ordering::Relaxed);
 

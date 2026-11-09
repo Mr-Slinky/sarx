@@ -7,7 +7,7 @@
 /// A handle stores an index and a version. The index selects the slot that the entity occupies in
 /// the world. The version tells apart the entities that use the same slot at different times. A
 /// handle therefore refers to its entity until a caller despawns that entity. After that, every
-/// call with the handle finds no entity.
+/// call with the handle does not find an entity.
 ///
 /// A handle is `Copy`, meaning a caller can keep and pass as many copies as it needs. Every copy
 /// refers to the same entity.
@@ -25,7 +25,7 @@
 /// let player = world.spawn_empty_ent();
 /// let copy = player;
 ///
-/// // Despawns the entity, after which the copy finds no entity either
+/// // Despawns the entity, after which the copy does not find an entity either
 /// world.despawn_ent(player);
 /// assert!(!world.despawn_ent(copy));
 /// ```

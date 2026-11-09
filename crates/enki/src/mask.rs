@@ -1,14 +1,14 @@
 //! Defines the mask that records a set of component types, with one bit for each type.
 //!
 //! A world gives each component type a position, from 0 upwards, the first time that it meets the
-//! type. A [`ComponentMask`] sets the bit at the position of each type in its set. A table stores
-//! the mask of its own set of types, and a query builds the mask of the types that it asks for.
-//! Comparing the two masks then answers whether the table stores every type in the query, without
-//! a visit to any column.
+//! type. For each type in its set, a [`ComponentMask`] sets the bit at that position. A table
+//! stores a mask for the component types that it stores, and a query builds a mask for the types
+//! that it asks for. The table then compares the two masks to answer whether it stores every type in the
+//! query. The comparison does not visit any column.
 //!
 //! A mask has room for [`ComponentMask::CAPACITY`] component types. That number is also the limit
-//! on the component types in one world. Every operation on the bits lives in this file, meaning a
-//! change to the limit changes this file alone.
+//! on the component types in one world. This module defines every operation on the bits. As a
+//! result, a change to the limit changes this module alone.
 
 use std::fmt;
 use std::ops::{BitOr, BitOrAssign};
@@ -79,8 +79,8 @@ impl ComponentMask {
     /// Returns `true` where `self` contains every component type in `other`, and `false` where it
     /// lacks at least one.
     ///
-    /// An `other` of [`EMPTY`](Self::EMPTY) does not ask for any component types, and the method
-    /// then returns `true` for every `self`.
+    /// An `other` of [`EMPTY`](Self::EMPTY) does not ask for any component types. The method
+    /// therefore returns `true` for every `self`.
     pub(crate) fn contains_all(self, other: Self) -> bool {
         self.0 & other.0 == other.0
     }
@@ -91,6 +91,9 @@ impl ComponentMask {
         self.0 & other.0 != 0
     }
 
+    /// Returns the mask with every component type in `self` apart from those in `other`.
+    ///
+    /// A type in `other` that `self` lacks leaves the result unchanged.
     #[must_use]
     pub(crate) fn without(mut self, other: Self) -> Self {
         self.0 &= !other.0;
@@ -115,7 +118,9 @@ impl BitOrAssign for ComponentMask {
 }
 
 impl fmt::Binary for ComponentMask {
-    /// Writes the bits of the mask in base 2, which a `{:b}` or `{:#b}` in a format string requests.
+    /// Writes the bits of the mask in base 2.
+    ///
+    /// A format string requests this output with `{:b}` or `{:#b}`.
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Binary::fmt(&self.0, formatter)
     }

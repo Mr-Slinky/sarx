@@ -21,7 +21,7 @@
 //! A [`ComponentInfo`] describes those bytes to the vector. It stores the layout of the component
 //! type, which is its size and alignment. It also stores a function that runs the clean-up code for
 //! that type. It stores the identity of the type as well, which the typed methods check. The name
-//! of the type is there for their panic message.
+//! of the type is stored too, and the panic message of those methods reports it.
 //!
 //! A [`ComponentInfo`] also stores one bit, which stands for its component type. A table has a
 //! mask, which is a [`ComponentMask`] with one set bit for each component type that the table
@@ -62,7 +62,7 @@
 //! using one is undefined behaviour.
 //!
 //! [`ComponentVec::move_component`] also changes what the addresses in `self` contain, although it
-//! frees nothing. The address of the old last component now contains a stale copy of that
+//! does not free anything. The address of the old last component now contains a stale copy of that
 //! component. Where a caller drops the component through that address, the component gets dropped
 //! twice, which is undefined behaviour. Where the moved index is not the last index, a pointer to it
 //! now reaches a different component, namely the one that was last.
@@ -362,7 +362,7 @@ impl ComponentVec {
         self.assert_stores::<T>();
 
         // SAFETY: `from_raw_parts_mut` has the same requirements as `from_raw_parts` in `as_slice`,
-        // which hold here for the same reasons. It also requires that nothing else accesses those
+        // which are met here for the same reasons. It also requires that nothing else accesses those
         // components while the slice exists, and the borrow of `&mut self` guarantees that
         unsafe { slice::from_raw_parts_mut(self.data.as_ptr().cast::<T>(), self.len) }
     }
@@ -469,13 +469,27 @@ impl ComponentVec {
         }
     }
 
+    /// Makes room for at least `additional` more components.
+    ///
+    /// Where the block lacks the room, the vector moves to a larger block. The new capacity is the
+    /// larger of the capacity that the caller needs and double the current capacity. A vector for
+    /// a type of size zero always has the room, and keeps its block.
+    ///
+    /// The components keep their indices. Where the vector moves to a larger block, every pointer
+    /// that [`data`](Self::data) and [`ptr_at`](Self::ptr_at) returned earlier stops being valid.
+    /// Using one of those pointers afterwards is undefined behaviour.
+    ///
+    /// # Panics
+    ///
+    /// Panics where the length plus `additional` overflows a `usize`, or where the new block would
+    /// exceed `isize::MAX` bytes. The program aborts where the allocator cannot supply the block.
     pub(crate) fn reserve(&mut self, additional: usize) {
         // Works out the capacity that the caller needs, and panics where it overflows `usize`
         let required = self
             .len
             .checked_add(additional)
             .expect("the required capacity should fit in a `usize`");
-        // Returns where the block already has the room, which always holds for a type of size zero
+        // Returns where the block already has the room, which is always true for a type of size zero
         if required <= self.capacity {
             return;
         }
@@ -508,8 +522,22 @@ impl ComponentVec {
         self.increase_capacity(new_capacity);
     }
 
+    /// Moves the components to a block with room for `new_capacity` components. Allocates the first
+    /// block where the capacity is 0.
+    ///
+    /// The components keep their indices. Every pointer that [`data`](Self::data) and
+    /// [`ptr_at`](Self::ptr_at) returned earlier stops being valid, even where the block stays at
+    /// the same address. Using one of those pointers afterwards is undefined behaviour.
+    ///
+    /// The caller must pass a `new_capacity` above the current capacity. A debug build panics where
+    /// it does not.
+    ///
+    /// # Panics
+    ///
+    /// Panics where the component type has a size of zero, or where the new block would exceed
+    /// `isize::MAX` bytes. The program aborts where the allocator cannot supply the block.
     fn increase_capacity(&mut self, new_capacity: usize) {
-        // Panics in a debug build where the caller asks for no more room than the block has
+        // Panics in a debug build where the caller does not ask for more room than the block has
         debug_assert!(
             new_capacity > self.capacity,
             "the new capacity must be above the current capacity"
@@ -582,7 +610,7 @@ impl Drop for ComponentVec {
     ///
     /// Where the clean-up code of a component panics, the method stops at that component. The
     /// components after it never get dropped, and the block never gets freed. This is a memory leak
-    /// rather than undefined behaviour. Sarx accepts the leak as a decision. A panicking clean-up is
+    /// rather than undefined behaviour. Accepting the leak is a decision. A panicking clean-up is
     /// a bug in the component, and an uncaught panic on the main thread ends the program.
     fn drop(&mut self) {
         if let Some(drop_component) = self.info.drop {
@@ -659,7 +687,7 @@ impl ComponentInfo {
     /// and a different bit for each component type in one world. The method stores `bit` without
     /// checking it. A wrong bit gives a table a wrong mask, and queries then match the wrong tables.
     ///
-    /// The bound `T: 'static` means that `T` contains no borrowed references that could expire. A
+    /// The bound `T: 'static` means that `T` does not contain a borrowed reference that could expire. A
     /// vector can then keep a `T` for as long as it needs. `TypeId::of` requires the same bound.
     ///
     /// The bound `T: Send + Sync` lets a vector move its components between threads, and share them.
@@ -1019,7 +1047,8 @@ mod tests {
         assert_eq!(target.as_slice::<u32>(), [20], "target after the move");
     }
 
-    /// Checks that moving the final component only pops it, since no gap is left to fill
+    /// Checks that moving the final component only pops it, since the move does not leave a
+    /// gap to fill
     #[test]
     fn move_component_with_last_index_leaves_other_components_in_place() {
         // Lists the starting components, the index to move, and the components that should remain
@@ -1096,7 +1125,7 @@ mod tests {
         // uses the same `ComponentInfo`
         unsafe {
             source.move_component(1, &mut target); // fills the gap with the last component
-            source.move_component(3, &mut target); // moves the last component, leaving no gap
+            source.move_component(3, &mut target); // moves the last component, which does not leave a gap
         }
         let drops_after_moves = drops.load(Ordering::Relaxed);
 
@@ -1108,7 +1137,7 @@ mod tests {
         assert_eq!(drops_after_vectors, 5, "drops after both vectors are gone");
     }
 
-    /// Checks that a type taking no memory is still counted, and never needs a block
+    /// Checks that a type of size zero is still counted, and never needs a block
     #[test]
     fn push_typed_with_zero_size_type_counts_without_allocating() {
         let mut components = ComponentVec::new(ComponentInfo::of::<()>(ComponentMask::single(0)));
@@ -1123,7 +1152,7 @@ mod tests {
         assert_eq!(components.data(), start, "pointer to the block");
     }
 
-    /// Checks that a type taking no memory still gets a pointer that meets its alignment
+    /// Checks that a type of size zero still gets a pointer that meets its alignment
     #[test]
     fn as_slice_with_aligned_zero_size_type_returns_aligned_slice() {
         // Defines a type of size zero with an alignment that most addresses fail
@@ -1142,7 +1171,7 @@ mod tests {
         assert_eq!(remainder, 0, "remainder of the address divided by 64");
     }
 
-    /// Checks that a type taking no memory still has its clean-up code run for each component
+    /// Checks that a type of size zero still has its clean-up code run for each component
     #[test]
     fn drop_with_zero_size_drop_type_drops_each_component_once() {
         // Counts the drops outside the type, since a type of size zero has no room for a counter
@@ -1166,7 +1195,7 @@ mod tests {
         assert_eq!(DROPS.load(Ordering::Relaxed), 3);
     }
 
-    /// Checks that a type taking no memory moves by count alone, and is cleaned up once per
+    /// Checks that a type of size zero moves by count alone, and is cleaned up once per
     /// component
     #[test]
     fn move_component_with_zero_size_drop_type_drops_each_component_once() {
@@ -1205,8 +1234,7 @@ mod tests {
         assert_eq!(drops_after_vectors, 3, "drops after both vectors are gone");
     }
 
-    /// Checks that a vector of a type that takes no memory stops at its limit, rather than
-    /// allocating
+    /// Checks that a vector for a type of size zero stops at its limit, rather than allocating
     #[test]
     #[should_panic]
     fn push_typed_with_full_zero_size_vector_panics() {

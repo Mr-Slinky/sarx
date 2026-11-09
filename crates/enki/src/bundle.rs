@@ -16,7 +16,7 @@
 //! world.add_components(player, (Position(0.0, 0.0), Velocity(1.0, 0.0), Health(100)));
 //! ```
 //!
-//! A bundle of one component takes a comma after the component, as in `(Health(100),)`. Rust reads
+//! A bundle of one component takes a comma after the component, as in `(Health(100),)`. Rust parses
 //! `(Health(100))` as a `Health` in brackets, rather than as a tuple.
 //!
 //! A tuple of thirty-three or more components does not implement [`Bundle`]. The compiler rejects
@@ -302,7 +302,7 @@ fn push_or_replace<T: Component>(table: &mut Archetype, row: usize, value: T) ->
 /// to the variable.
 ///
 /// The comma after the last name in `(A, B, C,)` changes the meaning only in the call with one
-/// name. Rust reads `(A)` as the type `A` in brackets, while `(A,)` is a tuple with one field.
+/// name. Rust parses `(A)` as the type `A` in brackets, while `(A,)` is a tuple with one field.
 ///
 /// # Calls past thirty-two
 ///

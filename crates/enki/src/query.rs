@@ -1,0 +1,798 @@
+//! Defines [`Query`], the trait that describes which component types a caller visits on each
+//! entity. A query also states whether the caller reads or changes each of those types.
+//!
+//! A caller writes a query as a type. `&T` reads the `T` of each entity, and `&mut T` changes it. A
+//! pair such as `(&mut Position, &Velocity)` asks for both types at once. A pair can contain
+//! another pair, which lets a query ask for three or more types.
+//!
+//! The caller passes the query type to `World::query_mut`, which returns one item for each entity
+//! that has every type in the query. The documentation on `World::query_mut` shows a full example.
+//!
+//! # Rules on access
+//!
+//! A query changes a component type only where it asks for that type once. A query such as
+//! `(&mut Position, &Position)` would hand out two references to the same `Position`, one of them
+//! able to change it. Rust forbids that pair of references. [`check_access`] therefore panics on
+//! such a query, before the world hands out any reference.
+
+use crate::Component;
+use crate::archetype::Archetype;
+use std::any::TypeId;
+use std::{iter, slice};
+
+/// Represents whether a query reads a component type or changes it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Access {
+    /// The query reads the component, through a `&T`.
+    Read,
+    /// The query changes the component, through a `&mut T`.
+    Write,
+}
+
+/// Describes the component types that a query asks for, and how the world hands them out.
+///
+/// A query type is `&T` for a component that the caller reads, or `&mut T` for one that it changes.
+/// A pair `(A, B)` of two query types is also a query, and asks for every type that `A` and `B` ask
+/// for.
+///
+/// The world runs a query in three steps. It first calls [`Query::add_access`] to collect the
+/// component types that the query asks for. It then calls [`Query::find_columns`] to borrow the
+/// matching columns of each table. Finally, it calls [`Query::split_rows`] to split those columns
+/// into one item per entity. `World::query_tables_mut` stops after the second step, and returns
+/// the columns.
+///
+/// # Lifetimes
+///
+/// The lifetime `'w` stands for the borrow of the world. Every column and every item borrows from
+/// the world for `'w`. As a result, the compiler rejects any other use of the world while a column
+/// or an item is in use.
+///
+/// # Visibility
+///
+/// Code outside the crate can name the trait as a bound, and can pass any query type that the
+/// crate implements it for. Code outside the crate cannot implement the trait. An implementation
+/// has to write `Access` and `Archetype` in its method signatures, and code outside the crate
+/// cannot write a path to either type.
+///
+/// # Safety
+///
+/// An implementation MUST guarantee the following:
+///
+/// - [`Query::add_access`] pushes one entry for every component type that
+///   [`Query::find_columns`] borrows. The entry is `Access::Write` for every type that
+///   `find_columns` borrows mutably.
+/// - [`Query::find_columns`] borrows only the columns of the table that it receives.
+///
+/// `check_access` relies on the first guarantee to reject a query that borrows one column mutably
+/// and also borrows it a second time. A missing entry would let a mutable reference reach a
+/// component that another reference also reaches, which is undefined behaviour.
+///
+/// # Examples
+///
+/// The example defines a generic function that accepts any query type. It then calls that function
+/// with the query `(&mut Position, &Velocity)`, which changes each `Position` and reads each
+/// `Velocity`.
+///
+/// ```
+/// use enki::Query;
+///
+/// struct Position(f32, f32);
+/// struct Velocity(f32, f32);
+///
+/// impl enki::Component for Position {}
+/// impl enki::Component for Velocity {}
+///
+/// // Accepts any query type
+/// fn accept<Q: Query>() {}
+///
+/// // Passes a query that changes each `Position` and reads each `Velocity`
+/// accept::<(&mut Position, &Velocity)>();
+/// ```
+pub unsafe trait Query {
+    /// Represents the columns that the query borrows from one table, for the lifetime `'w`.
+    ///
+    /// `&T` borrows its column as a `&'w [T]`, and `&mut T` as a `&'w mut [T]`. A pair borrows the
+    /// columns that each of its parts borrows.
+    type Columns<'w>;
+
+    /// Represents the item that the query produces for one entity, for the lifetime `'w`.
+    ///
+    /// `&T` produces a `&'w T`, and `&mut T` a `&'w mut T`. A pair produces a pair that contains
+    /// the item that each part produces.
+    type Item<'w>;
+
+    /// Pushes one entry onto `accesses` for each component type that the query asks for.
+    ///
+    /// Each entry pairs the [`TypeId`] of the type with the `Access` that the query needs. A pair
+    /// pushes the entries of its first part, then those of its second part. The method leaves every
+    /// existing entry in `accesses` in place.
+    fn add_access(accesses: &mut Vec<(TypeId, Access)>);
+
+    /// Returns the columns in `archetype` that the query asks for, or `None` where the table lacks
+    /// one of the component types.
+    ///
+    /// The columns borrow `archetype` for the lifetime `'w`. A column that the query changes comes
+    /// back as a mutable slice, although the method receives a shared reference to the table.
+    ///
+    /// # Safety
+    ///
+    /// The caller MUST guarantee three things:
+    ///
+    /// - Nothing outside the query reads or changes the columns of `archetype` during `'w`. A
+    ///   caller that borrows the world through `&mut World` for `'w` meets this guarantee.
+    /// - `check_access` has already returned for the query type, without a panic.
+    /// - The caller calls the method at most once for each table during `'w`.
+    ///
+    /// A broken guarantee lets a mutable slice reach a component that another reference also
+    /// reaches, which is undefined behaviour.
+    unsafe fn find_columns<'w>(archetype: &'w Archetype) -> Option<Self::Columns<'w>>;
+
+    /// Returns an iterator over the rows in `columns`, with one item for each entity in the table.
+    ///
+    /// The items come in row order. The item for each entity borrows from the columns for the
+    /// lifetime `'w`.
+    fn split_rows<'w>(columns: Self::Columns<'w>) -> impl Iterator<Item = Self::Item<'w>>;
+}
+
+unsafe impl<T: Component> Query for &T {
+    type Columns<'w> = &'w [T];
+    type Item<'w> = &'w T;
+
+    fn add_access(accesses: &mut Vec<(TypeId, Access)>) {
+        accesses.push((TypeId::of::<T>(), Access::Read));
+    }
+
+    unsafe fn find_columns<'w>(archetype: &'w Archetype) -> Option<Self::Columns<'w>> {
+        let components = archetype.components_of(TypeId::of::<T>())?;
+        Some(components.as_slice::<T>())
+    }
+
+    fn split_rows<'w>(columns: Self::Columns<'w>) -> impl Iterator<Item = Self::Item<'w>> {
+        columns.iter()
+    }
+}
+
+unsafe impl<T: Component> Query for &mut T {
+    type Columns<'w> = &'w mut [T];
+    type Item<'w> = &'w mut T;
+
+    fn add_access(accesses: &mut Vec<(TypeId, Access)>) {
+        accesses.push((TypeId::of::<T>(), Access::Write));
+    }
+
+    unsafe fn find_columns<'w>(archetype: &'w Archetype) -> Option<Self::Columns<'w>> {
+        let components = archetype.components_of(TypeId::of::<T>())?;
+        let start = components.data().cast::<T>();
+        let len = components.len();
+        Some(unsafe { slice::from_raw_parts_mut(start.as_ptr(), len) })
+    }
+
+    fn split_rows<'w>(columns: Self::Columns<'w>) -> impl Iterator<Item = Self::Item<'w>> {
+        columns.iter_mut()
+    }
+}
+
+unsafe impl<A: Query, B: Query> Query for (A, B) {
+    type Columns<'w> = (A::Columns<'w>, B::Columns<'w>);
+    type Item<'w> = (A::Item<'w>, B::Item<'w>);
+
+    fn add_access(accesses: &mut Vec<(TypeId, Access)>) {
+        A::add_access(accesses);
+        B::add_access(accesses);
+    }
+
+    unsafe fn find_columns<'w>(archetype: &'w Archetype) -> Option<Self::Columns<'w>> {
+        let a = unsafe { A::find_columns(archetype) }?;
+        let b = unsafe { B::find_columns(archetype) }?;
+        Some((a, b))
+    }
+
+    fn split_rows<'w>((a, b): Self::Columns<'w>) -> impl Iterator<Item = Self::Item<'w>> {
+        let a_rows = A::split_rows(a);
+        let b_rows = B::split_rows(b);
+        iter::zip(a_rows, b_rows)
+    }
+}
+
+/// Checks that the query type `Q` changes each component type only where it asks for that type
+/// once.
+///
+/// A caller MUST run this check before it calls [`Query::find_columns`], as the Safety section of
+/// that method sets out.
+///
+/// # Panics
+///
+/// Panics where `Q` asks for one component type twice, and changes it through at least one of the
+/// two. `(&mut Position, &Position)` panics, for example, whereas `(&Position, &Position)` passes.
+pub(crate) fn check_access<Q: Query>() {
+    let mut accesses = Vec::new();
+    Q::add_access(&mut accesses);
+    for (index, &(type_id, access)) in accesses.iter().enumerate() {
+        for &(other_id, other_access) in &accesses[index + 1..] {
+            // Records whether either access of the pair changes its component
+            let writes = access == Access::Write || other_access == Access::Write;
+            // Panics where both accesses are for one type and at least one of them changes that type
+            if type_id == other_id && writes {
+                panic!("a query must not change a component type that it also asks for elsewhere");
+            }
+        }
+    }
+}
+
+// ========================================================================================== \\
+//                                           Tests                                            \\
+// ========================================================================================== \\
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::Entity;
+    use crate::component::ComponentInfo;
+    use crate::mask::ComponentMask;
+
+    #[derive(Debug, PartialEq)]
+    struct Position(f32);
+
+    #[derive(Debug, PartialEq)]
+    struct Velocity(f32);
+
+    #[derive(Debug, PartialEq)]
+    struct Name(String);
+
+    /// Stands for a component type of size zero, which a column counts without storing any bytes.
+    #[derive(Debug, PartialEq)]
+    struct Tag;
+
+    /// Stands for a component type that no table in these tests stores.
+    #[derive(Debug, PartialEq)]
+    struct Health(u32);
+
+    impl Component for Position {}
+    impl Component for Velocity {}
+    impl Component for Name {}
+    impl Component for Tag {}
+    impl Component for Health {}
+
+    /// Returns the entries that `Q` pushes onto an empty list.
+    fn collect_accesses<Q: Query>() -> Vec<(TypeId, Access)> {
+        let mut accesses = Vec::new();
+        Q::add_access(&mut accesses);
+        accesses
+    }
+
+    /// Pushes `value` onto the column that stores `T`, which leaves the entity list unchanged.
+    fn push_component<T: Component>(table: &mut Archetype, value: T) {
+        let column = table
+            .components_of_mut(TypeId::of::<T>())
+            .expect("the table should store the component type");
+        column.push_typed(value);
+    }
+
+    /// Returns a table that stores `Position`, `Velocity`, `Name` and `Tag`, with one row for each
+    /// entry in `values`.
+    ///
+    /// The row for the entry `x` stores `Position(x)`, `Velocity(x * 10.0)` and a `Name` of
+    /// `"row x"`.
+    fn build_table(values: &[f32]) -> Archetype {
+        let mut table = Archetype::new(&[
+            ComponentInfo::of::<Position>(ComponentMask::single(0)),
+            ComponentInfo::of::<Velocity>(ComponentMask::single(1)),
+            ComponentInfo::of::<Name>(ComponentMask::single(2)),
+            ComponentInfo::of::<Tag>(ComponentMask::single(3)),
+        ]);
+        for (index, &x) in values.iter().enumerate() {
+            push_component(&mut table, Position(x));
+            push_component(&mut table, Velocity(x * 10.0));
+            push_component(&mut table, Name(format!("row {x}")));
+            push_component(&mut table, Tag);
+
+            // SAFETY: `push_entity` requires one new component in every column. The four lines
+            // above push one onto `Position`, `Velocity`, `Name` and `Tag`, which are the only
+            // columns
+            unsafe { table.push_entity(Entity::new(index as u32, 0)) };
+        }
+        table
+    }
+
+    /// Runs `check_access` for `Q`, then returns the columns in `table` that `Q` asks for.
+    ///
+    /// The columns borrow `table` exclusively, meaning the compiler rejects any other use of the
+    /// table while they are in use.
+    fn find_checked<Q: Query>(table: &mut Archetype) -> Option<Q::Columns<'_>> {
+        check_access::<Q>();
+
+        // SAFETY: `find_columns` requires three things. First, nothing outside the query reaches
+        // the columns during the borrow, since `table` is an exclusive borrow that the returned
+        // columns inherit. Second, `check_access` has returned for `Q`, on the line above. Third,
+        // the method runs once for the table during the borrow, since the exclusive borrow stops
+        // any second call until the columns are gone
+        unsafe { Q::find_columns(table) }
+    }
+
+    /// Returns the column that stores `T`, as a slice of `T`.
+    fn read_column<T: Component>(table: &Archetype) -> &[T] {
+        let column = table
+            .components_of(TypeId::of::<T>())
+            .expect("the table should store the component type");
+        column.as_slice::<T>()
+    }
+
+    /// Checks the entries and their order for single types, pairs and pairs inside pairs
+    #[test]
+    fn add_access_with_each_query_shape_pushes_entries_in_order() {
+        let position = TypeId::of::<Position>();
+        let velocity = TypeId::of::<Velocity>();
+        let tag = TypeId::of::<Tag>();
+
+        // Lists each query shape, the entries that it pushes, and the entries that it should push
+        let cases = [
+            (
+                "&Position",
+                collect_accesses::<&Position>(),
+                vec![(position, Access::Read)],
+            ),
+            (
+                "&mut Position",
+                collect_accesses::<&mut Position>(),
+                vec![(position, Access::Write)],
+            ),
+            (
+                "(&mut Position, &Velocity)",
+                collect_accesses::<(&mut Position, &Velocity)>(),
+                vec![(position, Access::Write), (velocity, Access::Read)],
+            ),
+            (
+                "(&Velocity, &mut Position)",
+                collect_accesses::<(&Velocity, &mut Position)>(),
+                vec![(velocity, Access::Read), (position, Access::Write)],
+            ),
+            (
+                "((&Position, &mut Velocity), &Tag)",
+                collect_accesses::<((&Position, &mut Velocity), &Tag)>(),
+                vec![
+                    (position, Access::Read),
+                    (velocity, Access::Write),
+                    (tag, Access::Read),
+                ],
+            ),
+            (
+                "(&Position, (&Velocity, &mut Tag))",
+                collect_accesses::<(&Position, (&Velocity, &mut Tag))>(),
+                vec![
+                    (position, Access::Read),
+                    (velocity, Access::Read),
+                    (tag, Access::Write),
+                ],
+            ),
+            (
+                "(&Position, &Position)",
+                collect_accesses::<(&Position, &Position)>(),
+                vec![(position, Access::Read), (position, Access::Read)],
+            ),
+        ];
+
+        for (label, found, expected) in cases {
+            assert_eq!(found, expected, "entries for {label}");
+        }
+    }
+
+    /// Checks that the method adds its entries after the ones already in the list
+    #[test]
+    fn add_access_with_existing_entries_keeps_them_in_front() {
+        let health = TypeId::of::<Health>();
+        let position = TypeId::of::<Position>();
+        let velocity = TypeId::of::<Velocity>();
+        let mut accesses = vec![(health, Access::Write)];
+
+        <(&Position, &mut Velocity)>::add_access(&mut accesses);
+
+        assert_eq!(
+            accesses,
+            [
+                (health, Access::Write),
+                (position, Access::Read),
+                (velocity, Access::Write),
+            ]
+        );
+    }
+
+    /// Checks that every query asking for each changed type once passes, including repeated reads
+    #[test]
+    fn check_access_with_valid_queries_returns() {
+        // Lists each query that should pass, with the check for that query
+        let cases: [(&str, fn()); 8] = [
+            ("&Position", check_access::<&Position>),
+            ("&mut Position", check_access::<&mut Position>),
+            (
+                "(&Position, &Velocity)",
+                check_access::<(&Position, &Velocity)>,
+            ),
+            (
+                "(&mut Position, &mut Velocity)",
+                check_access::<(&mut Position, &mut Velocity)>,
+            ),
+            (
+                "(&Position, &Position)",
+                check_access::<(&Position, &Position)>,
+            ),
+            (
+                "((&Position, &Velocity), &Position)",
+                check_access::<((&Position, &Velocity), &Position)>,
+            ),
+            (
+                "((&mut Position, &Velocity), &mut Tag)",
+                check_access::<((&mut Position, &Velocity), &mut Tag)>,
+            ),
+            (
+                "(&mut Tag, (&Position, &mut Name))",
+                check_access::<(&mut Tag, (&Position, &mut Name))>,
+            ),
+        ];
+
+        let mut passed = Vec::new();
+        for (label, check) in cases {
+            check();
+            passed.push(label);
+        }
+
+        let labels: Vec<&str> = cases.iter().map(|(label, _)| *label).collect();
+        assert_eq!(passed, labels, "queries that passed");
+    }
+
+    /// Checks that a query that changes a type and then reads it panics
+    #[test]
+    #[should_panic]
+    fn check_access_with_write_then_read_panics() {
+        check_access::<(&mut Position, &Position)>();
+    }
+
+    /// Checks that a query that reads a type and then changes it panics
+    #[test]
+    #[should_panic]
+    fn check_access_with_read_then_write_panics() {
+        check_access::<(&Position, &mut Position)>();
+    }
+
+    /// Checks that a query that changes one type twice panics
+    #[test]
+    #[should_panic]
+    fn check_access_with_write_then_write_panics() {
+        check_access::<(&mut Position, &mut Position)>();
+    }
+
+    /// Checks that a changed type inside a pair still clashes with the same type outside it
+    #[test]
+    #[should_panic]
+    fn check_access_with_duplicate_in_nested_first_part_panics() {
+        check_access::<((&mut Position, &Velocity), &Position)>();
+    }
+
+    /// Checks that a changed type outside a pair still clashes with the same type inside it
+    #[test]
+    #[should_panic]
+    fn check_access_with_duplicate_in_nested_second_part_panics() {
+        check_access::<(&mut Position, (&Velocity, &Position))>();
+    }
+
+    /// Checks that a clash between two separate inner pairs panics
+    #[test]
+    #[should_panic]
+    fn check_access_with_duplicate_across_nested_pairs_panics() {
+        check_access::<((&Velocity, &Position), (&Tag, &mut Position))>();
+    }
+
+    /// Checks that a size-zero type that the query changes twice panics like any other type
+    #[test]
+    #[should_panic]
+    fn check_access_with_duplicate_zero_size_type_panics() {
+        check_access::<(&mut Tag, &mut Tag)>();
+    }
+
+    /// Checks that a missing type gives `None`, alone and on either side of a pair
+    #[test]
+    fn find_columns_with_missing_type_returns_none() {
+        let mut table = build_table(&[1.0, 2.0]);
+
+        // Lists each query, with whether `find_columns` returned `None` for it
+        let cases = [
+            ("&Health", find_checked::<&Health>(&mut table).is_none()),
+            (
+                "&mut Health",
+                find_checked::<&mut Health>(&mut table).is_none(),
+            ),
+            (
+                "(&Health, &Position)",
+                find_checked::<(&Health, &Position)>(&mut table).is_none(),
+            ),
+            (
+                "(&Position, &Health)",
+                find_checked::<(&Position, &Health)>(&mut table).is_none(),
+            ),
+            (
+                "(&mut Health, &mut Position)",
+                find_checked::<(&mut Health, &mut Position)>(&mut table).is_none(),
+            ),
+            (
+                "(&mut Position, &mut Health)",
+                find_checked::<(&mut Position, &mut Health)>(&mut table).is_none(),
+            ),
+            (
+                "((&Position, &Velocity), &mut Health)",
+                find_checked::<((&Position, &Velocity), &mut Health)>(&mut table).is_none(),
+            ),
+        ];
+
+        for (label, is_none) in cases {
+            assert!(is_none, "result for {label}");
+        }
+    }
+
+    /// Checks that a table with no rows still gives every column, each one empty
+    #[test]
+    fn find_columns_with_empty_table_returns_empty_columns() {
+        let mut table = build_table(&[]);
+
+        let ((positions, velocities), tags) =
+            find_checked::<((&Position, &mut Velocity), &mut Tag)>(&mut table)
+                .expect("the table should store every type in the query");
+
+        assert!(positions.is_empty(), "positions");
+        assert!(velocities.is_empty(), "velocities");
+        assert!(tags.is_empty(), "tags");
+    }
+
+    /// Checks that a read returns the whole column, in row order
+    #[test]
+    fn find_columns_with_read_query_returns_column_in_row_order() {
+        let mut table = build_table(&[1.0, 2.0, 3.0]);
+
+        let positions =
+            find_checked::<&Position>(&mut table).expect("the table should store `Position`");
+
+        assert_eq!(positions, [Position(1.0), Position(2.0), Position(3.0)]);
+    }
+
+    /// Checks that a query that reads one type twice gets the same column on both sides
+    #[test]
+    fn find_columns_with_duplicate_reads_returns_same_column_twice() {
+        let mut table = build_table(&[1.0, 2.0]);
+
+        let (first, second) = find_checked::<(&Position, &Position)>(&mut table)
+            .expect("the table should store `Position`");
+
+        assert_eq!(first, [Position(1.0), Position(2.0)], "first column");
+        assert_eq!(second, [Position(1.0), Position(2.0)], "second column");
+    }
+
+    /// Checks that writes through the mutable column reach the table, after the column moved to a
+    /// larger block
+    #[test]
+    fn find_columns_with_write_query_changes_reach_table() {
+        // Pushes 5 rows, which makes the `Position` column grow from 4 to 8
+        let mut table = build_table(&[1.0, 2.0, 3.0, 4.0, 5.0]);
+
+        let positions =
+            find_checked::<&mut Position>(&mut table).expect("the table should store `Position`");
+        for position in positions.iter_mut() {
+            position.0 *= 2.0;
+        }
+
+        assert_eq!(
+            read_column::<Position>(&table),
+            [
+                Position(2.0),
+                Position(4.0),
+                Position(6.0),
+                Position(8.0),
+                Position(10.0),
+            ]
+        );
+    }
+
+    /// Checks that two mutable columns at once each reach their own column in the table
+    #[test]
+    fn find_columns_with_two_write_columns_changes_both() {
+        let mut table = build_table(&[1.0, 2.0, 3.0]);
+
+        let (positions, velocities) = find_checked::<(&mut Position, &mut Velocity)>(&mut table)
+            .expect("the table should store `Position` and `Velocity`");
+        for (position, velocity) in positions.iter_mut().zip(velocities.iter_mut()) {
+            position.0 += velocity.0;
+            velocity.0 = 0.0;
+        }
+
+        assert_eq!(
+            read_column::<Position>(&table),
+            [Position(11.0), Position(22.0), Position(33.0)],
+            "positions"
+        );
+        assert_eq!(
+            read_column::<Velocity>(&table),
+            [Velocity(0.0), Velocity(0.0), Velocity(0.0)],
+            "velocities"
+        );
+    }
+
+    /// Checks that replacing a component with heap data through a mutable column drops the old one
+    /// and keeps the new one in the table
+    #[test]
+    fn find_columns_with_write_query_replaces_heap_components() {
+        let mut table = build_table(&[1.0, 2.0]);
+
+        let names = find_checked::<&mut Name>(&mut table).expect("the table should store `Name`");
+        names[0] = Name(String::from("Ada"));
+        names[1].0.push_str(" and more");
+
+        assert_eq!(
+            read_column::<Name>(&table),
+            [
+                Name(String::from("Ada")),
+                Name(String::from("row 2 and more"))
+            ]
+        );
+    }
+
+    /// Checks that a mutable column of a size-zero type has one entry for each row, and takes writes
+    #[test]
+    fn find_columns_with_zero_size_write_query_returns_column_of_row_count() {
+        let mut table = build_table(&[1.0, 2.0, 3.0]);
+
+        let tags = find_checked::<&mut Tag>(&mut table).expect("the table should store `Tag`");
+        for tag in tags.iter_mut() {
+            *tag = Tag;
+        }
+        let found = tags.len();
+
+        assert_eq!(found, 3, "length of the column");
+        assert_eq!(read_column::<Tag>(&table).len(), 3, "length in the table");
+    }
+
+    /// Checks that a pair inside a pair returns each column with its contents
+    #[test]
+    fn find_columns_with_nested_pair_returns_each_column() {
+        let mut table = build_table(&[1.0, 2.0]);
+
+        let (positions, (velocities, tags)) =
+            find_checked::<(&Position, (&mut Velocity, &Tag))>(&mut table)
+                .expect("the table should store every type in the query");
+        velocities[1].0 = -1.0;
+        let found_velocities: Vec<f32> = velocities.iter().map(|velocity| velocity.0).collect();
+        let tag_count = tags.len();
+
+        assert_eq!(positions, [Position(1.0), Position(2.0)], "positions");
+        assert_eq!(found_velocities, [10.0, -1.0], "velocities");
+        assert_eq!(tag_count, 2, "tags");
+        assert_eq!(
+            read_column::<Velocity>(&table),
+            [Velocity(10.0), Velocity(-1.0)],
+            "velocities in the table"
+        );
+    }
+
+    /// Checks that a single type yields one item for each row, in row order
+    #[test]
+    fn split_rows_with_read_query_yields_items_in_row_order() {
+        let mut table = build_table(&[1.0, 2.0, 3.0]);
+        let positions =
+            find_checked::<&Position>(&mut table).expect("the table should store `Position`");
+
+        let items: Vec<&Position> = <&Position>::split_rows(positions).collect();
+
+        assert_eq!(items, [&Position(1.0), &Position(2.0), &Position(3.0)]);
+    }
+
+    /// Checks that a pair yields the components of one row together
+    #[test]
+    fn split_rows_with_pair_zips_items_by_row() {
+        let mut table = build_table(&[1.0, 2.0, 3.0]);
+        let columns = find_checked::<(&Position, &Velocity)>(&mut table)
+            .expect("the table should store `Position` and `Velocity`");
+
+        let items: Vec<(&Position, &Velocity)> =
+            <(&Position, &Velocity)>::split_rows(columns).collect();
+
+        assert_eq!(
+            items,
+            [
+                (&Position(1.0), &Velocity(10.0)),
+                (&Position(2.0), &Velocity(20.0)),
+                (&Position(3.0), &Velocity(30.0)),
+            ]
+        );
+    }
+
+    /// Checks that changes through the items of a mixed query reach the table
+    #[test]
+    fn split_rows_with_write_query_changes_reach_table() {
+        let mut table = build_table(&[1.0, 2.0, 3.0, 4.0, 5.0]);
+        let columns = find_checked::<(&mut Position, &Velocity)>(&mut table)
+            .expect("the table should store `Position` and `Velocity`");
+
+        for (position, velocity) in <(&mut Position, &Velocity)>::split_rows(columns) {
+            position.0 += velocity.0;
+        }
+
+        assert_eq!(
+            read_column::<Position>(&table),
+            [
+                Position(11.0),
+                Position(22.0),
+                Position(33.0),
+                Position(44.0),
+                Position(55.0),
+            ]
+        );
+    }
+
+    /// Checks that a pair inside a pair yields every component of one row, in row order
+    #[test]
+    fn split_rows_with_nested_pair_yields_items_by_row() {
+        let mut table = build_table(&[1.0, 2.0]);
+        let columns = find_checked::<((&mut Velocity, &Name), &Position)>(&mut table)
+            .expect("the table should store every type in the query");
+
+        let mut items = Vec::new();
+        for ((velocity, name), position) in
+            <((&mut Velocity, &Name), &Position)>::split_rows(columns)
+        {
+            velocity.0 = position.0;
+            items.push((name.0.clone(), position.0));
+        }
+
+        assert_eq!(
+            items,
+            [(String::from("row 1"), 1.0), (String::from("row 2"), 2.0)],
+            "items"
+        );
+        assert_eq!(
+            read_column::<Velocity>(&table),
+            [Velocity(1.0), Velocity(2.0)],
+            "velocities in the table"
+        );
+    }
+
+    /// Checks that a table with no rows yields no items, for a read, a write and a pair
+    #[test]
+    fn split_rows_with_empty_table_yields_no_items() {
+        let mut table = build_table(&[]);
+
+        // Lists each query, with the number of items that it yields
+        let cases = [
+            (
+                "&Position",
+                find_checked::<&Position>(&mut table)
+                    .map(|columns| <&Position>::split_rows(columns).count()),
+            ),
+            (
+                "&mut Position",
+                find_checked::<&mut Position>(&mut table)
+                    .map(|columns| <&mut Position>::split_rows(columns).count()),
+            ),
+            (
+                "(&mut Position, &Tag)",
+                find_checked::<(&mut Position, &Tag)>(&mut table)
+                    .map(|columns| <(&mut Position, &Tag)>::split_rows(columns).count()),
+            ),
+        ];
+
+        for (label, count) in cases {
+            assert_eq!(count, Some(0), "items for {label}");
+        }
+    }
+
+    /// Checks that a size-zero type still yields one item for each row, beside a type with data
+    #[test]
+    fn split_rows_with_zero_size_type_yields_one_item_per_row() {
+        let mut table = build_table(&[1.0, 2.0, 3.0]);
+        let columns = find_checked::<(&mut Tag, &Position)>(&mut table)
+            .expect("the table should store `Tag` and `Position`");
+
+        let mut positions = Vec::new();
+        for (tag, position) in <(&mut Tag, &Position)>::split_rows(columns) {
+            *tag = Tag;
+            positions.push(position.0);
+        }
+
+        assert_eq!(positions, [1.0, 2.0, 3.0]);
+    }
+}

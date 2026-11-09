@@ -956,6 +956,17 @@ mod tests {
 
     impl Component for Health {}
 
+    #[derive(Debug, PartialEq)]
+    struct Velocity(f32);
+
+    impl Component for Velocity {}
+
+    /// Takes no memory, which gives the world a column for a type with a size of zero.
+    #[derive(Debug, PartialEq)]
+    struct Marker;
+
+    impl Component for Marker {}
+
     /// Adds 1 to a shared counter when dropped, which shows how many times clean-up code ran.
     struct DropCounter {
         drops: Arc<AtomicUsize>,
@@ -1725,5 +1736,825 @@ mod tests {
         drop(world);
 
         assert_eq!(drops.load(Ordering::Relaxed), 2);
+    }
+
+    /// Checks that `default` files the empty table under the empty mask, with no types or free slots
+    #[test]
+    fn default_with_no_args_files_empty_table_under_empty_mask() {
+        let world = World::default();
+
+        let empty_index = world.indices.get(&ComponentMask::EMPTY);
+        let empty_mask = world.archetypes[World::EMPTY].mask();
+        assert_eq!(
+            empty_index,
+            Some(&World::EMPTY),
+            "table under the empty mask"
+        );
+        assert_eq!(empty_mask, ComponentMask::EMPTY, "mask of the empty table");
+        assert!(world.component_bits.is_empty(), "component types");
+        assert!(world.free_slots.is_empty(), "free slots");
+    }
+
+    /// Checks that despawning the entity in the last row leaves every other entity in its row
+    #[test]
+    fn despawn_ent_with_last_row_leaves_other_rows_in_place() {
+        let mut world = World::new();
+        let entities = [
+            world.spawn_empty_ent(),
+            world.spawn_empty_ent(),
+            world.spawn_empty_ent(),
+        ];
+        for (value, entity) in entities.into_iter().enumerate() {
+            world.add_component(entity, Health(value as u32));
+        }
+        let [first, second, third] = entities;
+
+        let despawned = world.despawn_ent(third);
+
+        let table = locate_alive(&world, first).arch_index();
+        let rows = [
+            locate_alive(&world, first).row(),
+            locate_alive(&world, second).row(),
+        ];
+        assert!(despawned, "answer for the entity in the last row");
+        assert_eq!(rows, [0, 1], "rows of the other entities");
+        assert_eq!(world.archetypes[table].len(), 2, "rows in the table");
+        assert_eq!(
+            world.get::<Health>(first),
+            Some(&Health(0)),
+            "first entity's component"
+        );
+        assert_eq!(
+            world.get::<Health>(second),
+            Some(&Health(1)),
+            "second entity's component"
+        );
+    }
+
+    /// Checks that `add_component` returns `false` for a handle of no living entity, and leaves the
+    /// world unchanged
+    #[test]
+    fn add_component_with_handle_of_no_living_entity_returns_false() {
+        let cases = [
+            ("index past the last slot", Entity::new(5, 0)),
+            ("later version", Entity::new(0, 1)),
+            ("largest index and version", Entity::new(u32::MAX, u32::MAX)),
+        ];
+
+        for (label, handle) in cases {
+            let mut world = World::new();
+            world.spawn_empty_ent();
+
+            let added = world.add_component(handle, Health(1));
+
+            assert!(!added, "answer for {label}");
+            assert_eq!(world.archetypes.len(), 1, "number of tables for {label}");
+            assert!(
+                world.component_bits.is_empty(),
+                "component types for {label}"
+            );
+        }
+    }
+
+    /// Checks that a bundle of new types moves the entity to one new table, with every component
+    #[test]
+    fn add_components_with_new_types_moves_entity_to_new_table() {
+        let mut world = World::new();
+        let entity = world.spawn_empty_ent();
+
+        let added = world.add_components(entity, (Position(1.5), Health(100)));
+
+        let location = locate_alive(&world, entity);
+        let mask = world.archetypes[location.arch_index()].mask();
+        let empty_rows = world.archetypes[World::EMPTY].len();
+        assert!(added, "answer for a living entity");
+        assert_eq!(world.archetypes.len(), 2, "number of tables");
+        assert_eq!(
+            mask,
+            ComponentMask::from_positions(&[0, 1]),
+            "mask of the entity's table"
+        );
+        assert_eq!(empty_rows, 0, "rows in the empty table");
+        assert_eq!(
+            world.get::<Position>(entity),
+            Some(&Position(1.5)),
+            "position"
+        );
+        assert_eq!(world.get::<Health>(entity), Some(&Health(100)), "health");
+    }
+
+    /// Checks that `add_components` returns `false` for a handle of no living entity, and leaves the
+    /// world unchanged
+    #[test]
+    fn add_components_with_handle_of_no_living_entity_returns_false() {
+        let cases = [
+            ("despawned", Entity::new(0, 0)),
+            ("index past the last slot", Entity::new(5, 0)),
+            ("later version", Entity::new(0, 7)),
+        ];
+
+        for (label, handle) in cases {
+            let mut world = World::new();
+            let entity = world.spawn_empty_ent();
+            world.despawn_ent(entity);
+
+            let added = world.add_components(handle, (Position(1.0), Health(1)));
+
+            assert!(!added, "answer for {label}");
+            assert_eq!(world.archetypes.len(), 1, "number of tables for {label}");
+            assert!(
+                world.component_bits.is_empty(),
+                "component types for {label}"
+            );
+        }
+    }
+
+    /// Checks that `add_components` drops the bundle once, where the handle refers to no living
+    /// entity
+    #[test]
+    fn add_components_with_despawned_entity_drops_bundle_once() {
+        let drops = Arc::new(AtomicUsize::new(0));
+        let mut world = World::new();
+        let entity = world.spawn_empty_ent();
+        world.despawn_ent(entity);
+
+        world.add_components(entity, (build_counter(&drops), Health(1)));
+
+        assert_eq!(drops.load(Ordering::Relaxed), 1);
+    }
+
+    /// Checks that a bundle of types that the entity already has replaces each value in place
+    #[test]
+    fn add_components_with_every_type_stored_replaces_values_in_place() {
+        let mut world = World::new();
+        let entity = world.spawn_empty_ent();
+        world.add_components(entity, (Position(1.0), Health(1)));
+        let before = locate_alive(&world, entity);
+
+        let added = world.add_components(entity, (Health(2), Position(2.0)));
+
+        let after = locate_alive(&world, entity);
+        assert!(added, "answer for a living entity");
+        assert_eq!(world.archetypes.len(), 2, "number of tables");
+        assert_eq!(
+            after.arch_index(),
+            before.arch_index(),
+            "table of the entity"
+        );
+        assert_eq!(after.row(), before.row(), "row of the entity");
+        assert_eq!(
+            world.get::<Position>(entity),
+            Some(&Position(2.0)),
+            "position"
+        );
+        assert_eq!(world.get::<Health>(entity), Some(&Health(2)), "health");
+    }
+
+    /// Checks that replacing every component in place drops each old value once, and nothing else
+    #[test]
+    fn add_components_with_every_type_stored_drops_old_values_once() {
+        let drops = Arc::new(AtomicUsize::new(0));
+        let mut world = World::new();
+        let entity = world.spawn_empty_ent();
+        world.add_components(entity, (build_counter(&drops), Health(1)));
+
+        world.add_components(entity, (build_counter(&drops), Health(2)));
+
+        assert_eq!(drops.load(Ordering::Relaxed), 1);
+    }
+
+    /// Checks that a bundle of new and stored types adds the new ones, replaces the stored ones, and
+    /// keeps every other component
+    #[test]
+    fn add_components_with_new_and_stored_types_keeps_one_value_per_type() {
+        let mut world = World::new();
+        let entity = world.spawn_empty_ent();
+        world.add_components(entity, (Position(1.0), Health(1)));
+
+        let added = world.add_components(entity, (Health(5), Velocity(2.0)));
+
+        let location = locate_alive(&world, entity);
+        let mask = world.archetypes[location.arch_index()].mask();
+        assert!(added, "answer for a living entity");
+        assert_eq!(world.archetypes.len(), 3, "number of tables");
+        assert_eq!(
+            mask,
+            ComponentMask::from_positions(&[0, 1, 2]),
+            "mask of the entity's table"
+        );
+        assert_eq!(
+            world.get::<Position>(entity),
+            Some(&Position(1.0)),
+            "kept component"
+        );
+        assert_eq!(
+            world.get::<Health>(entity),
+            Some(&Health(5)),
+            "replaced component"
+        );
+        assert_eq!(
+            world.get::<Velocity>(entity),
+            Some(&Velocity(2.0)),
+            "new component"
+        );
+    }
+
+    /// Checks that a bundle that moves the entity drops only the component that it replaces
+    #[test]
+    fn add_components_with_new_and_stored_types_drops_only_replaced_value() {
+        let drops = Arc::new(AtomicUsize::new(0));
+        let mut world = World::new();
+        let entity = world.spawn_empty_ent();
+        world.add_component(entity, build_counter(&drops));
+
+        world.add_components(entity, (build_counter(&drops), Health(1)));
+
+        assert_eq!(drops.load(Ordering::Relaxed), 1);
+    }
+
+    /// Checks that the entity that fills the row left behind keeps its own component, at that row
+    #[test]
+    fn add_components_with_entity_leaving_first_row_updates_filling_entity() {
+        let mut world = World::new();
+        let entities = [
+            world.spawn_empty_ent(),
+            world.spawn_empty_ent(),
+            world.spawn_empty_ent(),
+        ];
+        for (value, entity) in entities.into_iter().enumerate() {
+            world.add_component(entity, Health(value as u32));
+        }
+        let [first, second, third] = entities;
+
+        world.add_components(first, (Position(9.0),));
+
+        assert_eq!(
+            locate_alive(&world, third).row(),
+            0,
+            "row of the filling entity"
+        );
+        assert_eq!(
+            world.get::<Health>(first),
+            Some(&Health(0)),
+            "moved entity's health"
+        );
+        assert_eq!(
+            world.get::<Position>(first),
+            Some(&Position(9.0)),
+            "moved entity's new component"
+        );
+        assert_eq!(
+            world.get::<Health>(second),
+            Some(&Health(1)),
+            "second entity's component"
+        );
+        assert_eq!(
+            world.get::<Health>(third),
+            Some(&Health(2)),
+            "filling entity's component"
+        );
+    }
+
+    /// Checks that two bundles with the same types in either order reach the same table
+    #[test]
+    fn add_components_with_types_in_either_order_ends_in_same_table() {
+        let mut world = World::new();
+        let first = world.spawn_empty_ent();
+        let second = world.spawn_empty_ent();
+
+        world.add_components(first, (Position(1.0), Health(1)));
+        world.add_components(second, (Health(2), Position(2.0)));
+
+        let first_table = locate_alive(&world, first).arch_index();
+        let second_table = locate_alive(&world, second).arch_index();
+        assert_eq!(first_table, second_table, "table of each entity");
+        assert_eq!(world.archetypes.len(), 2, "number of tables");
+    }
+
+    /// Checks that a bundle with a type of size zero stores every component that it contains
+    #[test]
+    fn add_components_with_zero_size_type_stores_every_component() {
+        let mut world = World::new();
+        let entity = world.spawn_empty_ent();
+
+        let added = world.add_components(entity, (Marker, Health(3)));
+
+        assert!(added, "answer for a living entity");
+        assert_eq!(world.get::<Marker>(entity), Some(&Marker), "marker");
+        assert_eq!(world.get::<Health>(entity), Some(&Health(3)), "health");
+    }
+
+    /// Checks that `add_components` panics on a bundle that lists one type twice
+    #[test]
+    #[should_panic]
+    fn add_components_with_same_type_twice_panics() {
+        let mut world = World::new();
+        let entity = world.spawn_empty_ent();
+
+        world.add_components(entity, (Health(1), Health(2)));
+    }
+
+    /// Checks that `add_components` panics on a 65th component type, since a mask has room for 64
+    /// bits
+    #[test]
+    #[should_panic]
+    fn add_components_with_65th_component_type_panics() {
+        let mut world = World::new();
+        let entity = world.spawn_empty_ent();
+        for type_id in build_64_type_ids() {
+            world.find_or_assign_bit(type_id);
+        }
+
+        world.add_components(entity, (Health(1),));
+    }
+
+    /// Checks that `reserve` creates an empty table for new types, and gives each type a bit
+    #[test]
+    fn reserve_with_new_types_creates_empty_table_with_their_bits() {
+        let mut world = World::new();
+
+        world.reserve::<(Position, Health)>(4);
+
+        let position_bit = world.component_bits[&TypeId::of::<Position>()];
+        let health_bit = world.component_bits[&TypeId::of::<Health>()];
+        let table = &world.archetypes[1];
+        let table_index = world.indices.get(&(position_bit | health_bit));
+        assert_eq!(world.archetypes.len(), 2, "number of tables");
+        assert_eq!(
+            [position_bit, health_bit],
+            [ComponentMask::single(0), ComponentMask::single(1)],
+            "bits in order of the bundle"
+        );
+        assert_eq!(table.mask(), position_bit | health_bit, "mask of the table");
+        assert_eq!(table_index, Some(&1), "table under its mask");
+        assert_eq!(table.len(), 0, "rows in the table");
+        assert!(world.slots.capacity() >= 4, "room in the list of slots");
+    }
+
+    /// Checks that `reserve` makes room for each entity that a freed slot will not take
+    #[test]
+    fn reserve_with_freed_slots_makes_room_for_remaining_slots() {
+        let mut world = World::new();
+        let first = world.spawn_empty_ent();
+        let second = world.spawn_empty_ent();
+        world.despawn_ent(first);
+        world.despawn_ent(second);
+
+        world.reserve::<(Health,)>(5);
+
+        assert!(world.slots.capacity() >= 5, "room in the list of slots");
+    }
+
+    /// Checks that entities spawned after `reserve` reach the reserved table, with their own values
+    #[test]
+    fn reserve_with_varying_counts_keeps_later_entities_in_reserved_table() {
+        let cases = [0_usize, 1, 5];
+
+        for count in cases {
+            let mut world = World::new();
+            world.reserve::<(Position, Health)>(count);
+
+            let entities: Vec<Entity> = (0..count)
+                .map(|value| {
+                    let entity = world.spawn_empty_ent();
+                    world.add_components(entity, (Position(value as f32), Health(value as u32)));
+                    entity
+                })
+                .collect();
+
+            assert_eq!(world.archetypes.len(), 2, "number of tables for {count}");
+            assert_eq!(world.archetypes[1].len(), count, "rows for {count}");
+            for (value, entity) in entities.into_iter().enumerate() {
+                let table = locate_alive(&world, entity).arch_index();
+                let health = world.get::<Health>(entity);
+                assert_eq!(table, 1, "table of entity {value} for {count}");
+                assert_eq!(
+                    health,
+                    Some(&Health(value as u32)),
+                    "health of entity {value} for {count}"
+                );
+            }
+        }
+    }
+
+    /// Checks that `reserve` finds the table that already stores its types, in any order
+    #[test]
+    fn reserve_with_existing_table_reuses_table() {
+        let mut world = World::new();
+        let entity = world.spawn_empty_ent();
+        world.add_components(entity, (Position(1.0), Health(1)));
+
+        world.reserve::<(Health, Position)>(3);
+
+        assert_eq!(world.archetypes.len(), 2, "number of tables");
+        assert_eq!(
+            world.get::<Health>(entity),
+            Some(&Health(1)),
+            "stored component"
+        );
+    }
+
+    /// Checks that `reserve` panics on a bundle type that lists one type twice
+    #[test]
+    #[should_panic]
+    fn reserve_with_same_type_twice_panics() {
+        let mut world = World::new();
+
+        world.reserve::<(Health, Health)>(1);
+    }
+
+    /// Checks that `reserve` panics where the room asked for would exceed `isize::MAX` bytes
+    #[test]
+    #[should_panic]
+    fn reserve_with_usize_max_additional_panics() {
+        let mut world = World::new();
+
+        world.reserve::<(Health,)>(usize::MAX);
+    }
+
+    /// Checks that a type seen before keeps its bit, even once every bit is taken
+    #[test]
+    fn find_or_assign_bit_with_full_world_and_known_type_returns_its_bit() {
+        let mut world = World::new();
+        let type_ids = build_64_type_ids();
+        for type_id in type_ids {
+            world.find_or_assign_bit(type_id);
+        }
+
+        let last = world.find_or_assign_bit(type_ids[63]);
+
+        assert_eq!(last, ComponentMask::single(63), "bit of the last type");
+        assert_eq!(world.component_bits.len(), 64, "component types");
+    }
+
+    /// Checks that `find_or_assign_bit` panics on a 65th type, since a mask has room for 64 bits
+    #[test]
+    #[should_panic]
+    fn find_or_assign_bit_with_65th_type_panics() {
+        let mut world = World::new();
+        for type_id in build_64_type_ids() {
+            world.find_or_assign_bit(type_id);
+        }
+
+        world.find_or_assign_bit(TypeId::of::<Health>());
+    }
+
+    /// Checks that `get` returns `None` for a type that the world has never met
+    #[test]
+    fn get_with_type_never_seen_returns_none() {
+        let mut world = World::new();
+        let entity = world.spawn_empty_ent();
+        world.add_component(entity, Health(1));
+
+        let found = world.get::<Velocity>(entity);
+
+        assert_eq!(found, None);
+    }
+
+    /// Checks that a handle at another version of a living entity's slot reaches nothing
+    #[test]
+    fn get_with_other_version_of_living_slot_returns_none() {
+        let cases = [
+            ("later version", Entity::new(0, 1)),
+            ("largest version", Entity::new(0, u32::MAX)),
+        ];
+        let mut world = World::new();
+        let entity = world.spawn_empty_ent();
+        world.add_component(entity, Health(1));
+
+        let answers = cases.map(|(label, handle)| (label, world.get::<Health>(handle)));
+
+        for (label, found) in answers {
+            assert_eq!(found, None, "component for {label}");
+        }
+    }
+
+    /// Checks that `get_mut` returns `None` for every handle that does not refer to a living entity
+    #[test]
+    fn get_mut_with_handle_of_no_living_entity_returns_none() {
+        let cases = [
+            ("index past the last slot", Entity::new(9, 0)),
+            ("later version", Entity::new(0, 1)),
+            ("largest index and version", Entity::new(u32::MAX, u32::MAX)),
+        ];
+        let mut world = World::new();
+        let entity = world.spawn_empty_ent();
+        world.add_component(entity, Health(1));
+
+        let answers =
+            cases.map(|(label, handle)| (label, world.get_mut::<Health>(handle).is_none()));
+
+        for (label, missing) in answers {
+            assert!(missing, "answer for {label}");
+        }
+    }
+
+    /// Checks that `get_mut` returns `None` for a type that the world has never met
+    #[test]
+    fn get_mut_with_type_never_seen_returns_none() {
+        let mut world = World::new();
+        let entity = world.spawn_empty_ent();
+        world.add_component(entity, Health(1));
+
+        let missing = world.get_mut::<Velocity>(entity).is_none();
+
+        assert!(missing);
+    }
+
+    /// Checks that `query_mut` visits only the entities with every type in the query, across tables
+    #[test]
+    fn query_mut_with_several_tables_visits_only_entities_with_every_type() {
+        let mut world = World::new();
+        let alone = world.spawn_empty_ent();
+        let paired = world.spawn_empty_ent();
+        let tripled = world.spawn_empty_ent();
+        let health_only = world.spawn_empty_ent();
+        world.add_component(alone, Position(1.0));
+        world.add_components(paired, (Position(2.0), Health(2)));
+        world.add_components(tripled, (Position(3.0), Health(3), Velocity(3.0)));
+        world.add_component(health_only, Health(4));
+
+        let mut found: Vec<(f32, u32)> = world
+            .query_mut::<(&Position, &Health)>()
+            .map(|(position, health)| (position.0, health.0))
+            .collect();
+        found.sort_by(|left, right| left.0.total_cmp(&right.0));
+
+        assert_eq!(found, [(2.0, 2), (3.0, 3)]);
+    }
+
+    /// Checks that `query_mut` visits the entities in one table in row order, after a despawn
+    /// reorders the rows
+    #[test]
+    fn query_mut_with_one_table_returns_items_in_row_order() {
+        let mut world = World::new();
+        let entities = [
+            world.spawn_empty_ent(),
+            world.spawn_empty_ent(),
+            world.spawn_empty_ent(),
+            world.spawn_empty_ent(),
+        ];
+        for (value, entity) in entities.into_iter().enumerate() {
+            world.add_component(entity, Health(value as u32));
+        }
+        world.despawn_ent(entities[0]);
+
+        let found: Vec<u32> = world
+            .query_mut::<&Health>()
+            .map(|health| health.0)
+            .collect();
+
+        assert_eq!(found, [3, 1, 2]);
+    }
+
+    /// Checks that a change through `query_mut` stays in the world, for every table it visits
+    #[test]
+    fn query_mut_with_mutable_query_keeps_changes_for_get() {
+        let mut world = World::new();
+        let alone = world.spawn_empty_ent();
+        let paired = world.spawn_empty_ent();
+        world.add_component(alone, Health(1));
+        world.add_components(paired, (Position(2.0), Health(2)));
+
+        for health in world.query_mut::<&mut Health>() {
+            health.0 += 10;
+        }
+
+        assert_eq!(world.get::<Health>(alone), Some(&Health(11)), "first table");
+        assert_eq!(
+            world.get::<Health>(paired),
+            Some(&Health(12)),
+            "second table"
+        );
+    }
+
+    /// Checks that a nested pair returns the component for each part, from the same entity
+    #[test]
+    fn query_mut_with_nested_pair_returns_each_part() {
+        let mut world = World::new();
+        let first = world.spawn_empty_ent();
+        let second = world.spawn_empty_ent();
+        world.add_components(first, (Position(1.0), Health(1), Velocity(1.5)));
+        world.add_components(second, (Position(2.0), Health(2), Velocity(2.5)));
+
+        let found: Vec<(f32, u32, f32)> = world
+            .query_mut::<((&Position, &mut Health), &Velocity)>()
+            .map(|((position, health), velocity)| (position.0, health.0, velocity.0))
+            .collect();
+
+        assert_eq!(found, [(1.0, 1, 1.5), (2.0, 2, 2.5)]);
+    }
+
+    /// Checks that a query that reads one type twice returns that component in both parts
+    #[test]
+    fn query_mut_with_two_reads_of_same_type_returns_both() {
+        let mut world = World::new();
+        let entity = world.spawn_empty_ent();
+        world.add_component(entity, Position(4.0));
+
+        let found: Vec<(f32, f32)> = world
+            .query_mut::<(&Position, &Position)>()
+            .map(|(first, second)| (first.0, second.0))
+            .collect();
+
+        assert_eq!(found, [(4.0, 4.0)]);
+    }
+
+    /// Checks that a query for a type that the world has never met returns nothing
+    #[test]
+    fn query_mut_with_type_never_seen_returns_nothing() {
+        let mut world = World::new();
+        let entity = world.spawn_empty_ent();
+        world.add_component(entity, Position(1.0));
+
+        let found = world.query_mut::<&Velocity>().count();
+
+        assert_eq!(found, 0);
+    }
+
+    /// Checks that a query on a world with no entities returns nothing
+    #[test]
+    fn query_mut_with_empty_world_returns_nothing() {
+        let mut world = World::new();
+
+        let found = world.query_mut::<&Position>().count();
+
+        assert_eq!(found, 0);
+    }
+
+    /// Checks that a query with a type of size zero visits each entity that has that type
+    #[test]
+    fn query_mut_with_zero_size_type_visits_each_entity_with_it() {
+        let mut world = World::new();
+        let entities = [
+            world.spawn_empty_ent(),
+            world.spawn_empty_ent(),
+            world.spawn_empty_ent(),
+        ];
+        world.add_components(entities[0], (Marker, Health(0)));
+        world.add_components(entities[1], (Marker, Health(1)));
+        world.add_component(entities[2], Health(2));
+
+        let found: Vec<u32> = world
+            .query_mut::<(&Marker, &mut Health)>()
+            .map(|(_, health)| health.0)
+            .collect();
+
+        assert_eq!(found, [0, 1]);
+    }
+
+    /// Checks that `query_mut` panics on a query that changes a type and also reads it
+    #[test]
+    #[should_panic]
+    fn query_mut_with_write_and_read_of_same_type_panics() {
+        let mut world = World::new();
+        let entity = world.spawn_empty_ent();
+        world.add_component(entity, Position(1.0));
+
+        let _items = world.query_mut::<(&mut Position, &Position)>();
+    }
+
+    /// Checks that `query_mut` panics on a 65th component type, since a mask has room for 64 bits
+    #[test]
+    #[should_panic]
+    fn query_mut_with_65th_component_type_panics() {
+        let mut world = World::new();
+        for type_id in build_64_type_ids() {
+            world.find_or_assign_bit(type_id);
+        }
+
+        let _items = world.query_mut::<&Health>();
+    }
+
+    /// Checks that `query_tables_mut` returns one item for each matching table, with its whole
+    /// column
+    #[test]
+    fn query_tables_mut_with_several_matching_tables_returns_one_column_per_table() {
+        let mut world = World::new();
+        let entities = [
+            world.spawn_empty_ent(),
+            world.spawn_empty_ent(),
+            world.spawn_empty_ent(),
+            world.spawn_empty_ent(),
+        ];
+        world.add_component(entities[0], Position(1.0));
+        world.add_component(entities[1], Position(2.0));
+        world.add_components(entities[2], (Position(3.0), Health(3)));
+        world.add_component(entities[3], Health(4));
+
+        let mut lengths: Vec<usize> = world
+            .query_tables_mut::<&Position>()
+            .map(|positions| positions.len())
+            .collect();
+        lengths.sort_unstable();
+
+        assert_eq!(lengths, [1, 2]);
+    }
+
+    /// Checks that `query_tables_mut` skips a matching table once its last entity has left
+    #[test]
+    fn query_tables_mut_with_emptied_table_skips_it() {
+        let mut world = World::new();
+        let leaver = world.spawn_empty_ent();
+        let stayer = world.spawn_empty_ent();
+        world.add_component(leaver, Position(1.0));
+        world.remove::<Position>(leaver);
+        world.add_components(stayer, (Position(2.0), Health(2)));
+
+        let columns: Vec<Vec<f32>> = world
+            .query_tables_mut::<&Position>()
+            .map(|positions| positions.iter().map(|position| position.0).collect())
+            .collect();
+
+        assert_eq!(columns, [[2.0]]);
+    }
+
+    /// Checks that a change to a column from `query_tables_mut` stays in the world
+    #[test]
+    fn query_tables_mut_with_mutable_column_keeps_changes_for_get() {
+        let mut world = World::new();
+        let first = world.spawn_empty_ent();
+        let second = world.spawn_empty_ent();
+        world.add_components(first, (Position(1.0), Health(10)));
+        world.add_components(second, (Position(2.0), Health(20)));
+
+        for (positions, healths) in world.query_tables_mut::<(&mut Position, &Health)>() {
+            for (position, health) in positions.iter_mut().zip(healths) {
+                position.0 += health.0 as f32;
+            }
+        }
+
+        assert_eq!(
+            world.get::<Position>(first),
+            Some(&Position(11.0)),
+            "first entity"
+        );
+        assert_eq!(
+            world.get::<Position>(second),
+            Some(&Position(22.0)),
+            "second entity"
+        );
+    }
+
+    /// Checks that `query_tables_mut` panics on a nested query that changes a type it also reads
+    #[test]
+    #[should_panic]
+    fn query_tables_mut_with_nested_write_of_read_type_panics() {
+        let mut world = World::new();
+        let entity = world.spawn_empty_ent();
+        world.add_components(entity, (Position(1.0), Health(1)));
+
+        let _columns = world.query_tables_mut::<((&Position, &Health), &mut Position)>();
+    }
+
+    /// Checks that a location keeps the table and the row that it receives, up to `u32::MAX`
+    #[test]
+    fn location_new_with_values_up_to_u32_max_returns_same_values() {
+        let max = u32::MAX as usize;
+        let cases = [(0, 0), (3, 7), (max, max)];
+
+        for (arch_index, row) in cases {
+            let location = Location::new(arch_index, row);
+
+            let found = (location.arch_index(), location.row());
+            assert_eq!(found, (arch_index, row), "location ({arch_index}, {row})");
+        }
+    }
+
+    /// Checks that `Location::new` panics on a table position past `u32::MAX`
+    #[cfg(target_pointer_width = "64")]
+    #[test]
+    #[should_panic]
+    fn location_new_with_arch_index_past_u32_max_panics() {
+        Location::new(u32::MAX as usize + 1, 0);
+    }
+
+    /// Checks that `Location::new` panics on a row past `u32::MAX`
+    #[cfg(target_pointer_width = "64")]
+    #[test]
+    #[should_panic]
+    fn location_new_with_row_past_u32_max_panics() {
+        Location::new(0, u32::MAX as usize + 1);
+    }
+
+    /// Checks that `set_row` changes the row and keeps the table
+    #[test]
+    fn set_row_with_new_row_keeps_table() {
+        let mut location = Location::new(2, 5);
+
+        location.set_row(9);
+
+        let found = (location.arch_index(), location.row());
+        assert_eq!(found, (2, 9));
+    }
+
+    /// Checks that `set_row` panics on a row past `u32::MAX`
+    #[cfg(target_pointer_width = "64")]
+    #[test]
+    #[should_panic]
+    fn set_row_with_row_past_u32_max_panics() {
+        let mut location = Location::new(2, 5);
+
+        location.set_row(u32::MAX as usize + 1);
     }
 }

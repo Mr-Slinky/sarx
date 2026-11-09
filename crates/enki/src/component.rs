@@ -757,7 +757,9 @@ fn array_layout(item: Layout, count: usize) -> Layout {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::panic::{self, AssertUnwindSafe};
     use std::sync::Arc;
+    use std::sync::Mutex;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::thread;
 
@@ -769,6 +771,19 @@ mod tests {
     impl Drop for DropCounter {
         fn drop(&mut self) {
             self.drops.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    /// Adds its ID to a shared log when dropped, which shows which components had their clean-up
+    /// code run.
+    struct DropLog {
+        id: u32,
+        log: Arc<Mutex<Vec<u32>>>,
+    }
+
+    impl Drop for DropLog {
+        fn drop(&mut self) {
+            self.log.lock().unwrap().push(self.id);
         }
     }
 
@@ -1420,5 +1435,484 @@ mod tests {
         );
         assert_eq!(target_health.as_slice::<u32>(), [10], "target health");
         assert_eq!(target_names.as_slice::<String>(), ["Ada"], "target names");
+    }
+
+    /// Checks that `type_id` returns the `TypeId` of the type that `of` was called with
+    #[test]
+    fn type_id_with_standard_and_extreme_types_returns_type_id_of_type() {
+        // Pairs each `ComponentInfo` with the `TypeId` that it should return
+        let cases = [
+            (
+                "f32",
+                ComponentInfo::of::<f32>(ComponentMask::single(0)),
+                TypeId::of::<f32>(),
+            ),
+            (
+                "String",
+                ComponentInfo::of::<String>(ComponentMask::single(0)),
+                TypeId::of::<String>(),
+            ),
+            (
+                "()",
+                ComponentInfo::of::<()>(ComponentMask::single(0)),
+                TypeId::of::<()>(),
+            ),
+        ];
+
+        for (name, info, expected) in cases {
+            let type_id = info.type_id();
+
+            assert_eq!(type_id, expected, "type ID of {name}");
+        }
+    }
+
+    /// Checks that `bit` returns the mask that `of` received, up to the last position in a mask
+    #[test]
+    fn bit_with_standard_and_extreme_positions_returns_mask_from_of() {
+        let cases = [0, 5, ComponentMask::CAPACITY - 1];
+
+        for position in cases {
+            let mask = ComponentMask::single(position);
+            let info = ComponentInfo::of::<u32>(mask);
+
+            let bit = info.bit();
+
+            assert_eq!(bit, mask, "bit at position {position}");
+        }
+    }
+
+    /// Checks that a vector returns the `ComponentInfo` that it was created with
+    #[test]
+    fn info_with_standard_type_returns_info_from_new() {
+        let info = ComponentInfo::of::<f32>(ComponentMask::single(3));
+        let components = ComponentVec::new(info);
+
+        let returned = components.info();
+
+        assert_eq!(returned.type_id(), TypeId::of::<f32>(), "type ID");
+        assert_eq!(returned.bit(), ComponentMask::single(3), "bit");
+        assert_eq!(returned.layout, info.layout, "layout");
+    }
+
+    /// Checks that the length counts the components in the vector, before and after the block grows
+    #[test]
+    fn len_with_varying_counts_returns_number_of_components() {
+        let cases = [0_u32, 1, 4, 5];
+
+        for count in cases {
+            let mut components =
+                ComponentVec::new(ComponentInfo::of::<u32>(ComponentMask::single(0)));
+            for value in 0..count {
+                components.push_typed(value);
+            }
+
+            let len = components.len();
+
+            assert_eq!(len, count as usize, "length after {count} pushes");
+        }
+    }
+
+    /// Checks that `data` points at index 0 once the vector has a block, where the first component
+    /// lies
+    #[test]
+    fn data_with_pushed_components_returns_address_of_first_component() {
+        let mut components = ComponentVec::new(ComponentInfo::of::<u32>(ComponentMask::single(0)));
+        components.push_typed(7_u32);
+        components.push_typed(8_u32);
+
+        let data = components.data();
+        // SAFETY: `read` requires an aligned pointer to a live `u32`. `data` is always aligned, and
+        // index 0 stores the live component 7. `u32` is `Copy`, meaning the copy has no clean-up code
+        let first = unsafe { data.cast::<u32>().read() };
+
+        assert_eq!(data.as_ptr(), components.ptr_at(0), "address of index 0");
+        assert_eq!(first, 7, "component at the address");
+    }
+
+    /// Checks that a removal from any index but the last fills the gap with the last component
+    #[test]
+    fn swap_remove_with_non_last_index_fills_gap_with_last_component() {
+        // Lists the starting components, the index to remove, and the components that should remain
+        let cases: [(&[u32], usize, &[u32]); 3] = [
+            (&[10, 20, 30, 40], 0, &[40, 20, 30]),
+            (&[10, 20, 30, 40], 1, &[10, 40, 30]),
+            (&[10, 20], 0, &[20]),
+        ];
+
+        for (values, index, remaining) in cases {
+            let mut components =
+                ComponentVec::new(ComponentInfo::of::<u32>(ComponentMask::single(0)));
+            for &value in values {
+                components.push_typed(value);
+            }
+
+            components.swap_remove(index);
+
+            assert_eq!(
+                components.as_slice::<u32>(),
+                remaining,
+                "components after removing index {index} from {values:?}"
+            );
+        }
+    }
+
+    /// Checks that removing the final component only pops it, since the removal does not leave a gap
+    /// to fill
+    #[test]
+    fn swap_remove_with_last_index_leaves_other_components_in_place() {
+        // Lists the starting components, the index to remove, and the components that should remain
+        let cases: [(&[u32], usize, &[u32]); 3] = [
+            (&[10, 20, 30], 2, &[10, 20]),
+            (&[10], 0, &[]),
+            (
+                &[10, 20, 30, 40, 50, 60, 70, 80, 90],
+                8,
+                &[10, 20, 30, 40, 50, 60, 70, 80],
+            ),
+        ];
+
+        for (values, index, remaining) in cases {
+            let mut components =
+                ComponentVec::new(ComponentInfo::of::<u32>(ComponentMask::single(0)));
+            for &value in values {
+                components.push_typed(value);
+            }
+
+            components.swap_remove(index);
+
+            assert_eq!(
+                components.as_slice::<u32>(),
+                remaining,
+                "components after removing from {values:?}"
+            );
+        }
+    }
+
+    /// Checks that a removal runs the clean-up code of the removed component alone, and that the
+    /// vector later drops each remaining component once
+    #[test]
+    fn swap_remove_with_drop_logs_drops_only_removed_component() {
+        let log = Arc::new(Mutex::new(Vec::new()));
+        let mut components =
+            ComponentVec::new(ComponentInfo::of::<DropLog>(ComponentMask::single(0)));
+        for id in 0..5 {
+            components.push_typed(DropLog {
+                id,
+                log: Arc::clone(&log),
+            });
+        }
+
+        components.swap_remove(1);
+        let dropped_by_removal = log.lock().unwrap().clone();
+        let remaining: Vec<u32> = components
+            .as_slice::<DropLog>()
+            .iter()
+            .map(|component| component.id)
+            .collect();
+
+        drop(components);
+        let drops_after_vector = log.lock().unwrap().len();
+
+        assert_eq!(dropped_by_removal, [1], "IDs dropped by the removal");
+        assert_eq!(remaining, [0, 4, 2, 3], "IDs left in the vector");
+        assert_eq!(drops_after_vector, 5, "drops after the vector is gone");
+    }
+
+    /// Checks that heap memory owned by the components that remain stays reachable after a removal
+    #[test]
+    fn swap_remove_with_strings_keeps_remaining_strings_readable() {
+        let mut components =
+            ComponentVec::new(ComponentInfo::of::<String>(ComponentMask::single(0)));
+        for name in ["Ada", "Bo", "Cy", "Dee", "Eli"] {
+            components.push_typed(String::from(name));
+        }
+
+        components.swap_remove(0);
+        components.swap_remove(3);
+
+        assert_eq!(components.as_slice::<String>(), ["Eli", "Bo", "Cy"]);
+    }
+
+    /// Checks that a type of size zero is removed by count alone, and is cleaned up once per
+    /// component
+    #[test]
+    fn swap_remove_with_zero_size_drop_type_drops_each_component_once() {
+        // Counts the drops outside the type, since a type of size zero has no room for a counter
+        static DROPS: AtomicUsize = AtomicUsize::new(0);
+
+        struct Marker;
+        impl Drop for Marker {
+            fn drop(&mut self) {
+                DROPS.fetch_add(1, Ordering::Relaxed);
+            }
+        }
+
+        let mut components =
+            ComponentVec::new(ComponentInfo::of::<Marker>(ComponentMask::single(0)));
+        for _ in 0..3 {
+            components.push_typed(Marker);
+        }
+
+        components.swap_remove(0);
+        let len_after_removal = components.len();
+        let drops_after_removal = DROPS.load(Ordering::Relaxed);
+
+        drop(components);
+        let drops_after_vector = DROPS.load(Ordering::Relaxed);
+
+        assert_eq!(len_after_removal, 2, "components left after the removal");
+        assert_eq!(drops_after_removal, 1, "drops caused by the removal");
+        assert_eq!(drops_after_vector, 3, "drops after the vector is gone");
+    }
+
+    /// Checks that a vector stays usable after the clean-up code of a removed component panics, and
+    /// that it never drops that component again
+    #[test]
+    fn swap_remove_with_panicking_drop_leaves_vector_usable() {
+        // Defines a component whose clean-up code counts the drop, then panics where `panics` is set
+        struct Fragile {
+            id: u32,
+            panics: bool,
+            drops: Arc<AtomicUsize>,
+        }
+
+        impl Drop for Fragile {
+            fn drop(&mut self) {
+                self.drops.fetch_add(1, Ordering::Relaxed);
+                assert!(!self.panics, "the clean-up code of the component panicked");
+            }
+        }
+
+        let drops = Arc::new(AtomicUsize::new(0));
+        let mut components =
+            ComponentVec::new(ComponentInfo::of::<Fragile>(ComponentMask::single(0)));
+        for (id, panics) in [(0, true), (1, false), (2, false)] {
+            components.push_typed(Fragile {
+                id,
+                panics,
+                drops: Arc::clone(&drops),
+            });
+        }
+
+        // Catches the panic from the clean-up code of index 0, which `swap_remove` passes on
+        let result = panic::catch_unwind(AssertUnwindSafe(|| components.swap_remove(0)));
+        let len_after_panic = components.len();
+        components.push_typed(Fragile {
+            id: 3,
+            panics: false,
+            drops: Arc::clone(&drops),
+        });
+        let ids: Vec<u32> = components
+            .as_slice::<Fragile>()
+            .iter()
+            .map(|component| component.id)
+            .collect();
+
+        drop(components);
+        let drops_after_vector = drops.load(Ordering::Relaxed);
+
+        assert!(result.is_err(), "swap_remove should pass the panic on");
+        assert_eq!(len_after_panic, 2, "length after the panic");
+        assert_eq!(ids, [2, 1, 3], "IDs in the vector after a later push");
+        assert_eq!(drops_after_vector, 4, "drops after the vector is gone");
+    }
+
+    /// Checks that every build catches an index that would remove a component past the last one
+    #[test]
+    #[should_panic]
+    fn swap_remove_with_out_of_range_index_panics() {
+        let mut components = ComponentVec::new(ComponentInfo::of::<u32>(ComponentMask::single(0)));
+        components.push_typed(10_u32);
+
+        components.swap_remove(1);
+    }
+
+    /// Checks that a removal from an empty vector panics, rather than reaching an index below zero
+    #[test]
+    #[should_panic]
+    fn swap_remove_with_empty_vector_panics() {
+        let mut components = ComponentVec::new(ComponentInfo::of::<u32>(ComponentMask::single(0)));
+
+        components.swap_remove(0);
+    }
+
+    /// Checks that the new capacity is the larger of the capacity needed and double the old one, and
+    /// that a block with room already stays the same size
+    #[test]
+    fn reserve_with_standard_and_extreme_amounts_returns_expected_capacity() {
+        // Lists the number of pushes, the amount to reserve, and the capacity that should result
+        let cases = [
+            (0_u32, 0, 0),
+            (0, 1, 1),
+            (0, 10, 10),
+            (3, 1, 4),
+            (4, 1, 8),
+            (4, 10, 14),
+            (5, 3, 8),
+        ];
+
+        for (count, additional, capacity) in cases {
+            let mut components =
+                ComponentVec::new(ComponentInfo::of::<u32>(ComponentMask::single(0)));
+            for value in 0..count {
+                components.push_typed(value);
+            }
+
+            components.reserve(additional);
+
+            assert_eq!(
+                components.capacity, capacity,
+                "capacity after {count} pushes and a reserve of {additional}"
+            );
+        }
+    }
+
+    /// Checks that a reserve within the room that the block has keeps the block at its address
+    #[test]
+    fn reserve_with_room_available_keeps_block() {
+        let mut components = ComponentVec::new(ComponentInfo::of::<u32>(ComponentMask::single(0)));
+        components.push_typed(1_u32);
+        let start = components.data();
+
+        components.reserve(3);
+
+        assert_eq!(components.data(), start, "pointer to the block");
+    }
+
+    /// Checks that the pushes that a reserve makes room for fit in the block without moving it
+    #[test]
+    fn reserve_with_later_pushes_keeps_block_in_place() {
+        let mut components = ComponentVec::new(ComponentInfo::of::<u32>(ComponentMask::single(0)));
+        components.reserve(10);
+        let start = components.data();
+
+        for value in 0..10_u32 {
+            components.push_typed(value);
+        }
+
+        assert_eq!(components.capacity, 10, "capacity after the pushes");
+        assert_eq!(components.data(), start, "pointer to the block");
+    }
+
+    /// Checks that heap memory owned by a component stays reachable after a reserve moves the block
+    #[test]
+    fn reserve_with_growth_keeps_strings_readable() {
+        let names = ["Ada", "Bo", "Cy"];
+        let mut components =
+            ComponentVec::new(ComponentInfo::of::<String>(ComponentMask::single(0)));
+        for name in names {
+            components.push_typed(String::from(name));
+        }
+
+        components.reserve(10);
+
+        assert_eq!(components.as_slice::<String>(), names);
+    }
+
+    /// Checks that a vector for a type of size zero always has the room, and keeps its block
+    #[test]
+    fn reserve_with_zero_size_type_keeps_capacity_and_block() {
+        let cases = [0, 1, usize::MAX];
+
+        for additional in cases {
+            let mut components =
+                ComponentVec::new(ComponentInfo::of::<()>(ComponentMask::single(0)));
+            let start = components.data();
+
+            components.reserve(additional);
+
+            assert_eq!(
+                components.capacity,
+                usize::MAX,
+                "capacity after a reserve of {additional}"
+            );
+            assert_eq!(
+                components.data(),
+                start,
+                "pointer after a reserve of {additional}"
+            );
+        }
+    }
+
+    /// Checks the limit when the length plus the amount to reserve is too large for `usize`
+    #[test]
+    #[should_panic]
+    fn reserve_with_overflowing_count_panics() {
+        let mut components = ComponentVec::new(ComponentInfo::of::<u32>(ComponentMask::single(0)));
+        components.push_typed(1_u32);
+
+        components.reserve(usize::MAX);
+    }
+
+    /// Checks the limit when the block would pass the largest size allowed, before anything is
+    /// allocated
+    #[test]
+    #[should_panic]
+    fn reserve_with_size_above_limit_panics() {
+        let mut components = ComponentVec::new(ComponentInfo::of::<u8>(ComponentMask::single(0)));
+        let additional = isize::MAX as usize + 1;
+
+        components.reserve(additional);
+    }
+
+    /// Checks that heap memory owned by the components stays reachable when a move grows the target
+    #[test]
+    fn move_component_with_strings_and_full_target_keeps_strings_readable() {
+        let mut source = ComponentVec::new(ComponentInfo::of::<String>(ComponentMask::single(0)));
+        for name in ["Ada", "Bo", "Cy"] {
+            source.push_typed(String::from(name));
+        }
+
+        let mut target = ComponentVec::new(source.info());
+        for name in ["Dee", "Eli", "Fay", "Gus"] {
+            target.push_typed(String::from(name));
+        }
+
+        // SAFETY: `move_component` requires an index below the length and a target of the same
+        // type. Index 0 is below the length of 3, and `target` uses the same `ComponentInfo`
+        unsafe { source.move_component(0, &mut target) };
+
+        assert_eq!(source.as_slice::<String>(), ["Cy", "Bo"], "source");
+        assert_eq!(
+            target.as_slice::<String>(),
+            ["Dee", "Eli", "Fay", "Gus", "Ada"],
+            "target"
+        );
+    }
+
+    /// Checks that each component is dropped once after a mix of reserves, pushes, removals and moves
+    #[test]
+    fn drop_with_mixed_operations_drops_each_component_once() {
+        let drops = Arc::new(AtomicUsize::new(0));
+        let mut source =
+            ComponentVec::new(ComponentInfo::of::<DropCounter>(ComponentMask::single(0)));
+        let mut target = ComponentVec::new(source.info());
+
+        // Reserves room for 5, then pushes 7, which makes the block grow from 5 to 10
+        source.reserve(5);
+        for _ in 0..7 {
+            source.push_typed(DropCounter {
+                drops: Arc::clone(&drops),
+            });
+        }
+        source.swap_remove(2);
+        // SAFETY: `move_component` requires an index below the length and a target of the same
+        // type. Index 0 is below the length of 6, index 4 is below the length of 5, and `target`
+        // uses the same `ComponentInfo`
+        unsafe {
+            source.move_component(0, &mut target);
+            source.move_component(4, &mut target);
+        }
+        target.reserve(10);
+        let drops_before_vectors = drops.load(Ordering::Relaxed);
+        let lengths = (source.len(), target.len());
+
+        drop(source);
+        drop(target);
+        let drops_after_vectors = drops.load(Ordering::Relaxed);
+
+        assert_eq!(drops_before_vectors, 1, "drops caused by the removal");
+        assert_eq!(lengths, (4, 2), "lengths of the source and the target");
+        assert_eq!(drops_after_vectors, 7, "drops after both vectors are gone");
     }
 }

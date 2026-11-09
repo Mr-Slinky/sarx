@@ -518,6 +518,18 @@ mod tests {
         unsafe { table.push_entity(entity) };
     }
 
+    /// Adds one row to a table whose two columns store `A` and `B`.
+    fn push_pair_row<A: 'static, B: 'static>(table: &mut Archetype, entity: Entity, a: A, b: B) {
+        // Stops a table with a third column from getting a row that the third column lacks
+        assert_eq!(table.infos().len(), 2, "the table must have two columns");
+        push_component(table, a);
+        push_component(table, b);
+
+        // SAFETY: `push_entity` requires one new component in every column. The assert above leaves
+        // two columns, and the two lines above push one onto each
+        unsafe { table.push_entity(entity) };
+    }
+
     /// Returns the column that stores `T`, as a slice of `T`.
     ///
     /// The slice borrows `table`, meaning the compiler rejects any change to the table while the
@@ -1114,5 +1126,512 @@ mod tests {
 
         assert_eq!(shared_totals, [10, 10], "totals from the shared table");
         assert_eq!(moved_total, 10, "total from the moved table");
+    }
+
+    /// Checks that the entity list comes back in row order, from an empty table upwards
+    #[test]
+    fn entities_with_varying_row_counts_returns_entities_in_row_order() {
+        let cases = [0_u32, 1, 3];
+
+        for count in cases {
+            let mut table =
+                Archetype::new(&[ComponentInfo::of::<Health>(ComponentMask::single(0))]);
+            let expected: Vec<Entity> = (0..count).map(|index| Entity::new(index, 1)).collect();
+            for (index, entity) in (0..count).zip(expected.iter().copied()) {
+                push_row(&mut table, entity, Health(index));
+            }
+
+            let found = table.entities();
+
+            assert_eq!(found, expected.as_slice(), "entities for {count} rows");
+        }
+    }
+
+    /// Checks that reserving room leaves every row in place, in the entity list and in each column
+    #[test]
+    fn reserve_with_varying_additional_rows_keeps_existing_rows() {
+        let cases = [0_usize, 1, 100];
+
+        for additional in cases {
+            let position = ComponentInfo::of::<Position>(ComponentMask::single(0));
+            let name = ComponentInfo::of::<String>(ComponentMask::single(1));
+            let mut table = Archetype::new(&[position, name]);
+            let first = Entity::new(0, 0);
+            let second = Entity::new(1, 0);
+            push_pair_row(&mut table, first, Position(1.0), String::from("Ada"));
+            push_pair_row(&mut table, second, Position(2.0), String::from("Bo"));
+
+            table.reserve(additional);
+
+            assert_eq!(
+                table.entities(),
+                [first, second],
+                "entities after reserving {additional}"
+            );
+            assert_eq!(
+                read_column::<Position>(&table),
+                [Position(1.0), Position(2.0)],
+                "positions after reserving {additional}"
+            );
+            assert_eq!(
+                read_column::<String>(&table),
+                ["Ada", "Bo"],
+                "names after reserving {additional}"
+            );
+        }
+    }
+
+    /// Checks that the reserved rows fit in the blocks that the table already has, meaning no
+    /// column and not the entity list moves to a larger block
+    #[test]
+    fn reserve_with_varying_additional_rows_fits_rows_without_moving_blocks() {
+        let cases = [1_u32, 4, 9];
+
+        for additional in cases {
+            let position = ComponentInfo::of::<Position>(ComponentMask::single(0));
+            let health = ComponentInfo::of::<Health>(ComponentMask::single(1));
+            let mut table = Archetype::new(&[position, health]);
+            push_pair_row(&mut table, Entity::new(0, 0), Position(0.0), Health(0));
+
+            table.reserve(additional as usize);
+            let reserved_positions = read_column::<Position>(&table).as_ptr();
+            let reserved_healths = read_column::<Health>(&table).as_ptr();
+            let reserved_entities = table.entities().as_ptr();
+            for index in 1..=additional {
+                let row = Entity::new(index, 0);
+                push_pair_row(&mut table, row, Position(index as f32), Health(index));
+            }
+            let final_positions = read_column::<Position>(&table).as_ptr();
+            let final_healths = read_column::<Health>(&table).as_ptr();
+            let final_entities = table.entities().as_ptr();
+
+            let rows = additional as usize + 1;
+            assert_eq!(table.len(), rows, "length after {additional} pushes");
+            assert_eq!(
+                final_positions, reserved_positions,
+                "position block after {additional} pushes"
+            );
+            assert_eq!(
+                final_healths, reserved_healths,
+                "health block after {additional} pushes"
+            );
+            assert_eq!(
+                final_entities, reserved_entities,
+                "entity block after {additional} pushes"
+            );
+        }
+    }
+
+    /// Checks that a request for more rows than a `usize` can count panics
+    #[test]
+    #[should_panic]
+    fn reserve_with_overflowing_additional_rows_panics() {
+        let mut table = Archetype::new(&[ComponentInfo::of::<Health>(ComponentMask::single(0))]);
+        push_row(&mut table, Entity::new(0, 0), Health(1));
+
+        table.reserve(usize::MAX);
+    }
+
+    /// Checks that the borrowed columns come back in the order of the request, whatever the order
+    /// of the columns inside the table
+    #[test]
+    fn get_disjoint_components_mut_with_stored_types_returns_columns_in_requested_order() {
+        let position = ComponentInfo::of::<Position>(ComponentMask::single(0));
+        let health = ComponentInfo::of::<Health>(ComponentMask::single(1));
+        let name = ComponentInfo::of::<String>(ComponentMask::single(2));
+
+        // Lists the two types to request, in the order that the columns should come back
+        let cases = [
+            [position.type_id(), health.type_id()],
+            [health.type_id(), position.type_id()],
+            [name.type_id(), position.type_id()],
+        ];
+
+        for (case, type_ids) in cases.into_iter().enumerate() {
+            let mut table = Archetype::new(&[position, health, name]);
+
+            let found = table
+                .get_disjoint_components_mut(type_ids)
+                .map(|columns| columns.map(|column| column.info().type_id()));
+
+            assert_eq!(found, Some(type_ids), "columns for request {case}");
+        }
+    }
+
+    /// Checks that each borrowed column takes its own push, which the table then keeps
+    #[test]
+    fn get_disjoint_components_mut_with_stored_types_returns_columns_that_keep_pushes() {
+        let position = ComponentInfo::of::<Position>(ComponentMask::single(0));
+        let health = ComponentInfo::of::<Health>(ComponentMask::single(1));
+        let mut table = Archetype::new(&[position, health]);
+
+        let [healths, positions] = table
+            .get_disjoint_components_mut([health.type_id(), position.type_id()])
+            .expect("the table should store `Health` and `Position`");
+        healths.push_typed(Health(100));
+        positions.push_typed(Position(1.5));
+
+        assert_eq!(read_column::<Health>(&table), [Health(100)], "healths");
+        assert_eq!(
+            read_column::<Position>(&table),
+            [Position(1.5)],
+            "positions"
+        );
+    }
+
+    /// Checks that a request for a type outside the table gives no columns, wherever that type
+    /// stands in the request
+    #[test]
+    fn get_disjoint_components_mut_with_absent_type_returns_none() {
+        let position = TypeId::of::<Position>();
+        let health = TypeId::of::<Health>();
+        let name = TypeId::of::<String>();
+
+        // Lists requests that each contain at least one type outside the table
+        let cases = [[name, position], [health, name], [name, name]];
+
+        for (case, type_ids) in cases.into_iter().enumerate() {
+            let mut table = Archetype::new(&[
+                ComponentInfo::of::<Position>(ComponentMask::single(0)),
+                ComponentInfo::of::<Health>(ComponentMask::single(1)),
+            ]);
+
+            let found = table.get_disjoint_components_mut(type_ids);
+
+            assert!(found.is_none(), "answer for request {case}");
+        }
+    }
+
+    /// Checks that a request for one column twice gives no columns, since the caller could then
+    /// change that column through two references at once
+    #[test]
+    fn get_disjoint_components_mut_with_repeated_type_returns_none() {
+        let position = ComponentInfo::of::<Position>(ComponentMask::single(0));
+        let health = ComponentInfo::of::<Health>(ComponentMask::single(1));
+        let mut table = Archetype::new(&[position, health]);
+
+        let found = table.get_disjoint_components_mut([
+            position.type_id(),
+            health.type_id(),
+            position.type_id(),
+        ]);
+
+        assert!(found.is_none());
+    }
+
+    /// Checks the smallest requests, which ask for no columns or for a single column
+    #[test]
+    fn get_disjoint_components_mut_with_zero_or_one_type_returns_requested_columns() {
+        let position = ComponentInfo::of::<Position>(ComponentMask::single(0));
+        let mut table = Archetype::new(&[position]);
+        let mut empty_table = Archetype::new(&[]);
+
+        let no_types = table
+            .get_disjoint_components_mut([])
+            .map(|columns| columns.len());
+        let no_types_empty_table = empty_table
+            .get_disjoint_components_mut([])
+            .map(|columns| columns.len());
+        let one_type = table
+            .get_disjoint_components_mut([position.type_id()])
+            .map(|[column]| column.info().type_id());
+
+        assert_eq!(no_types, Some(0), "no types from a table with one column");
+        assert_eq!(
+            no_types_empty_table,
+            Some(0),
+            "no types from a table with no columns"
+        );
+        assert_eq!(one_type, Some(position.type_id()), "one type");
+    }
+
+    /// Checks that the last row fills the removed row, for the first, middle and last rows, and
+    /// for the only row
+    #[test]
+    fn remove_entity_with_varying_rows_fills_gap_with_last_row() {
+        // Lists the number of rows, the row to remove, the index of the entity that should fill
+        // it, and the indices of the entities that should remain, in row order
+        let cases: [(u32, usize, Option<u32>, &[u32]); 4] = [
+            (3, 0, Some(2), &[2, 1]),
+            (3, 1, Some(2), &[0, 2]),
+            (3, 2, None, &[0, 1]),
+            (1, 0, None, &[]),
+        ];
+
+        for (count, row, filled, remaining) in cases {
+            let mut table =
+                Archetype::new(&[ComponentInfo::of::<Health>(ComponentMask::single(0))]);
+            for index in 0..count {
+                push_row(&mut table, Entity::new(index, 0), Health(index));
+            }
+            let expected_filled = filled.map(|index| Entity::new(index, 0));
+            let expected_entities: Vec<Entity> = remaining
+                .iter()
+                .map(|&index| Entity::new(index, 0))
+                .collect();
+            let expected_healths: Vec<Health> =
+                remaining.iter().map(|&index| Health(index)).collect();
+
+            let found = table.remove_entity(row);
+
+            assert_eq!(
+                found, expected_filled,
+                "entity that fills the row, row {row} of {count}"
+            );
+            assert_eq!(
+                table.entities(),
+                expected_entities.as_slice(),
+                "entities, row {row} of {count}"
+            );
+            assert_eq!(
+                read_column::<Health>(&table),
+                expected_healths.as_slice(),
+                "column, row {row} of {count}"
+            );
+        }
+    }
+
+    /// Checks that a whole row leaves together, and that the last row fills it in every column
+    #[test]
+    fn remove_entity_with_several_columns_keeps_rows_together() {
+        let position = ComponentInfo::of::<Position>(ComponentMask::single(0));
+        let name = ComponentInfo::of::<String>(ComponentMask::single(1));
+        let mut table = Archetype::new(&[position, name]);
+        let first = Entity::new(0, 0);
+        let second = Entity::new(1, 0);
+        let third = Entity::new(2, 0);
+        push_pair_row(&mut table, first, Position(1.0), String::from("Ada"));
+        push_pair_row(&mut table, second, Position(2.0), String::from("Bo"));
+        push_pair_row(&mut table, third, Position(3.0), String::from("Cy"));
+
+        let filled = table.remove_entity(0);
+
+        assert_eq!(filled, Some(third), "entity that fills the row");
+        assert_eq!(table.entities(), [third, second], "entities");
+        assert_eq!(
+            read_column::<Position>(&table),
+            [Position(3.0), Position(2.0)],
+            "positions"
+        );
+        assert_eq!(read_column::<String>(&table), ["Cy", "Bo"], "names");
+    }
+
+    /// Checks that a table with no columns still removes its entities
+    #[test]
+    fn remove_entity_with_no_columns_removes_only_entity() {
+        let mut table = Archetype::new(&[]);
+        let first = Entity::new(0, 0);
+        let second = Entity::new(1, 0);
+        // SAFETY: `push_entity` requires one new component in every column, and the table has no
+        // columns
+        unsafe {
+            table.push_entity(first);
+            table.push_entity(second);
+        }
+
+        let filled = table.remove_entity(0);
+
+        assert_eq!(filled, Some(second), "entity that fills the row");
+        assert_eq!(table.entities(), [second], "entities");
+    }
+
+    /// Checks that a removal drops the removed component alone, and that the table later drops the
+    /// rest once each
+    #[test]
+    fn remove_entity_with_drop_counters_drops_each_component_once() {
+        let drops = Arc::new(AtomicUsize::new(0));
+        let mut table =
+            Archetype::new(&[ComponentInfo::of::<DropCounter>(ComponentMask::single(0))]);
+        for index in 0..3 {
+            let value = DropCounter {
+                drops: Arc::clone(&drops),
+            };
+            push_row(&mut table, Entity::new(index, 0), value);
+        }
+
+        table.remove_entity(0);
+        let drops_after_removal = drops.load(Ordering::Relaxed);
+
+        drop(table);
+        let drops_after_table = drops.load(Ordering::Relaxed);
+
+        assert_eq!(drops_after_removal, 1, "drops caused by the removal");
+        assert_eq!(drops_after_table, 3, "drops after the table is gone");
+    }
+
+    /// Checks that a column of a zero-sized type with clean-up code drops the removed component
+    #[test]
+    fn remove_entity_with_zero_size_drop_type_drops_removed_component() {
+        // Counts the drops outside the type, since a type of size zero has no room for a counter
+        static DROPS: AtomicUsize = AtomicUsize::new(0);
+
+        struct Marker;
+        impl Drop for Marker {
+            fn drop(&mut self) {
+                DROPS.fetch_add(1, Ordering::Relaxed);
+            }
+        }
+
+        let mut table = Archetype::new(&[ComponentInfo::of::<Marker>(ComponentMask::single(0))]);
+        push_row(&mut table, Entity::new(0, 0), Marker);
+        push_row(&mut table, Entity::new(1, 0), Marker);
+
+        table.remove_entity(1);
+        let column_length = read_column::<Marker>(&table).len();
+        let drops_after_removal = DROPS.load(Ordering::Relaxed);
+
+        drop(table);
+        let drops_after_table = DROPS.load(Ordering::Relaxed);
+
+        assert_eq!(column_length, 1, "column length");
+        assert_eq!(drops_after_removal, 1, "drops caused by the removal");
+        assert_eq!(drops_after_table, 2, "drops after the table is gone");
+    }
+
+    /// Checks that every build catches a row past the last entity
+    #[test]
+    #[should_panic]
+    fn remove_entity_with_out_of_range_row_panics() {
+        let mut table = Archetype::new(&[ComponentInfo::of::<Health>(ComponentMask::single(0))]);
+        push_row(&mut table, Entity::new(0, 0), Health(1));
+
+        table.remove_entity(1);
+    }
+
+    /// Checks that every build catches a removal from a table with no rows
+    #[test]
+    #[should_panic]
+    fn remove_entity_with_empty_table_panics() {
+        let mut table = Archetype::new(&[ComponentInfo::of::<Health>(ComponentMask::single(0))]);
+
+        table.remove_entity(0);
+    }
+
+    /// Checks that a debug build catches a column shorter than the entity list, before anything
+    /// changes
+    #[test]
+    #[cfg(debug_assertions)]
+    #[should_panic]
+    fn remove_entity_with_short_column_panics() {
+        let mut table = Archetype::new(&[ComponentInfo::of::<Health>(ComponentMask::single(0))]);
+        push_row(&mut table, Entity::new(0, 0), Health(1));
+        // SAFETY: this call breaks the requirement of one new component in every column on
+        // purpose. The `debug_assert` at the start of `remove_entity` panics before any memory is
+        // read
+        unsafe { table.push_entity(Entity::new(1, 0)) };
+
+        table.remove_entity(0);
+    }
+
+    /// Checks that a move into a table without a column for one component drops that component,
+    /// and moves the rest of the row
+    #[test]
+    fn move_entity_dropping_with_target_lacking_column_drops_that_component() {
+        let drops = Arc::new(AtomicUsize::new(0));
+        let position = ComponentInfo::of::<Position>(ComponentMask::single(0));
+        let counter = ComponentInfo::of::<DropCounter>(ComponentMask::single(1));
+        let mut source = Archetype::new(&[position, counter]);
+        let mut target = Archetype::new(&[position]);
+        let first = Entity::new(0, 0);
+        let second = Entity::new(1, 0);
+        let third = Entity::new(2, 0);
+        for (entity, x) in [(first, 1.0), (second, 2.0), (third, 3.0)] {
+            let value = DropCounter {
+                drops: Arc::clone(&drops),
+            };
+            push_pair_row(&mut source, entity, Position(x), value);
+        }
+
+        // SAFETY: `move_entity_dropping` requires a row in range, and a push onto each new column
+        // in the target. Row 0 is below the length of 3, and the target has no new columns
+        let filled = unsafe { source.move_entity_dropping(0, &mut target) };
+        let drops_after_move = drops.load(Ordering::Relaxed);
+        let counters_left = source
+            .components_of(counter.type_id())
+            .expect("the source should store `DropCounter`")
+            .len();
+
+        drop(source);
+        let drops_after_source = drops.load(Ordering::Relaxed);
+
+        assert_eq!(filled, Some(third), "entity that fills the row");
+        assert_eq!(drops_after_move, 1, "drops caused by the move");
+        assert_eq!(counters_left, 2, "counters left in the source");
+        assert_eq!(drops_after_source, 3, "drops after the source is gone");
+        assert_eq!(target.entities(), [first], "target entities");
+        assert_eq!(
+            read_column::<Position>(&target),
+            [Position(1.0)],
+            "target positions"
+        );
+    }
+
+    /// Checks that a move into a table with no columns drops every component of the entity
+    #[test]
+    fn move_entity_dropping_with_columnless_target_drops_every_component() {
+        let drops = Arc::new(AtomicUsize::new(0));
+        let counter = ComponentInfo::of::<DropCounter>(ComponentMask::single(0));
+        let mut source = Archetype::new(&[counter]);
+        let mut target = Archetype::new(&[]);
+        let moved = Entity::new(0, 0);
+        let value = DropCounter {
+            drops: Arc::clone(&drops),
+        };
+        push_row(&mut source, moved, value);
+
+        // SAFETY: `move_entity_dropping` requires a row in range, and a push onto each new column
+        // in the target. Row 0 is below the length of 1, and the target has no columns
+        let filled = unsafe { source.move_entity_dropping(0, &mut target) };
+        let drops_after_move = drops.load(Ordering::Relaxed);
+
+        assert_eq!(filled, None, "entity that fills the row");
+        assert_eq!(drops_after_move, 1, "drops caused by the move");
+        assert_eq!(source.len(), 0, "source length");
+        assert_eq!(
+            read_column::<DropCounter>(&source).len(),
+            0,
+            "source column length"
+        );
+        assert_eq!(target.entities(), [moved], "target entities");
+    }
+
+    /// Checks that a debug build catches a source column shorter than the entity list, before
+    /// anything changes
+    #[test]
+    #[cfg(debug_assertions)]
+    #[should_panic]
+    fn move_entity_dropping_with_short_source_column_panics() {
+        let position = ComponentInfo::of::<Position>(ComponentMask::single(0));
+        let mut source = Archetype::new(&[position]);
+        let mut target = Archetype::new(&[position]);
+        push_row(&mut source, Entity::new(0, 0), Position(1.0));
+
+        // SAFETY: the first call breaks the requirement of one new component in every column, and
+        // the second breaks the row requirement, both on purpose. The `debug_assert` at the start
+        // of `move_entity_dropping` panics before any memory is read
+        unsafe {
+            source.push_entity(Entity::new(1, 0));
+            source.move_entity_dropping(0, &mut target);
+        }
+    }
+
+    /// Checks that a debug build catches a target column shorter than the target entity list,
+    /// before anything changes
+    #[test]
+    #[cfg(debug_assertions)]
+    #[should_panic]
+    fn move_entity_dropping_with_short_target_column_panics() {
+        let position = ComponentInfo::of::<Position>(ComponentMask::single(0));
+        let mut source = Archetype::new(&[position]);
+        let mut target = Archetype::new(&[position]);
+        push_row(&mut source, Entity::new(0, 0), Position(1.0));
+
+        // SAFETY: the first call breaks the requirement of one new component in every column of
+        // the target on purpose. The `debug_assert` at the start of `move_entity_dropping` panics
+        // before any memory is read
+        unsafe {
+            target.push_entity(Entity::new(1, 0));
+            source.move_entity_dropping(0, &mut target);
+        }
     }
 }

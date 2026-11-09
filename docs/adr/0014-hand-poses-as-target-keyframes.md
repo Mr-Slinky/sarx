@@ -56,7 +56,7 @@ one rotation to another, along the shortest arc between them.
 To change the hand's goal, Sarx changes the target pose. Each bone then starts its turn from its
 rotation at that moment. A hand part-way into one pose therefore turns smoothly towards the next.
 
-ADR 0015 sets how far a bone turns on each update. A further decision must choose whether the
+A further decision must set how far a bone turns on each update. Another must choose whether the
 update runs in the simulation step or in the renderer, and that decision must agree with ADR 0005.
 
 ### Consequences
@@ -71,7 +71,7 @@ update runs in the simulation step or in the renderer, and that decision must ag
   transforms by weight. Villagers do not need skinning, because ADR 0012 builds them from rigid
   parts.
 - Bad, because Sarx has to read the animations section of a glTF file, as well as its meshes and its
-  skin. ADR 0018 sets out how Sarx reads the file.
+  skin. ADR 0016 sets out how Sarx reads the file.
 - Bad, because a pose stores only where the hand ends up. A move along a set path, such as a wave,
   needs more than one keyframe. It also needs a different way to play the move back.
 

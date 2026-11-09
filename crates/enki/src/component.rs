@@ -134,7 +134,7 @@ use std::{mem, ptr, slice};
 ///
 /// The game makes a type a component by implementing this trait for it, with one empty `impl`.
 /// Every other type stays outside the world. As a result, a tuple passed to
-/// `World::add_component` by mistake fails to compile, as ADR 0016 sets out.
+/// `World::add_component` by mistake fails to compile, as ADR 0015 sets out.
 ///
 /// The trait requires three other traits of every component type:
 ///

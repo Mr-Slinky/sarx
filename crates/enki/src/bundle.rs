@@ -30,6 +30,19 @@ use std::any::TypeId;
 use std::mem;
 
 // ========================================================================================== \\
+//                                          Modules                                           \\
+// ========================================================================================== \\
+
+/// Declares the trait that seals [`Bundle`].
+mod sealed {
+    /// Marks each type that the crate implements [`Bundle`](super::Bundle) for.
+    ///
+    /// The trait is `pub` inside a private module. Code outside the crate therefore cannot write a
+    /// path to it, and cannot implement it.
+    pub trait Sealed {}
+}
+
+// ========================================================================================== \\
 //                                         Public API                                         \\
 // ========================================================================================== \\
 
@@ -45,9 +58,10 @@ use std::mem;
 /// attribute `#[doc(hidden)]` hides the two methods from the public documentation, since only code
 /// inside the crate needs them.
 ///
-/// Code outside the crate cannot implement the trait. An implementation has to write `Archetype`
-/// in the signature of [`Bundle::push_into`]. Code outside the crate cannot write a path to
-/// `Archetype`. As a result, the tuple implementations in the crate are the only ones.
+/// Code outside the crate cannot implement the trait. `Bundle` requires the trait `Sealed`, which a
+/// private module in `bundle.rs` declares. Code outside the crate cannot write a path to `Sealed`,
+/// and therefore cannot implement it. As a result, the tuple implementations in the crate are the
+/// only ones.
 ///
 /// A method on `World` that adds a bundle must rely on that guarantee. The method must build a
 /// table from the `ComponentInfo` values that [`Bundle::infos`] returns. It must then rely on
@@ -73,7 +87,7 @@ use std::mem;
 /// // Passes a tuple of a `Position` and a `Health`. The tuple implements `Bundle`
 /// accept((Position(0.0, 0.0), Health(100)));
 /// ```
-pub trait Bundle: Send + Sync + 'static {
+pub trait Bundle: sealed::Sealed + Send + Sync + 'static {
     /// Returns one [`ComponentInfo`] for each type in the bundle, in the order of the tuple fields.
     ///
     /// The method has no `self` parameter. A caller therefore calls it on the type, as in
@@ -262,6 +276,10 @@ fn push_or_replace<T: Component>(
 /// comments, to explain each line. The expansion itself has no comments.
 ///
 /// ```ignore
+/// // Marks every tuple of three components as a type that the crate implements `Bundle` for,
+/// // which `Bundle` requires
+/// impl<A: Component, B: Component, C: Component> sealed::Sealed for (A, B, C,) {}
+///
 /// // Implements `Bundle` for every tuple of three types, where each type implements `Component`
 /// impl<A: Component, B: Component, C: Component> Bundle for (A, B, C,) {
 ///     // Returns one `ComponentInfo` per type, in the order of the tuple fields
@@ -325,6 +343,9 @@ fn push_or_replace<T: Component>(
 /// call lists the same names as the call for thirty-two, followed by one more name, `AG`.
 macro_rules! impl_bundle {
     ($($name:ident),+) => {
+        // Marks the tuple as a type that the crate implements `Bundle` for, which `Bundle` requires
+        impl<$($name: Component),+> sealed::Sealed for ($($name,)+) {}
+
         // Declares one type parameter per name, each with the component bound, and implements
         // `Bundle` for the tuple of those parameters. The comma after each name turns a single
         // name into a tuple of one field

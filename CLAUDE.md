@@ -165,8 +165,19 @@ in the README.
 
 ### Decision Records
 
-A discussion that settles a decision ends in an ADR. Once the discussion closes, the agent writes the
-ADR in the format that the README sets out. The agent then adds a row for it to the table in the
+A discussion that settles a decision ends in an ADR where the decision constrains later work. A
+decision constrains later work in either of two cases:
+
+- Code built on the decision would have to change if the decision changed. The choice of storage
+  for the ECS is one such decision.
+- The decision rules out a direction that the game might take later.
+
+A decision that stays inside one module takes no ADR. The code and its doc comments already state
+such a decision, and a later change can reverse it without breaking any other code. Sealing a trait
+is one example. Where the agent is unsure which kind a decision is, it asks the developer.
+
+Once a discussion that needs an ADR closes, the agent writes the ADR in the format that the README
+sets out. The agent then adds a row for it to the table in the
 Design Decisions section of the README. The developer reviews the ADR and the row, as with any other
 change that an agent makes.
 

@@ -8,7 +8,7 @@ decision-makers: Kheagen Haskins
 
 ## Context and Problem Statement
 
-The god's hand reaches Sarx as `assets/hand.glb`, a binary glTF file that Blender exports. A binary
+The god's hand reaches Sarx as `assets/hand-model.glb`, a binary glTF file that Blender exports. A binary
 glTF file has three parts:
 
 1. A 12-byte header, which identifies the file as glTF and gives its length.

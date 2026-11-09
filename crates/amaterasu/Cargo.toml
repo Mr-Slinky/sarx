@@ -1,7 +1,8 @@
 [package]
-name = "sarx-render"
+name = "amaterasu"
 version.workspace = true
 edition.workspace = true
 publish.workspace = true
 
 [dependencies]
+wgpu = "30.0.1"

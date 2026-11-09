@@ -1,0 +1,1474 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>enki Component Charts</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+Condensed:wght@500;600&family=IBM+Plex+Sans:ital,wght@0,400;0,600;1,400&display=swap">
+<style>
+:root {
+  /* Layout: one reading column for prose (about 68ch); chart sheets break out to the full 1200px frame */
+  --paper: #f6f1f6;
+  --sheet: #fffaff;
+  --grid: #efe9ef;
+  --ink: #303036;
+  --muted: #66646c;
+  --rule: #d8d3d9;
+  --box: #ffffff;
+  --accent: #fc5130;
+  --accent-ink: #c7351a;
+  --code-bg: #f5ecd8;
+  --display: "IBM Plex Sans Condensed", "Arial Narrow", "Helvetica Neue", sans-serif;
+  --body: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #1f1f24; --sheet: #26262b; --grid: #2d2d33; --ink: #fffaff; --muted: #a8a6ad;
+    --rule: #45454d; --box: #303036; --accent: #30bced; --accent-ink: #d5ac4e; --code-bg: #36363d;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --paper: #1f1f24; --sheet: #26262b; --grid: #2d2d33; --ink: #fffaff; --muted: #a8a6ad;
+  --rule: #45454d; --box: #303036; --accent: #30bced; --accent-ink: #d5ac4e; --code-bg: #36363d;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+body {
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--body);
+  font-size: 16px;
+  line-height: 1.6;
+}
+.frame { max-width: 1240px; margin: 0 auto; padding-inline: 20px; padding-block: 40px 64px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 56px; }
+.prose { max-width: 68ch; }
+h1, h2, h3 { font-family: var(--display); text-wrap: balance; margin: 0; line-height: 1.15; }
+h1 { font-size: clamp(2rem, 4.6vw, 3.1rem); font-weight: 600; letter-spacing: -0.01em; }
+h2 { font-size: 1.6rem; font-weight: 600; }
+h3 { font-size: 1.2rem; font-weight: 600; }
+p { margin: 0; }
+code, .mono { font-family: var(--mono); font-size: 0.88em; }
+:not(pre) > code { background: var(--code-bg); padding: 0.05em 0.35em; border-radius: 3px; }
+pre {
+  margin: 0; font-family: var(--mono); font-size: 12.5px; line-height: 1.5;
+  background: var(--code-bg); padding: 10px 12px; border-radius: 4px; overflow-x: auto; white-space: pre;
+}
+.eyebrow {
+  font-family: var(--display); font-size: 0.8rem; letter-spacing: 0.12em; text-transform: uppercase;
+  color: var(--muted); font-weight: 500;
+}
+.stack { display: grid; gap: 14px; }
+.stack-lg { display: grid; gap: 24px; }
+
+/* Masthead */
+.masthead { display: grid; gap: 16px; border-bottom: 2px solid var(--ink); padding-bottom: 28px; }
+.masthead .lede { font-size: 1.1rem; max-width: 64ch; }
+.meta { display: flex; flex-wrap: wrap; gap: 8px 28px; font-family: var(--mono); font-size: 0.8rem; color: var(--muted); }
+
+/* Key */
+.key { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 460px), 1fr)); gap: 0 40px; }
+.key-item { display: grid; grid-template-columns: 112px minmax(0, 1fr); gap: 12px 16px; padding-block: 18px; border-top: 1px solid var(--rule); align-items: start; }
+.key-item pre { grid-column: 1 / -1; }
+.key-item svg { width: 112px; height: auto; display: block; }
+.key-text { display: grid; gap: 8px; min-width: 0; }
+.key-text strong { font-family: var(--display); font-size: 1.02rem; font-weight: 600; }
+.key-text p { font-size: 0.94rem; }
+.rules { display: grid; gap: 10px; font-size: 0.94rem; color: var(--muted); max-width: 72ch; }
+
+/* Sheets */
+.sheet { margin: 0; background-color: var(--sheet); border: 1px solid var(--rule); }
+.sheet-body {
+  overflow-x: auto; padding-block: 20px; padding-inline: 12px;
+  background-image: linear-gradient(var(--grid) 1px, transparent 1px), linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+  background-size: 20px 20px;
+}
+.sheet-body { display: grid; gap: 28px; }
+.sheet-body svg { display: block; margin: 0 auto; height: auto; }
+.titleblock {
+  display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: stretch;
+  border-bottom: 1px solid var(--rule); font-family: var(--display);
+}
+.titleblock > div { padding: 10px 16px; display: grid; align-content: center; gap: 2px; min-width: 0; }
+.titleblock > div + div { border-left: 1px solid var(--rule); }
+.tb-label { font-size: 0.7rem; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); }
+.tb-num { font-size: 1.5rem; font-weight: 600; line-height: 1; }
+.tb-entry { font-family: var(--mono); font-size: 0.82rem; }
+.sheet figcaption { padding: 14px 16px 18px; border-top: 1px solid var(--rule); font-size: 0.95rem; }
+.sheet figcaption p { max-width: 80ch; }
+
+/* Structure chart drawing */
+.sc .box { fill: var(--box); stroke: var(--ink); stroke-width: 1.4; }
+.sc .box.ext { fill: var(--sheet); stroke: var(--muted); stroke-dasharray: 5 4; }
+.sc .libbar { stroke: var(--ink); stroke-width: 1.2; }
+.sc .rep { fill: var(--muted); }
+.sc .lbl { font-family: var(--mono); font-size: 12px; fill: var(--ink); }
+.sc .lbl.ext { fill: var(--muted); }
+.sc .sub { font-family: var(--body); font-size: 10px; fill: var(--muted); }
+.sc .part { font-family: var(--display); font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; fill: var(--muted); }
+.sc .note { font-family: var(--body); font-size: 11px; font-style: italic; fill: var(--muted); }
+.sc .call { stroke: var(--ink); stroke-width: 1.3; fill: none; }
+.sc .call.hidden { stroke-dasharray: 6 4; }
+.sc .head { fill: var(--ink); }
+.sc .diamond { fill: var(--box); stroke: var(--ink); stroke-width: 1.3; }
+.sc .loop { stroke: var(--ink); stroke-width: 1.3; fill: none; }
+.sc .cpl { stroke: var(--accent); stroke-width: 1.4; fill: none; }
+.sc .cpl-head { fill: var(--accent); }
+.sc .tail-d { fill: var(--sheet); stroke: var(--accent); stroke-width: 1.4; }
+.sc .tail-f { fill: var(--accent); stroke: var(--accent); stroke-width: 1.4; }
+.sc .clbl {
+  font-family: var(--mono); font-size: 11px; fill: var(--accent-ink);
+  paint-order: stroke; stroke: var(--sheet); stroke-width: 3.5px; stroke-linejoin: round;
+}
+.key-item .sc .tail-d, .key-item .sc .clbl { stroke: var(--paper); }
+.key-item .sc .tail-d { stroke: var(--accent); fill: var(--paper); }
+
+/* Table */
+.table-wrap { overflow-x: auto; border-top: 2px solid var(--ink); }
+table { border-collapse: collapse; width: 100%; font-size: 0.92rem; }
+th, td { text-align: left; padding: 9px 12px 9px 0; border-bottom: 1px solid var(--rule); vertical-align: top; }
+th { font-family: var(--display); font-weight: 600; font-size: 0.78rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); }
+td.num { font-family: var(--mono); font-variant-numeric: tabular-nums; text-align: right; padding-right: 20px; width: 4ch; }
+td .mono { font-size: 0.86rem; }
+tr.hi td.num { color: var(--accent-ink); font-weight: 500; }
+
+/* Notes */
+.notes { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 28px 40px; }
+.note-item { display: grid; gap: 8px; align-content: start; border-top: 1px solid var(--rule); padding-top: 14px; }
+.note-item p { font-size: 0.97rem; }
+
+footer { border-top: 1px solid var(--rule); padding-top: 16px; color: var(--muted); font-size: 0.85rem; }
+
+@media (max-width: 760px) {
+  .frame { padding-inline: 16px; gap: 44px; }
+  .sheet-body svg { max-width: none; width: calc(var(--w) * 0.74px); }
+  .titleblock { grid-template-columns: auto minmax(0, 1fr); }
+  .titleblock > div:last-child { grid-column: 1 / -1; border-left: 0; border-top: 1px solid var(--rule); }
+}
+
+</style>
+</head>
+<body>
+
+<div class="frame">
+
+<header class="masthead">
+  <span class="eyebrow">Structured Design &middot; crates/enki/src/component.rs</span>
+  <h1>Component structure charts</h1>
+  <p class="lede">This page shows how the functions in <code>component.rs</code> call one another. The file defines
+  two types. <code>ComponentVec</code> is one column in an archetype table. <code>ComponentInfo</code> describes the
+  component type in that column. The page shows the calls with structure charts, a kind of diagram from Yourdon and
+  Constantine&rsquo;s book <em>Structured Design</em>. A structure chart shows which modules call which. It also shows
+  the values that pass between them on each call. The file has eighteen functions and methods, and one closure.
+  Thirteen charts cover sixteen of them. The three newest methods, <code>ComponentVec::swap_remove</code>,
+  <code>ComponentInfo::type_id</code> and <code>ComponentInfo::bit</code>, have no chart yet.</p>
+  <div class="meta"><span>Drawn from the working tree at commit 60a3306</span><span>Charts last modified 2026-11-01</span><span>16 modules &middot; 13 charts</span></div>
+</header>
+
+<section class="stack-lg" aria-labelledby="key-h">
+  <div class="stack prose">
+    <h2 id="key-h">Reading the charts</h2>
+    <p>Each chart is drawn with a few symbols, and this section explains them one at a time. The first is the module.
+    In Structured Design, a <em>module</em> is a named piece of code that a caller invokes, and that hands control back
+    to the caller when it finishes. In Rust, a module in this sense is a function, a method or a closure. It is a
+    different thing from a Rust module, the unit that <code>mod</code> declares. Below each symbol is a line from
+    <code>component.rs</code> that the symbol stands for.</p>
+  </div>
+  <div class="key">
+<div class="key-item"><svg class="sc" viewBox="0 0 112 60" role="img" aria-label="A plain box"><rect class="box" x="6" y="15" width="100" height="30"/><text class="lbl" x="56" y="34" text-anchor="middle" style="font-size:11px">array_layout</text></svg><div class="key-text"><strong>Module</strong><p>A plain box stands for one function, method or closure in <code>component.rs</code>.</p></div><pre><code>fn array_layout(item: Layout, count: usize) -&gt; Layout {</code></pre></div>
+<div class="key-item"><svg class="sc" viewBox="0 0 112 60" role="img" aria-label="An arrow from an upper box to a lower box"><rect class="box" x="30" y="2" width="52" height="14"/><line class="call" x1="56" y1="16" x2="56" y2="42"/><polygon class="head" points="56,44 51.5,35 60.5,35"/><rect class="box" x="30" y="44" width="52" height="14"/></svg><div class="key-text"><strong>Call</strong><p>An arrow runs from a module to a module that it calls. The caller is always drawn above.</p></div><pre><code>let end = self.ptr_at(self.len);   // in ComponentVec::push</code></pre></div>
+<div class="key-item"><svg class="sc" viewBox="0 0 112 60" role="img" aria-label="A dashed arrow from an upper box to a lower box"><rect class="box" x="30" y="2" width="52" height="14"/><line class="call hidden" x1="56" y1="16" x2="56" y2="42"/><polygon class="head" points="56,44 51.5,35 60.5,35"/><rect class="box" x="30" y="44" width="52" height="14"/></svg><div class="key-text"><strong>Hidden call</strong><p>A dashed arrow is a call that never appears in the code. The compiler adds it, or a library makes it.</p></div><pre><code>impl Drop for ComponentVec {
+// the compiler calls drop where a ComponentVec goes out of scope</code></pre></div>
+<div class="key-item"><svg class="sc" viewBox="0 0 112 60" role="img" aria-label="Two small arrows with hollow circles at their tails beside the call arrow, one pointing down and one up"><line class="call" x1="24" y1="2" x2="24" y2="56"/><polygon class="head" points="24,58 19.5,49 28.5,49"/><line class="cpl" x1="40" y1="8" x2="40" y2="23"/><polygon class="cpl-head" points="40,29 36.4,22 43.6,22"/><circle class="tail-d" cx="40" cy="8" r="3.6"/><text class="clbl" x="50" y="22">len</text><line class="cpl" x1="40" y1="54" x2="40" y2="39"/><polygon class="cpl-head" points="40,33 36.4,40 43.6,40"/><circle class="tail-d" cx="40" cy="54" r="3.6"/><text class="clbl" x="50" y="48">end</text></svg><div class="key-text"><strong>Data couple</strong><p>A small arrow beside a call is a data couple. It stands for one value that passes on that call. The hollow circle marks where the value starts, and the arrow points the way that the value travels. A couple that points down is an argument, and a couple that points up is a result.</p></div><pre><code>let end = self.ptr_at(self.len);
+// len goes down as an argument, and end comes up as the result</code></pre></div>
+<div class="key-item"><svg class="sc" viewBox="0 0 112 60" role="img" aria-label="A small diamond where the call arrow leaves the caller"><rect class="box" x="20" y="0" width="72" height="12"/><line class="call" x1="56" y1="12" x2="56" y2="56"/><polygon class="head" points="56,58 51.5,49 60.5,49"/><polygon class="diamond" points="56,13 62,20 56,27 50,20"/></svg><div class="key-text"><strong>Conditional call</strong><p>A diamond where the arrow leaves the caller marks a call that happens only when a test passes.</p></div><pre><code>if self.len == self.capacity {
+    self.grow();
+}</code></pre></div>
+<div class="key-item"><svg class="sc" viewBox="0 0 112 60" role="img" aria-label="A curved arrow drawn across two call arrows below the caller"><rect class="box" x="20" y="0" width="72" height="12"/><line class="call" x1="46" y1="12" x2="28" y2="56"/><polygon class="head" points="27.2,58 25.4,48.8 33.6,52"/><line class="call" x1="66" y1="12" x2="84" y2="56"/><polygon class="head" points="84.8,58 78.4,52 86.6,48.8"/><path class="loop" d="M30,26 Q56,46 80,26"/><polygon class="head" points="82.5,24 77.3,32 74.2,25.6"/></svg><div class="key-text"><strong>Repeated calls</strong><p>A curved arrow marks a loop. It crosses every call that runs once on each pass of the loop.</p></div><pre><code>for index in 0..self.len {
+    drop_component(self.ptr_at(index));</code></pre></div>
+<div class="key-item"><svg class="sc" viewBox="0 0 112 60" role="img" aria-label="A box with a second line inside each side"><rect class="box" x="6" y="15" width="100" height="30"/><line class="libbar" x1="13" y1="15" x2="13" y2="45"/><line class="libbar" x1="99" y1="15" x2="99" y2="45"/><text class="lbl" x="56" y="34" text-anchor="middle" style="font-size:11px">alloc::alloc</text></svg><div class="key-text"><strong>Library module</strong><p>A box with a second line inside each side is a function that the standard library defines.</p></div><pre><code>unsafe { alloc::alloc(new_layout) }</code></pre></div>
+<div class="key-item"><svg class="sc" viewBox="0 0 112 60" role="img" aria-label="A box with a dashed outline"><rect class="box ext" x="6" y="15" width="100" height="30"/><text class="lbl ext" x="56" y="34" text-anchor="middle" style="font-size:11px">caller</text></svg><div class="key-text"><strong>Code outside the file</strong><p>A dashed box stands for code outside <code>component.rs</code>. It shows where the first call on a chart comes from.</p></div><pre><code>let mut source = ComponentVec::new(info);   // in the module documentation</code></pre></div>
+  </div>
+  <div class="rules">
+    <p>The labels on the charts follow a few conventions. Each box shows the function&rsquo;s path in Rust syntax, such
+    as <code>Type::function</code>. A method on a raw pointer appears as <code>pointer::method</code>. Each couple shows
+    the name of its variable in the code. Some values pass straight from one call to the next, without a variable, and
+    the chart gives such a value a short name of its own. For example, <code>address</code> stands for the pointer that
+    <code>ptr::without_provenance_mut</code> returns. The value that a method runs on, its <code>self</code>, is never
+    drawn as a couple.</p>
+    <p>A caller sometimes calls one module from two places. The chart draws a box for each call where the two calls pass
+    different values, or where only one of them has a diamond. <code>array_layout</code> on Chart 6 is one example.</p>
+    <p>A few calls are left off the charts. The first two are <code>Option::expect</code> and
+    <code>Result::expect</code>, which panic on a failure. A couple for a value that passes through either one therefore
+    shows the unwrapped value. The <code>Some</code> that wraps <code>drop_value</code> is left off too. So are four
+    macros, <code>assert_eq!</code>, <code>assert_ne!</code>, <code>debug_assert!</code> and <code>debug_assert_eq!</code>. Arguments to a macro still
+    appear, where they make a call.</p>
+  </div>
+</section>
+
+<section class="stack-lg" aria-label="Structure charts">
+
+<figure class="sheet" id="chart-1">
+  <div class="titleblock">
+    <div><span class="tb-label">Chart</span><span class="tb-num">1</span></div>
+    <div><span class="tb-label">Title</span><h3>What the component module offers</h3></div>
+    <div><span class="tb-label">Entry point</span><span class="tb-entry">nine methods and one Drop implementation</span></div>
+  </div>
+  <div class="sheet-body">
+<svg class="sc" viewBox="0 0 1154.5 360.0" width="1154.5" height="360.0" role="img" aria-label="Structure chart 1, part 1 of 3: a caller in another filebuilds a ComponentInfo and a vector, then reads from the vector." style="--w:1154.5">
+  <line class="call" x1="543.2" y1="70.0" x2="128.2" y2="272.2"/>
+  <polygon class="head" points="124.6,274.0 131.2,265.8 135.1,273.9"/>
+  <line class="call" x1="560.2" y1="70.0" x2="344.8" y2="271.3"/>
+  <polygon class="head" points="341.9,274.0 345.7,264.2 351.9,270.8"/>
+  <line class="call" x1="577.2" y1="70.0" x2="563.0" y2="270.0"/>
+  <polygon class="head" points="562.8,274.0 558.9,264.2 567.9,264.8"/>
+  <line class="call" x1="594.2" y1="70.0" x2="784.5" y2="271.1"/>
+  <polygon class="head" points="787.2,274.0 777.5,270.2 784.0,264.0"/>
+  <line class="call" x1="611.2" y1="70.0" x2="1015.4" y2="272.2"/>
+  <polygon class="head" points="1019.0,274.0 1008.5,273.8 1012.5,265.7"/>
+  <line class="cpl" x1="277.0" y1="184.2" x2="298.5" y2="173.7"/>
+  <polygon class="cpl-head" points="298.5,173.7 293.8,180.0 290.7,173.5"/>
+  <circle class="tail-d" cx="277.0" cy="184.2" r="3.6"/>
+  <text class="clbl" x="265.1" y="182.9" text-anchor="end">info</text>
+  <line class="cpl" x1="441.6" y1="161.7" x2="424.1" y2="178.1"/>
+  <polygon class="cpl-head" points="424.1,178.1 426.7,170.7 431.6,175.9"/>
+  <circle class="tail-d" cx="441.6" cy="161.7" r="3.6"/>
+  <text class="clbl" x="412.3" y="173.9" text-anchor="end">info</text>
+  <line class="cpl" x1="397.7" y1="202.6" x2="415.3" y2="186.3"/>
+  <polygon class="cpl-head" points="415.3,186.3 412.6,193.7 407.7,188.4"/>
+  <circle class="tail-d" cx="397.7" cy="202.6" r="3.6"/>
+  <text class="clbl" x="386.0" y="198.5" text-anchor="end">vector</text>
+  <line class="cpl" x1="553.9" y1="201.4" x2="555.6" y2="177.4"/>
+  <polygon class="cpl-head" points="555.6,177.4 558.7,184.7 551.5,184.2"/>
+  <circle class="tail-d" cx="553.9" cy="201.4" r="3.6"/>
+  <text class="clbl" x="542.8" y="193.4" text-anchor="end">info</text>
+  <line class="cpl" x1="727.1" y1="190.0" x2="710.6" y2="172.6"/>
+  <polygon class="cpl-head" points="710.6,172.6 718.0,175.2 712.8,180.2"/>
+  <circle class="tail-d" cx="727.1" cy="190.0" r="3.6"/>
+  <text class="clbl" x="738.8" y="185.3">data</text>
+  <line class="cpl" x1="835.3" y1="166.5" x2="856.8" y2="177.2"/>
+  <polygon class="cpl-head" points="856.8,177.2 848.9,177.3 852.1,170.8"/>
+  <circle class="tail-d" cx="835.3" cy="166.5" r="3.6"/>
+  <text class="clbl" x="868.7" y="175.8">index</text>
+  <line class="cpl" x1="889.0" y1="193.3" x2="867.5" y2="182.6"/>
+  <polygon class="cpl-head" points="867.5,182.6 875.4,182.5 872.2,188.9"/>
+  <circle class="tail-d" cx="889.0" cy="193.3" r="3.6"/>
+  <text class="clbl" x="900.9" y="191.9">pointer</text>
+  <rect class="box ext" x="521.2" y="24.0" width="112.0" height="46.0"/>
+  <text class="lbl ext" x="577.2" y="43.5" text-anchor="middle">caller</text>
+  <text class="sub" x="577.2" y="58.5" text-anchor="middle">other files</text>
+  <rect class="box" x="48.0" y="274.0" width="153.2" height="46.0"/>
+  <text class="lbl" x="124.6" y="301.0" text-anchor="middle">ComponentInfo::of</text>
+  <text class="note" x="124.6" y="338.0" text-anchor="middle">continues in Chart 2</text>
+  <rect class="box" x="265.2" y="274.0" width="153.2" height="46.0"/>
+  <text class="lbl" x="341.9" y="301.0" text-anchor="middle">ComponentVec::new</text>
+  <text class="note" x="341.9" y="338.0" text-anchor="middle">continues in Chart 3</text>
+  <rect class="box" x="482.5" y="274.0" width="160.5" height="46.0"/>
+  <text class="lbl" x="562.8" y="301.0" text-anchor="middle">ComponentVec::info</text>
+  <rect class="box" x="707.0" y="274.0" width="160.5" height="46.0"/>
+  <text class="lbl" x="787.2" y="301.0" text-anchor="middle">ComponentVec::data</text>
+  <rect class="box" x="931.5" y="274.0" width="175.0" height="46.0"/>
+  <text class="lbl" x="1019.0" y="301.0" text-anchor="middle">ComponentVec::ptr_at</text>
+  <text class="note" x="1019.0" y="338.0" text-anchor="middle">continues in Chart 4</text>
+</svg>
+<svg class="sc" viewBox="0 0 676.5 374.0" width="676.5" height="374.0" role="img" aria-label="Structure chart 1, part 2 of 3: a caller in another fileadds components by type, and reads them back as slices." style="--w:676.5">
+  <line class="call" x1="321.2" y1="70.0" x2="131.0" y2="271.1"/>
+  <polygon class="head" points="128.2,274.0 138.4,269.8 131.9,263.6"/>
+  <line class="call" x1="338.2" y1="70.0" x2="338.2" y2="270.0"/>
+  <polygon class="head" points="338.2,274.0 342.8,264.0 333.8,264.0"/>
+  <line class="call" x1="355.2" y1="70.0" x2="545.5" y2="271.1"/>
+  <polygon class="head" points="548.2,274.0 544.6,263.6 538.1,269.8"/>
+  <line class="cpl" x1="222.8" y1="153.7" x2="206.3" y2="171.1"/>
+  <polygon class="cpl-head" points="206.3,171.1 213.8,168.5 208.5,163.5"/>
+  <circle class="tail-d" cx="222.8" cy="153.7" r="3.6"/>
+  <text class="clbl" x="203.6" y="166.4" text-anchor="end">value</text>
+  <line class="cpl" x1="352.2" y1="204.4" x2="352.2" y2="180.4"/>
+  <polygon class="cpl-head" points="352.2,180.4 355.9,187.4 348.6,187.4"/>
+  <circle class="tail-d" cx="352.2" cy="204.4" r="3.6"/>
+  <text class="clbl" x="363.2" y="196.4">slice</text>
+  <line class="cpl" x1="470.2" y1="171.1" x2="453.7" y2="153.7"/>
+  <polygon class="cpl-head" points="453.7,153.7 461.1,156.3 455.9,161.2"/>
+  <circle class="tail-d" cx="470.2" cy="171.1" r="3.6"/>
+  <text class="clbl" x="472.9" y="166.4">slice</text>
+  <rect class="box ext" x="282.2" y="24.0" width="112.0" height="46.0"/>
+  <text class="lbl ext" x="338.2" y="43.5" text-anchor="middle">caller</text>
+  <text class="sub" x="338.2" y="58.5" text-anchor="middle">other files</text>
+  <rect class="box" x="62.5" y="274.0" width="131.5" height="60.0"/>
+  <text class="lbl" x="128.2" y="300.5" text-anchor="middle">ComponentVec::</text>
+  <text class="lbl" x="128.2" y="314.5" text-anchor="middle">push_typed</text>
+  <text class="note" x="128.2" y="352.0" text-anchor="middle">continues in Chart 11</text>
+  <rect class="box" x="272.5" y="274.0" width="131.5" height="60.0"/>
+  <text class="lbl" x="338.2" y="300.5" text-anchor="middle">ComponentVec::</text>
+  <text class="lbl" x="338.2" y="314.5" text-anchor="middle">as_slice</text>
+  <text class="note" x="338.2" y="352.0" text-anchor="middle">continues in Chart 12</text>
+  <rect class="box" x="482.5" y="274.0" width="131.5" height="60.0"/>
+  <text class="lbl" x="548.2" y="300.5" text-anchor="middle">ComponentVec::</text>
+  <text class="lbl" x="548.2" y="314.5" text-anchor="middle">as_mut_slice</text>
+  <text class="note" x="548.2" y="352.0" text-anchor="middle">continues in Chart 12</text>
+</svg>
+<svg class="sc" viewBox="0 0 508.0 374.0" width="508.0" height="374.0" role="img" aria-label="Structure chart 1, part 3 of 3: a caller in another filemoves components, and the compiler adds the call that drops the vector." style="--w:508.0">
+  <line class="call" x1="239.5" y1="70.0" x2="139.5" y2="270.4"/>
+  <polygon class="head" points="137.8,274.0 146.2,267.1 138.2,263.0"/>
+  <line class="call hidden" x1="256.5" y1="70.0" x2="378.2" y2="270.6"/>
+  <polygon class="head" points="380.2,274.0 378.9,263.1 371.2,267.8"/>
+  <line class="cpl" x1="181.5" y1="155.0" x2="170.7" y2="176.5"/>
+  <polygon class="cpl-head" points="170.7,176.5 177.1,171.8 170.6,168.6"/>
+  <circle class="tail-d" cx="181.5" cy="155.0" r="3.6"/>
+  <text class="clbl" x="165.1" y="169.8" text-anchor="end">index, target</text>
+  <rect class="box ext" x="192.0" y="24.0" width="112.0" height="46.0"/>
+  <text class="lbl ext" x="248.0" y="43.5" text-anchor="middle">caller</text>
+  <text class="sub" x="248.0" y="58.5" text-anchor="middle">other files</text>
+  <rect class="box" x="72.0" y="274.0" width="131.5" height="60.0"/>
+  <text class="lbl" x="137.8" y="300.5" text-anchor="middle">ComponentVec::</text>
+  <text class="lbl" x="137.8" y="314.5" text-anchor="middle">move_component</text>
+  <text class="note" x="137.8" y="352.0" text-anchor="middle">continues in Chart 8</text>
+  <rect class="box" x="300.0" y="274.0" width="160.5" height="46.0"/>
+  <text class="lbl" x="380.2" y="301.0" text-anchor="middle">ComponentVec::drop</text>
+  <text class="note" x="380.2" y="338.0" text-anchor="middle">continues in Chart 9</text>
+</svg>
+  </div>
+  <figcaption><p><code>ComponentInfo</code> and <code>ComponentVec</code> offer thirteen entry points. The chart splits ten
+  of them into three parts, and the introduction lists the other three. In part 1, a caller builds a <code>ComponentInfo</code> with <code>ComponentInfo::of</code>, then
+  passes it to <code>ComponentVec::new</code> to create an empty vector. The caller reads from the vector through the
+  next three methods. <code>ComponentVec::info</code> and <code>ComponentVec::data</code> each return one field, and
+  call nothing. In part 2, the caller adds components with <code>ComponentVec::push_typed</code>, and reads them with
+  <code>ComponentVec::as_slice</code> or <code>ComponentVec::as_mut_slice</code>. In part 3, the caller moves one
+  component to another vector with <code>ComponentVec::move_component</code>. The arrow to
+  <code>ComponentVec::drop</code> is dashed, since the compiler adds that call where the vector goes out of scope. The
+  dashed <code>caller</code> box stands for the code in other files that calls these methods, mainly
+  <code>archetype.rs</code> and <code>world.rs</code>.</p></figcaption>
+</figure>
+<figure class="sheet" id="chart-2">
+  <div class="titleblock">
+    <div><span class="tb-label">Chart</span><span class="tb-num">2</span></div>
+    <div><span class="tb-label">Title</span><h3>Describing a component type</h3></div>
+    <div><span class="tb-label">Entry point</span><span class="tb-entry">ComponentInfo::of&lt;T&gt;(u64)</span></div>
+  </div>
+  <div class="sheet-body">
+<svg class="sc" viewBox="0 0 780.2 610.0" width="780.2" height="610.0" role="img" aria-label="Structure chart 2: ComponentInfo::of calls mem::needs_drop, TypeId::of, any::type_name and Layout::new, and returns a ComponentInfo." style="--w:780.2">
+  <line class="call" x1="390.1" y1="70.0" x2="390.1" y2="270.0"/>
+  <polygon class="head" points="390.1,274.0 394.6,264.0 385.6,264.0"/>
+  <line class="cpl" x1="404.1" y1="204.4" x2="404.1" y2="180.4"/>
+  <polygon class="cpl-head" points="404.1,180.4 407.7,187.4 400.5,187.4"/>
+  <circle class="tail-d" cx="404.1" cy="204.4" r="3.6"/>
+  <text class="clbl" x="415.1" y="196.4">info</text>
+  <line class="call" x1="364.6" y1="320.0" x2="120.0" y2="521.5"/>
+  <polygon class="head" points="116.9,524.0 127.5,521.1 121.7,514.2"/>
+  <line class="cpl" x1="222.6" y1="418.8" x2="241.1" y2="403.6"/>
+  <polygon class="cpl-head" points="241.1,403.6 238.0,410.8 233.4,405.2"/>
+  <circle class="tail-d" cx="222.6" cy="418.8" r="3.6"/>
+  <text class="clbl" x="220.9" y="415.2" text-anchor="end">needs_drop</text>
+  <line class="call" x1="381.6" y1="320.0" x2="307.1" y2="520.3"/>
+  <polygon class="head" points="305.8,524.0 313.5,516.2 305.0,513.1"/>
+  <line class="cpl" x1="326.4" y1="428.4" x2="334.7" y2="405.9"/>
+  <polygon class="cpl-head" points="334.7,405.9 335.7,413.7 328.9,411.2"/>
+  <circle class="tail-d" cx="326.4" cy="428.4" r="3.6"/>
+  <text class="clbl" x="319.6" y="421.1" text-anchor="end">type_id</text>
+  <line class="call" x1="398.6" y1="320.0" x2="489.4" y2="520.4"/>
+  <polygon class="head" points="491.0,524.0 491.0,513.0 482.8,516.7"/>
+  <line class="cpl" x1="462.5" y1="427.2" x2="452.6" y2="405.3"/>
+  <polygon class="cpl-head" points="452.6,405.3 458.8,410.2 452.2,413.2"/>
+  <circle class="tail-d" cx="462.5" cy="427.2" r="3.6"/>
+  <text class="clbl" x="468.6" y="420.2">type_name</text>
+  <line class="call" x1="415.6" y1="320.0" x2="673.1" y2="521.5"/>
+  <polygon class="head" points="676.2,524.0 671.1,514.3 665.6,521.4"/>
+  <line class="cpl" x1="564.0" y1="418.4" x2="545.1" y2="403.6"/>
+  <polygon class="cpl-head" points="545.1,403.6 552.8,405.1 548.4,410.7"/>
+  <circle class="tail-d" cx="564.0" cy="418.4" r="3.6"/>
+  <text class="clbl" x="565.6" y="415.0">layout</text>
+  <rect class="box ext" x="334.1" y="24.0" width="112.0" height="46.0"/>
+  <text class="lbl ext" x="390.1" y="43.5" text-anchor="middle">caller</text>
+  <text class="sub" x="390.1" y="58.5" text-anchor="middle">other files</text>
+  <rect class="box" x="314.0" y="274.0" width="152.2" height="46.0"/>
+  <text class="lbl" x="390.1" y="301.0" text-anchor="middle">ComponentInfo::of</text>
+  <rect class="box" x="48.0" y="524.0" width="137.8" height="46.0"/>
+  <line class="libbar" x1="55.0" y1="524.0" x2="55.0" y2="570.0"/>
+  <line class="libbar" x1="178.8" y1="524.0" x2="178.8" y2="570.0"/>
+  <text class="lbl" x="116.9" y="551.0" text-anchor="middle">mem::needs_drop</text>
+  <rect class="box" x="249.8" y="524.0" width="112.0" height="46.0"/>
+  <line class="libbar" x1="256.8" y1="524.0" x2="256.8" y2="570.0"/>
+  <line class="libbar" x1="354.8" y1="524.0" x2="354.8" y2="570.0"/>
+  <text class="lbl" x="305.8" y="551.0" text-anchor="middle">TypeId::of</text>
+  <rect class="box" x="425.8" y="524.0" width="130.5" height="46.0"/>
+  <line class="libbar" x1="432.8" y1="524.0" x2="432.8" y2="570.0"/>
+  <line class="libbar" x1="549.2" y1="524.0" x2="549.2" y2="570.0"/>
+  <text class="lbl" x="491.0" y="551.0" text-anchor="middle">any::type_name</text>
+  <rect class="box" x="620.2" y="524.0" width="112.0" height="46.0"/>
+  <line class="libbar" x1="627.2" y1="524.0" x2="627.2" y2="570.0"/>
+  <line class="libbar" x1="725.2" y1="524.0" x2="725.2" y2="570.0"/>
+  <text class="lbl" x="676.2" y="551.0" text-anchor="middle">Layout::new</text>
+</svg>
+  </div>
+  <figcaption><p>The caller gives <code>ComponentInfo::of</code> a type and one value, as in
+  <code>ComponentInfo::of::&lt;f32&gt;(1)</code>. The value is <code>bit</code>, the bit for the type in a
+  table&rsquo;s mask. The method stores <code>bit</code> in the result unchanged, and the chart draws no couple for it.
+  The four library modules each read one fact about the type, and each fact takes one field in the result. <code>mem::needs_drop</code> reports whether the type has clean-up code. Where it
+  does, the method stores the address of <code>drop_value::&lt;T&gt;</code> in the <code>drop</code> field. Storing an
+  address calls nothing, meaning the chart has no arrow to <code>drop_value</code>. Chart 9 shows where that call
+  happens. The bound <code>T: 'static</code> is a lifetime bound. It means that <code>T</code> contains no borrowed
+  references that could expire. A vector can then keep a <code>T</code> for as long as it needs. The bound
+  <code>T: Send + Sync</code> lets a vector move its components between threads, and share them.</p></figcaption>
+</figure>
+<figure class="sheet" id="chart-3">
+  <div class="titleblock">
+    <div><span class="tb-label">Chart</span><span class="tb-num">3</span></div>
+    <div><span class="tb-label">Title</span><h3>Creating an empty vector</h3></div>
+    <div><span class="tb-label">Entry point</span><span class="tb-entry">ComponentVec::new(ComponentInfo)</span></div>
+  </div>
+  <div class="sheet-body">
+<svg class="sc" viewBox="0 0 835.8 610.0" width="835.8" height="610.0" role="img" aria-label="Structure chart 3: ComponentVec::new turns the alignment into a placeholder address, wraps it in a NonNull, and reads the size of the type." style="--w:835.8">
+  <line class="call" x1="417.9" y1="70.0" x2="417.9" y2="270.0"/>
+  <polygon class="head" points="417.9,274.0 413.4,264.5 422.4,264.5"/>
+  <line class="call" x1="392.4" y1="320.0" x2="113.4" y2="521.7"/>
+  <polygon class="head" points="110.1,524.0 115.2,514.8 120.5,522.1"/>
+  <line class="call" x1="409.4" y1="320.0" x2="332.4" y2="520.3"/>
+  <polygon class="head" points="331.0,524.0 330.2,513.5 338.6,516.7"/>
+  <line class="call" x1="426.4" y1="320.0" x2="546.2" y2="520.6"/>
+  <polygon class="head" points="548.2,524.0 539.5,518.2 547.2,513.5"/>
+  <line class="call" x1="443.4" y1="320.0" x2="726.0" y2="521.7"/>
+  <polygon class="head" points="729.2,524.0 718.9,522.1 724.1,514.8"/>
+  <line class="cpl" x1="431.9" y1="162.4" x2="431.9" y2="186.4"/>
+  <polygon class="cpl-head" points="431.9,186.4 428.3,179.4 435.5,179.4"/>
+  <circle class="tail-d" cx="431.9" cy="162.4" r="3.6"/>
+  <text class="clbl" x="442.9" y="178.4">info</text>
+  <line class="cpl" x1="431.9" y1="222.4" x2="431.9" y2="198.4"/>
+  <polygon class="cpl-head" points="431.9,198.4 435.5,205.4 428.3,205.4"/>
+  <circle class="tail-d" cx="431.9" cy="222.4" r="3.6"/>
+  <text class="clbl" x="442.9" y="214.4">vector</text>
+  <line class="cpl" x1="206.7" y1="436.9" x2="226.2" y2="422.9"/>
+  <polygon class="cpl-head" points="226.2,422.9 222.6,429.9 218.4,424.0"/>
+  <circle class="tail-d" cx="206.7" cy="436.9" r="3.6"/>
+  <text class="clbl" x="194.9" y="433.9" text-anchor="end">alignment</text>
+  <line class="cpl" x1="360.0" y1="409.4" x2="351.4" y2="431.8"/>
+  <polygon class="cpl-head" points="351.4,431.8 350.6,424.0 357.3,426.5"/>
+  <circle class="tail-d" cx="360.0" cy="409.4" r="3.6"/>
+  <text class="clbl" x="340.1" y="424.6" text-anchor="end">alignment</text>
+  <line class="cpl" x1="338.5" y1="465.4" x2="347.1" y2="443.0"/>
+  <polygon class="cpl-head" points="347.1,443.0 348.0,450.8 341.3,448.2"/>
+  <circle class="tail-d" cx="338.5" cy="465.4" r="3.6"/>
+  <text class="clbl" x="327.2" y="458.2" text-anchor="end">address</text>
+  <line class="cpl" x1="496.1" y1="409.5" x2="508.4" y2="430.1"/>
+  <polygon class="cpl-head" points="508.4,430.1 501.8,425.9 507.9,422.2"/>
+  <circle class="tail-d" cx="496.1" cy="409.5" r="3.6"/>
+  <text class="clbl" x="520.0" y="423.8">address</text>
+  <line class="cpl" x1="526.9" y1="461.0" x2="514.6" y2="440.4"/>
+  <polygon class="cpl-head" points="514.6,440.4 521.3,444.5 515.1,448.2"/>
+  <circle class="tail-d" cx="526.9" cy="461.0" r="3.6"/>
+  <text class="clbl" x="538.4" y="454.7">data</text>
+  <line class="cpl" x1="631.2" y1="436.8" x2="611.6" y2="422.9"/>
+  <polygon class="cpl-head" points="611.6,422.9 619.4,424.0 615.2,429.9"/>
+  <circle class="tail-d" cx="631.2" cy="436.8" r="3.6"/>
+  <text class="clbl" x="643.0" y="433.8">size</text>
+  <rect class="box ext" x="361.9" y="24.0" width="112.0" height="46.0"/>
+  <text class="lbl ext" x="417.9" y="43.5" text-anchor="middle">caller</text>
+  <text class="sub" x="417.9" y="58.5" text-anchor="middle">other files</text>
+  <rect class="box" x="341.2" y="274.0" width="153.2" height="46.0"/>
+  <text class="lbl" x="417.9" y="301.0" text-anchor="middle">ComponentVec::new</text>
+  <rect class="box" x="48.0" y="524.0" width="124.2" height="46.0"/>
+  <line class="libbar" x1="55.0" y1="524.0" x2="55.0" y2="570.0"/>
+  <line class="libbar" x1="165.2" y1="524.0" x2="165.2" y2="570.0"/>
+  <text class="lbl" x="110.1" y="551.0" text-anchor="middle">Layout::align</text>
+  <rect class="box" x="236.2" y="524.0" width="189.5" height="60.0"/>
+  <line class="libbar" x1="243.2" y1="524.0" x2="243.2" y2="584.0"/>
+  <line class="libbar" x1="418.8" y1="524.0" x2="418.8" y2="584.0"/>
+  <text class="lbl" x="331.0" y="550.5" text-anchor="middle">ptr::</text>
+  <text class="lbl" x="331.0" y="564.5" text-anchor="middle">without_provenance_mut</text>
+  <rect class="box" x="489.8" y="524.0" width="117.0" height="46.0"/>
+  <line class="libbar" x1="496.8" y1="524.0" x2="496.8" y2="570.0"/>
+  <line class="libbar" x1="599.8" y1="524.0" x2="599.8" y2="570.0"/>
+  <text class="lbl" x="548.2" y="551.0" text-anchor="middle">NonNull::new</text>
+  <rect class="box" x="670.8" y="524.0" width="117.0" height="46.0"/>
+  <line class="libbar" x1="677.8" y1="524.0" x2="677.8" y2="570.0"/>
+  <line class="libbar" x1="780.8" y1="524.0" x2="780.8" y2="570.0"/>
+  <text class="lbl" x="729.2" y="551.0" text-anchor="middle">Layout::size</text>
+</svg>
+  </div>
+  <figcaption><p><code>ComponentVec::new</code> does not allocate. It reads the alignment of the type with
+  <code>Layout::align</code>. <code>ptr::without_provenance_mut</code> then turns that number into an
+  <code>address</code>, a pointer with no memory behind it. <code>NonNull::new</code> wraps the address in a
+  <code>NonNull</code>, a raw pointer type that is never null. It is the placeholder for the <code>data</code> field,
+  until the first call to <code>ComponentVec::grow</code>. Last, the method reads the size with
+  <code>Layout::size</code>. A size of zero gives the vector a capacity of <code>usize::MAX</code>, and any other size
+  gives it a capacity of 0.</p></figcaption>
+</figure>
+<figure class="sheet" id="chart-4">
+  <div class="titleblock">
+    <div><span class="tb-label">Chart</span><span class="tb-num">4</span></div>
+    <div><span class="tb-label">Title</span><h3>Finding a component</h3></div>
+    <div><span class="tb-label">Entry point</span><span class="tb-entry">ComponentVec::ptr_at(usize)</span></div>
+  </div>
+  <div class="sheet-body">
+<svg class="sc" viewBox="0 0 596.8 610.0" width="596.8" height="610.0" role="img" aria-label="Structure chart 4: ComponentVec::ptr_at reads the component size and the start of the block, then adds the offset to the start." style="--w:596.8">
+  <line class="call" x1="298.4" y1="70.0" x2="298.4" y2="270.0"/>
+  <polygon class="head" points="298.4,274.0 293.9,264.5 302.9,264.5"/>
+  <line class="call" x1="281.4" y1="320.0" x2="109.1" y2="521.0"/>
+  <polygon class="head" points="106.5,524.0 109.3,513.9 116.1,519.7"/>
+  <line class="call" x1="298.4" y1="320.0" x2="298.4" y2="520.0"/>
+  <polygon class="head" points="298.4,524.0 293.9,514.5 302.9,514.5"/>
+  <line class="call" x1="315.4" y1="320.0" x2="487.6" y2="521.0"/>
+  <polygon class="head" points="490.2,524.0 480.7,519.7 487.5,513.9"/>
+  <line class="cpl" x1="312.4" y1="162.4" x2="312.4" y2="186.4"/>
+  <polygon class="cpl-head" points="312.4,186.4 308.8,179.4 316.0,179.4"/>
+  <circle class="tail-d" cx="312.4" cy="162.4" r="3.6"/>
+  <text class="clbl" x="323.4" y="178.4">index</text>
+  <line class="cpl" x1="312.4" y1="222.4" x2="312.4" y2="198.4"/>
+  <polygon class="cpl-head" points="312.4,198.4 316.0,205.4 308.8,205.4"/>
+  <circle class="tail-d" cx="312.4" cy="222.4" r="3.6"/>
+  <text class="clbl" x="323.4" y="214.4">pointer</text>
+  <line class="cpl" x1="159.3" y1="440.9" x2="174.9" y2="422.7"/>
+  <polygon class="cpl-head" points="174.9,422.7 173.1,430.3 167.6,425.6"/>
+  <circle class="tail-d" cx="159.3" cy="440.9" r="3.6"/>
+  <text class="clbl" x="147.7" y="435.8" text-anchor="end">size</text>
+  <line class="cpl" x1="312.4" y1="452.4" x2="312.4" y2="428.4"/>
+  <polygon class="cpl-head" points="312.4,428.4 316.0,435.4 308.8,435.4"/>
+  <circle class="tail-d" cx="312.4" cy="452.4" r="3.6"/>
+  <text class="clbl" x="323.4" y="444.4">start</text>
+  <line class="cpl" x1="411.4" y1="410.5" x2="427.0" y2="428.7"/>
+  <polygon class="cpl-head" points="427.0,428.7 419.7,425.8 425.2,421.1"/>
+  <circle class="tail-d" cx="411.4" cy="410.5" r="3.6"/>
+  <text class="clbl" x="438.7" y="423.6">offset</text>
+  <line class="cpl" x1="450.5" y1="456.1" x2="434.8" y2="437.8"/>
+  <polygon class="cpl-head" points="434.8,437.8 442.1,440.8 436.7,445.5"/>
+  <circle class="tail-d" cx="450.5" cy="456.1" r="3.6"/>
+  <text class="clbl" x="462.1" y="451.0">pointer</text>
+  <rect class="box ext" x="242.4" y="24.0" width="112.0" height="46.0"/>
+  <text class="lbl ext" x="298.4" y="43.5" text-anchor="middle">caller</text>
+  <text class="sub" x="298.4" y="58.5" text-anchor="middle">also Charts 5, 8, 9</text>
+  <rect class="box" x="210.9" y="274.0" width="175.0" height="46.0"/>
+  <text class="lbl" x="298.4" y="301.0" text-anchor="middle">ComponentVec::ptr_at</text>
+  <rect class="box" x="48.0" y="524.0" width="117.0" height="46.0"/>
+  <line class="libbar" x1="55.0" y1="524.0" x2="55.0" y2="570.0"/>
+  <line class="libbar" x1="158.0" y1="524.0" x2="158.0" y2="570.0"/>
+  <text class="lbl" x="106.5" y="551.0" text-anchor="middle">Layout::size</text>
+  <rect class="box" x="229.0" y="524.0" width="138.8" height="46.0"/>
+  <line class="libbar" x1="236.0" y1="524.0" x2="236.0" y2="570.0"/>
+  <line class="libbar" x1="360.8" y1="524.0" x2="360.8" y2="570.0"/>
+  <text class="lbl" x="298.4" y="551.0" text-anchor="middle">NonNull::as_ptr</text>
+  <rect class="box" x="431.8" y="524.0" width="117.0" height="60.0"/>
+  <line class="libbar" x1="438.8" y1="524.0" x2="438.8" y2="584.0"/>
+  <line class="libbar" x1="541.8" y1="524.0" x2="541.8" y2="584.0"/>
+  <text class="lbl" x="490.2" y="550.5" text-anchor="middle">pointer::</text>
+  <text class="lbl" x="490.2" y="564.5" text-anchor="middle">wrapping_add</text>
+</svg>
+  </div>
+  <figcaption><p><code>ComponentVec::ptr_at</code> works out where a component starts. It multiplies <code>index</code> by the
+  value from <code>Layout::size</code>, which gives <code>offset</code>. The multiplication is an operator on two
+  numbers, and it takes no box. <code>NonNull::as_ptr</code> returns the start of the block as a plain raw pointer.
+  <code>pointer::wrapping_add</code> adds <code>offset</code> to that pointer. The method does not check bounds. A
+  caller therefore reads through the result only where <code>index</code> is below the length.</p></figcaption>
+</figure>
+<figure class="sheet" id="chart-5">
+  <div class="titleblock">
+    <div><span class="tb-label">Chart</span><span class="tb-num">5</span></div>
+    <div><span class="tb-label">Title</span><h3>Adding a component</h3></div>
+    <div><span class="tb-label">Entry point</span><span class="tb-entry">ComponentVec::push(*const u8)</span></div>
+  </div>
+  <div class="sheet-body">
+<svg class="sc" viewBox="0 0 908.2 610.0" width="908.2" height="610.0" role="img" aria-label="Structure chart 5: ComponentVec::push grows a full block, finds the end of the vector, reads the component size, and copies the bytes in." style="--w:908.2">
+  <line class="call" x1="454.1" y1="70.0" x2="454.1" y2="270.0"/>
+  <polygon class="head" points="454.1,274.0 449.6,264.5 458.6,264.5"/>
+  <line class="call" x1="428.6" y1="320.0" x2="131.6" y2="521.8"/>
+  <polygon class="head" points="128.2,524.0 133.6,514.9 138.6,522.4"/>
+  <polygon class="diamond" points="416.2,321.4 422.2,328.4 416.2,335.4 410.2,328.4"/>
+  <line class="call" x1="445.6" y1="320.0" x2="361.5" y2="520.3"/>
+  <polygon class="head" points="360.0,524.0 359.5,513.5 367.8,517.0"/>
+  <line class="call" x1="462.6" y1="320.0" x2="568.1" y2="520.5"/>
+  <polygon class="head" points="570.0,524.0 561.6,517.7 569.6,513.5"/>
+  <line class="call" x1="479.6" y1="320.0" x2="773.1" y2="521.7"/>
+  <polygon class="head" points="776.4,524.0 766.0,522.3 771.1,514.9"/>
+  <line class="cpl" x1="468.1" y1="182.4" x2="468.1" y2="206.4"/>
+  <polygon class="cpl-head" points="468.1,206.4 464.5,199.4 471.7,199.4"/>
+  <circle class="tail-d" cx="468.1" cy="182.4" r="3.6"/>
+  <text class="clbl" x="479.1" y="198.4">value</text>
+  <line class="cpl" x1="393.0" y1="409.3" x2="383.7" y2="431.4"/>
+  <polygon class="cpl-head" points="383.7,431.4 383.1,423.6 389.7,426.4"/>
+  <circle class="tail-d" cx="393.0" cy="409.3" r="3.6"/>
+  <text class="clbl" x="372.3" y="424.4" text-anchor="end">len</text>
+  <line class="cpl" x1="369.7" y1="464.6" x2="379.0" y2="442.5"/>
+  <polygon class="cpl-head" points="379.0,442.5 379.6,450.4 373.0,447.6"/>
+  <circle class="tail-d" cx="369.7" cy="464.6" r="3.6"/>
+  <text class="clbl" x="358.3" y="457.6" text-anchor="end">end</text>
+  <line class="cpl" x1="544.1" y1="444.7" x2="532.9" y2="423.5"/>
+  <polygon class="cpl-head" points="532.9,423.5 539.4,428.0 533.0,431.4"/>
+  <circle class="tail-d" cx="544.1" cy="444.7" r="3.6"/>
+  <text class="clbl" x="555.6" y="438.1">size</text>
+  <line class="cpl" x1="657.4" y1="425.2" x2="677.1" y2="438.8"/>
+  <polygon class="cpl-head" points="677.1,438.8 669.3,437.8 673.4,431.9"/>
+  <circle class="tail-d" cx="657.4" cy="425.2" r="3.6"/>
+  <text class="clbl" x="689.0" y="423.0">value, end,</text>
+  <text class="clbl" x="689.0" y="436.0">size</text>
+  <rect class="box" x="352.1" y="24.0" width="204.0" height="46.0"/>
+  <text class="lbl" x="454.1" y="43.5" text-anchor="middle">ComponentVec::push_typed</text>
+  <text class="sub" x="454.1" y="58.5" text-anchor="middle">Chart 11, also Chart 8</text>
+  <rect class="box" x="373.9" y="274.0" width="160.5" height="46.0"/>
+  <text class="lbl" x="454.1" y="301.0" text-anchor="middle">ComponentVec::push</text>
+  <rect class="box" x="48.0" y="524.0" width="160.5" height="46.0"/>
+  <text class="lbl" x="128.2" y="551.0" text-anchor="middle">ComponentVec::grow</text>
+  <text class="note" x="128.2" y="588.0" text-anchor="middle">continues in Chart 6</text>
+  <rect class="box" x="272.5" y="524.0" width="175.0" height="46.0"/>
+  <text class="lbl" x="360.0" y="551.0" text-anchor="middle">ComponentVec::ptr_at</text>
+  <text class="note" x="360.0" y="588.0" text-anchor="middle">continues in Chart 4</text>
+  <rect class="box" x="511.5" y="524.0" width="117.0" height="46.0"/>
+  <line class="libbar" x1="518.5" y1="524.0" x2="518.5" y2="570.0"/>
+  <line class="libbar" x1="621.5" y1="524.0" x2="621.5" y2="570.0"/>
+  <text class="lbl" x="570.0" y="551.0" text-anchor="middle">Layout::size</text>
+  <rect class="box" x="692.5" y="524.0" width="167.8" height="60.0"/>
+  <line class="libbar" x1="699.5" y1="524.0" x2="699.5" y2="584.0"/>
+  <line class="libbar" x1="853.2" y1="524.0" x2="853.2" y2="584.0"/>
+  <text class="lbl" x="776.4" y="550.5" text-anchor="middle">ptr::</text>
+  <text class="lbl" x="776.4" y="564.5" text-anchor="middle">copy_nonoverlapping</text>
+</svg>
+  </div>
+  <figcaption><p><code>ComponentVec::push</code> is private, and only <code>ComponentVec::push_typed</code> and
+  <code>ComponentVec::move_component</code> call it. It calls <code>ComponentVec::grow</code> only where the length equals the capacity.
+  It then asks <code>ComponentVec::ptr_at</code> for <code>end</code>, the address just past the last component.
+  <code>ptr::copy_nonoverlapping</code> copies <code>size</code> bytes from <code>value</code> to <code>end</code>. The
+  vector now owns those bytes, and the method adds one to the length. For a type of size zero, the capacity of
+  <code>usize::MAX</code> keeps the first test from passing, and the copy covers zero bytes.</p></figcaption>
+</figure>
+<figure class="sheet" id="chart-6">
+  <div class="titleblock">
+    <div><span class="tb-label">Chart</span><span class="tb-num">6</span></div>
+    <div><span class="tb-label">Title</span><h3>Growing the block</h3></div>
+    <div><span class="tb-label">Entry point</span><span class="tb-entry">ComponentVec::grow()</span></div>
+  </div>
+  <div class="sheet-body">
+<svg class="sc" viewBox="0 0 394.0 610.0" width="394.0" height="610.0" role="img" aria-label="Structure chart 6, part 1 of 4: ComponentVec::grow checks the size and builds the new layout." style="--w:394.0">
+  <line class="call" x1="197.0" y1="70.0" x2="197.0" y2="270.0"/>
+  <polygon class="head" points="197.0,274.0 192.5,264.5 201.5,264.5"/>
+  <polygon class="diamond" points="197.0,78.0 203.0,85.0 197.0,92.0 191.0,85.0"/>
+  <line class="call" x1="188.5" y1="320.0" x2="108.0" y2="520.3"/>
+  <polygon class="head" points="106.5,524.0 105.9,513.5 114.2,516.9"/>
+  <line class="call" x1="205.5" y1="320.0" x2="286.0" y2="520.3"/>
+  <polygon class="head" points="287.5,524.0 279.8,516.9 288.1,513.5"/>
+  <line class="cpl" x1="122.6" y1="446.5" x2="131.5" y2="424.2"/>
+  <polygon class="cpl-head" points="131.5,424.2 132.3,432.0 125.6,429.3"/>
+  <circle class="tail-d" cx="122.6" cy="446.5" r="3.6"/>
+  <text class="clbl" x="111.2" y="439.3" text-anchor="end">size</text>
+  <line class="cpl" x1="256.5" y1="409.3" x2="265.5" y2="431.6"/>
+  <polygon class="cpl-head" points="265.5,431.6 259.5,426.5 266.2,423.8"/>
+  <circle class="tail-d" cx="256.5" cy="409.3" r="3.6"/>
+  <text class="clbl" x="276.8" y="411.5">layout,</text>
+  <text class="clbl" x="276.8" y="424.5">new_capacity</text>
+  <line class="cpl" x1="278.9" y1="465.0" x2="269.9" y2="442.7"/>
+  <polygon class="cpl-head" points="269.9,442.7 275.9,447.9 269.2,450.6"/>
+  <circle class="tail-d" cx="278.9" cy="465.0" r="3.6"/>
+  <text class="clbl" x="290.3" y="457.9">new_layout</text>
+  <rect class="box" x="116.8" y="24.0" width="160.5" height="46.0"/>
+  <text class="lbl" x="197.0" y="43.5" text-anchor="middle">ComponentVec::push</text>
+  <text class="sub" x="197.0" y="58.5" text-anchor="middle">Chart 5</text>
+  <rect class="box" x="116.8" y="274.0" width="160.5" height="46.0"/>
+  <text class="lbl" x="197.0" y="301.0" text-anchor="middle">ComponentVec::grow</text>
+  <rect class="box" x="48.0" y="524.0" width="117.0" height="46.0"/>
+  <line class="libbar" x1="55.0" y1="524.0" x2="55.0" y2="570.0"/>
+  <line class="libbar" x1="158.0" y1="524.0" x2="158.0" y2="570.0"/>
+  <text class="lbl" x="106.5" y="551.0" text-anchor="middle">Layout::size</text>
+  <rect class="box" x="229.0" y="524.0" width="117.0" height="46.0"/>
+  <text class="lbl" x="287.5" y="551.0" text-anchor="middle">array_layout</text>
+  <text class="note" x="287.5" y="588.0" text-anchor="middle">continues in Chart 7</text>
+</svg>
+<svg class="sc" viewBox="0 0 256.5 596.0" width="256.5" height="596.0" role="img" aria-label="Structure chart 6, part 2 of 4: the first growth calls alloc::alloc." style="--w:256.5">
+  <line class="call" x1="128.2" y1="70.0" x2="128.2" y2="270.0"/>
+  <polygon class="head" points="128.2,274.0 123.8,264.5 132.8,264.5"/>
+  <polygon class="diamond" points="128.2,78.0 134.2,85.0 128.2,92.0 122.2,85.0"/>
+  <line class="call" x1="128.2" y1="320.0" x2="128.2" y2="520.0"/>
+  <polygon class="head" points="128.2,524.0 123.8,514.5 132.8,514.5"/>
+  <polygon class="diamond" points="128.2,328.0 134.2,335.0 128.2,342.0 122.2,335.0"/>
+  <line class="cpl" x1="142.2" y1="412.4" x2="142.2" y2="436.4"/>
+  <polygon class="cpl-head" points="142.2,436.4 138.7,429.4 145.8,429.4"/>
+  <circle class="tail-d" cx="142.2" cy="412.4" r="3.6"/>
+  <text class="clbl" x="153.2" y="428.4">new_layout</text>
+  <line class="cpl" x1="142.2" y1="472.4" x2="142.2" y2="448.4"/>
+  <polygon class="cpl-head" points="142.2,448.4 145.8,455.4 138.7,455.4"/>
+  <circle class="tail-d" cx="142.2" cy="472.4" r="3.6"/>
+  <text class="clbl" x="153.2" y="464.4">new_data</text>
+  <rect class="box" x="48.0" y="24.0" width="160.5" height="46.0"/>
+  <text class="lbl" x="128.2" y="43.5" text-anchor="middle">ComponentVec::push</text>
+  <text class="sub" x="128.2" y="58.5" text-anchor="middle">Chart 5</text>
+  <rect class="box" x="48.0" y="274.0" width="160.5" height="46.0"/>
+  <text class="lbl" x="128.2" y="301.0" text-anchor="middle">ComponentVec::grow</text>
+  <rect class="box" x="69.8" y="524.0" width="117.0" height="46.0"/>
+  <line class="libbar" x1="76.8" y1="524.0" x2="76.8" y2="570.0"/>
+  <line class="libbar" x1="179.8" y1="524.0" x2="179.8" y2="570.0"/>
+  <text class="lbl" x="128.2" y="551.0" text-anchor="middle">alloc::alloc</text>
+</svg>
+<svg class="sc" viewBox="0 0 792.2 610.0" width="792.2" height="610.0" role="img" aria-label="Structure chart 6, part 3 of 4: every later growth builds the old layout and calls alloc::realloc." style="--w:792.2">
+  <line class="call" x1="396.1" y1="70.0" x2="396.1" y2="270.0"/>
+  <polygon class="head" points="396.1,274.0 391.6,264.5 400.6,264.5"/>
+  <polygon class="diamond" points="396.1,78.0 402.1,85.0 396.1,92.0 390.1,85.0"/>
+  <line class="call" x1="370.6" y1="320.0" x2="109.7" y2="521.6"/>
+  <polygon class="head" points="106.5,524.0 111.3,514.6 116.8,521.8"/>
+  <polygon class="diamond" points="358.8,322.2 364.8,329.2 358.8,336.2 352.8,329.2"/>
+  <line class="call" x1="387.6" y1="320.0" x2="300.0" y2="520.3"/>
+  <polygon class="head" points="298.4,524.0 298.1,513.5 306.3,517.1"/>
+  <polygon class="diamond" points="381.6,326.7 387.6,333.7 381.6,340.7 375.6,333.7"/>
+  <line class="call" x1="404.6" y1="320.0" x2="488.7" y2="520.3"/>
+  <polygon class="head" points="490.2,524.0 482.4,517.0 490.7,513.5"/>
+  <polygon class="diamond" points="410.4,326.8 416.4,333.8 410.4,340.8 404.4,333.8"/>
+  <line class="call" x1="421.6" y1="320.0" x2="675.4" y2="521.5"/>
+  <polygon class="head" points="678.5,524.0 668.3,521.6 673.9,514.6"/>
+  <polygon class="diamond" points="433.4,322.3 439.4,329.3 433.4,336.3 427.4,329.3"/>
+  <line class="cpl" x1="227.3" y1="413.0" x2="208.3" y2="427.7"/>
+  <polygon class="cpl-head" points="208.3,427.7 211.7,420.5 216.1,426.2"/>
+  <circle class="tail-d" cx="227.3" cy="413.0" r="3.6"/>
+  <text class="clbl" x="196.5" y="411.3" text-anchor="end">layout,</text>
+  <text class="clbl" x="196.5" y="424.3" text-anchor="end">capacity</text>
+  <line class="cpl" x1="179.8" y1="449.7" x2="198.8" y2="435.0"/>
+  <polygon class="cpl-head" points="198.8,435.0 195.5,442.1 191.1,436.4"/>
+  <circle class="tail-d" cx="179.8" cy="449.7" r="3.6"/>
+  <text class="clbl" x="168.1" y="446.3" text-anchor="end">old_layout</text>
+  <line class="cpl" x1="317.2" y1="446.0" x2="326.9" y2="424.0"/>
+  <polygon class="cpl-head" points="326.9,424.0 327.4,431.8 320.8,428.9"/>
+  <circle class="tail-d" cx="317.2" cy="446.0" r="3.6"/>
+  <text class="clbl" x="305.8" y="439.0" text-anchor="end">data</text>
+  <line class="cpl" x1="472.8" y1="446.2" x2="463.5" y2="424.1"/>
+  <polygon class="cpl-head" points="463.5,424.1 469.5,429.1 462.9,431.9"/>
+  <circle class="tail-d" cx="472.8" cy="446.2" r="3.6"/>
+  <text class="clbl" x="484.2" y="439.1">new_size</text>
+  <line class="cpl" x1="561.0" y1="412.8" x2="579.8" y2="427.7"/>
+  <polygon class="cpl-head" points="579.8,427.7 572.0,426.2 576.5,420.5"/>
+  <circle class="tail-d" cx="561.0" cy="412.8" r="3.6"/>
+  <text class="clbl" x="591.5" y="398.2">data,</text>
+  <text class="clbl" x="591.5" y="411.2">old_layout,</text>
+  <text class="clbl" x="591.5" y="424.2">new_size</text>
+  <line class="cpl" x1="607.9" y1="450.1" x2="589.2" y2="435.2"/>
+  <polygon class="cpl-head" points="589.2,435.2 596.9,436.7 592.4,442.3"/>
+  <circle class="tail-d" cx="607.9" cy="450.1" r="3.6"/>
+  <text class="clbl" x="619.7" y="446.6">new_data</text>
+  <rect class="box" x="315.9" y="24.0" width="160.5" height="46.0"/>
+  <text class="lbl" x="396.1" y="43.5" text-anchor="middle">ComponentVec::push</text>
+  <text class="sub" x="396.1" y="58.5" text-anchor="middle">Chart 5</text>
+  <rect class="box" x="315.9" y="274.0" width="160.5" height="46.0"/>
+  <text class="lbl" x="396.1" y="301.0" text-anchor="middle">ComponentVec::grow</text>
+  <rect class="box" x="48.0" y="524.0" width="117.0" height="46.0"/>
+  <text class="lbl" x="106.5" y="551.0" text-anchor="middle">array_layout</text>
+  <text class="note" x="106.5" y="588.0" text-anchor="middle">continues in Chart 7</text>
+  <rect class="box" x="229.0" y="524.0" width="138.8" height="46.0"/>
+  <line class="libbar" x1="236.0" y1="524.0" x2="236.0" y2="570.0"/>
+  <line class="libbar" x1="360.8" y1="524.0" x2="360.8" y2="570.0"/>
+  <text class="lbl" x="298.4" y="551.0" text-anchor="middle">NonNull::as_ptr</text>
+  <rect class="box" x="431.8" y="524.0" width="117.0" height="46.0"/>
+  <line class="libbar" x1="438.8" y1="524.0" x2="438.8" y2="570.0"/>
+  <line class="libbar" x1="541.8" y1="524.0" x2="541.8" y2="570.0"/>
+  <text class="lbl" x="490.2" y="551.0" text-anchor="middle">Layout::size</text>
+  <rect class="box" x="612.8" y="524.0" width="131.5" height="46.0"/>
+  <line class="libbar" x1="619.8" y1="524.0" x2="619.8" y2="570.0"/>
+  <line class="libbar" x1="737.2" y1="524.0" x2="737.2" y2="570.0"/>
+  <text class="lbl" x="678.5" y="551.0" text-anchor="middle">alloc::realloc</text>
+</svg>
+<svg class="sc" viewBox="0 0 437.5 1110.0" width="437.5" height="1110.0" role="img" aria-label="Structure chart 6, part 4 of 4: ComponentVec::grow wraps the new address in a NonNull, and a closure reports a failed allocation." style="--w:437.5">
+  <line class="call" x1="218.8" y1="70.0" x2="218.8" y2="270.0"/>
+  <polygon class="head" points="218.8,274.0 214.2,264.5 223.2,264.5"/>
+  <polygon class="diamond" points="218.8,78.0 224.8,85.0 218.8,92.0 212.8,85.0"/>
+  <line class="call" x1="210.2" y1="320.0" x2="108.3" y2="520.4"/>
+  <polygon class="head" points="106.5,524.0 106.8,513.5 114.8,517.6"/>
+  <line class="call" x1="227.2" y1="320.0" x2="307.8" y2="520.3"/>
+  <polygon class="head" points="309.2,524.0 301.5,516.9 309.9,513.5"/>
+  <line class="call hidden" x1="309.2" y1="584.0" x2="309.2" y2="770.0"/>
+  <polygon class="head" points="309.2,774.0 304.8,764.5 313.8,764.5"/>
+  <polygon class="diamond" points="309.2,592.0 315.2,599.0 309.2,606.0 303.2,599.0"/>
+  <line class="call" x1="309.2" y1="820.0" x2="309.2" y2="1020.0"/>
+  <polygon class="head" points="309.2,1024.0 304.8,1014.5 313.8,1014.5"/>
+  <line class="cpl" x1="149.1" y1="409.3" x2="138.2" y2="430.7"/>
+  <polygon class="cpl-head" points="138.2,430.7 138.2,422.8 144.6,426.1"/>
+  <circle class="tail-d" cx="149.1" cy="409.3" r="3.6"/>
+  <text class="clbl" x="126.8" y="424.0" text-anchor="end">new_data</text>
+  <line class="cpl" x1="121.9" y1="462.8" x2="132.8" y2="441.4"/>
+  <polygon class="cpl-head" points="132.8,441.4 132.8,449.3 126.4,446.0"/>
+  <circle class="tail-d" cx="121.9" cy="462.8" r="3.6"/>
+  <text class="clbl" x="110.5" y="456.1" text-anchor="end">option</text>
+  <line class="cpl" x1="278.3" y1="409.3" x2="287.2" y2="431.6"/>
+  <polygon class="cpl-head" points="287.2,431.6 281.3,426.5 287.9,423.8"/>
+  <circle class="tail-d" cx="278.3" cy="409.3" r="3.6"/>
+  <text class="clbl" x="298.6" y="424.5">closure</text>
+  <line class="cpl" x1="300.6" y1="465.0" x2="291.7" y2="442.7"/>
+  <polygon class="cpl-head" points="291.7,442.7 297.6,447.9 290.9,450.6"/>
+  <circle class="tail-d" cx="300.6" cy="465.0" r="3.6"/>
+  <text class="clbl" x="312.0" y="457.9">data</text>
+  <line class="cpl" x1="323.2" y1="932.4" x2="323.2" y2="956.4"/>
+  <polygon class="cpl-head" points="323.2,956.4 319.6,949.4 326.9,949.4"/>
+  <circle class="tail-d" cx="323.2" cy="932.4" r="3.6"/>
+  <text class="clbl" x="334.2" y="948.4">new_layout</text>
+  <rect class="box" x="138.5" y="24.0" width="160.5" height="46.0"/>
+  <text class="lbl" x="218.8" y="43.5" text-anchor="middle">ComponentVec::push</text>
+  <text class="sub" x="218.8" y="58.5" text-anchor="middle">Chart 5</text>
+  <rect class="box" x="138.5" y="274.0" width="160.5" height="46.0"/>
+  <text class="lbl" x="218.8" y="301.0" text-anchor="middle">ComponentVec::grow</text>
+  <rect class="box" x="48.0" y="524.0" width="117.0" height="46.0"/>
+  <line class="libbar" x1="55.0" y1="524.0" x2="55.0" y2="570.0"/>
+  <line class="libbar" x1="158.0" y1="524.0" x2="158.0" y2="570.0"/>
+  <text class="lbl" x="106.5" y="551.0" text-anchor="middle">NonNull::new</text>
+  <rect class="box" x="243.5" y="524.0" width="131.5" height="60.0"/>
+  <line class="libbar" x1="250.5" y1="524.0" x2="250.5" y2="584.0"/>
+  <line class="libbar" x1="368.0" y1="524.0" x2="368.0" y2="584.0"/>
+  <text class="lbl" x="309.2" y="550.5" text-anchor="middle">Option::</text>
+  <text class="lbl" x="309.2" y="564.5" text-anchor="middle">unwrap_or_else</text>
+  <rect class="box" x="253.2" y="774.0" width="112.0" height="46.0"/>
+  <text class="lbl" x="309.2" y="793.5" text-anchor="middle">closure</text>
+  <text class="sub" x="309.2" y="808.5" text-anchor="middle">in grow</text>
+  <rect class="box" x="229.0" y="1024.0" width="160.5" height="60.0"/>
+  <line class="libbar" x1="236.0" y1="1024.0" x2="236.0" y2="1084.0"/>
+  <line class="libbar" x1="382.5" y1="1024.0" x2="382.5" y2="1084.0"/>
+  <text class="lbl" x="309.2" y="1050.5" text-anchor="middle">alloc::</text>
+  <text class="lbl" x="309.2" y="1064.5" text-anchor="middle">handle_alloc_error</text>
+</svg>
+  </div>
+  <figcaption><p><code>ComponentVec::grow</code> makes nine calls, which the chart splits into four parts. In part 1, the method
+  passes the size of the type to <code>assert_ne!</code>, which panics on a size of zero. It then doubles the capacity,
+  or sets it to 4 from 0, and <code>array_layout</code> builds <code>new_layout</code>. Parts 2 and 3 show two paths. In
+  part 2, the first growth has no block yet, and calls <code>alloc::alloc</code>. In part 3, every later growth makes
+  four calls, and <code>alloc::realloc</code> resizes the existing block. <code>alloc::realloc</code> requires the
+  layout that the block was allocated with, and <code>array_layout</code> rebuilds it from the current capacity. In part
+  4, <code>NonNull::new</code> returns <code>None</code> where the allocator failed. The dashed arrow runs to a closure
+  that <code>Option::unwrap_or_else</code> calls only on <code>None</code>. The closure captures
+  <code>new_layout</code>, and passes it to <code>alloc::handle_alloc_error</code>, which never returns.</p></figcaption>
+</figure>
+<figure class="sheet" id="chart-7">
+  <div class="titleblock">
+    <div><span class="tb-label">Chart</span><span class="tb-num">7</span></div>
+    <div><span class="tb-label">Title</span><h3>Working out the size of a block</h3></div>
+    <div><span class="tb-label">Entry point</span><span class="tb-entry">array_layout(Layout, usize)</span></div>
+  </div>
+  <div class="sheet-body">
+<svg class="sc" viewBox="0 0 828.5 610.0" width="828.5" height="610.0" role="img" aria-label="Structure chart 7: array_layout multiplies the component size by the count with an overflow check, then builds a layout from the result." style="--w:828.5">
+  <line class="call" x1="414.2" y1="70.0" x2="414.2" y2="270.0"/>
+  <polygon class="head" points="414.2,274.0 409.8,264.5 418.8,264.5"/>
+  <line class="call" x1="388.8" y1="320.0" x2="109.7" y2="521.7"/>
+  <polygon class="head" points="106.5,524.0 111.6,514.8 116.8,522.1"/>
+  <line class="call" x1="405.8" y1="320.0" x2="311.0" y2="520.4"/>
+  <polygon class="head" points="309.2,524.0 309.2,513.5 317.4,517.3"/>
+  <line class="call" x1="422.8" y1="320.0" x2="514.0" y2="520.4"/>
+  <polygon class="head" points="515.6,524.0 507.6,517.2 515.8,513.5"/>
+  <line class="call" x1="439.8" y1="320.0" x2="707.9" y2="521.6"/>
+  <polygon class="head" points="711.1,524.0 700.8,521.9 706.2,514.7"/>
+  <line class="cpl" x1="428.2" y1="162.4" x2="428.2" y2="186.4"/>
+  <polygon class="cpl-head" points="428.2,186.4 424.6,179.4 431.9,179.4"/>
+  <circle class="tail-d" cx="428.2" cy="162.4" r="3.6"/>
+  <text class="clbl" x="439.2" y="178.4">item, count</text>
+  <line class="cpl" x1="428.2" y1="222.4" x2="428.2" y2="198.4"/>
+  <polygon class="cpl-head" points="428.2,198.4 431.9,205.4 424.6,205.4"/>
+  <circle class="tail-d" cx="428.2" cy="222.4" r="3.6"/>
+  <text class="clbl" x="439.2" y="214.4">layout</text>
+  <line class="cpl" x1="203.1" y1="436.9" x2="222.5" y2="422.9"/>
+  <polygon class="cpl-head" points="222.5,422.9 219.0,429.9 214.8,424.0"/>
+  <circle class="tail-d" cx="203.1" cy="436.9" r="3.6"/>
+  <text class="clbl" x="191.3" y="433.9" text-anchor="end">size</text>
+  <line class="cpl" x1="348.0" y1="409.3" x2="337.8" y2="431.0"/>
+  <polygon class="cpl-head" points="337.8,431.0 337.5,423.1 344.0,426.2"/>
+  <circle class="tail-d" cx="348.0" cy="409.3" r="3.6"/>
+  <text class="clbl" x="326.3" y="424.1" text-anchor="end">count</text>
+  <line class="cpl" x1="322.4" y1="463.5" x2="332.6" y2="441.8"/>
+  <polygon class="cpl-head" points="332.6,441.8 332.9,449.7 326.4,446.6"/>
+  <circle class="tail-d" cx="322.4" cy="463.5" r="3.6"/>
+  <text class="clbl" x="310.9" y="456.7" text-anchor="end">size</text>
+  <line class="cpl" x1="495.4" y1="445.7" x2="485.4" y2="423.9"/>
+  <polygon class="cpl-head" points="485.4,423.9 491.6,428.7 485.0,431.7"/>
+  <circle class="tail-d" cx="495.4" cy="445.7" r="3.6"/>
+  <text class="clbl" x="506.8" y="438.8">alignment</text>
+  <line class="cpl" x1="587.0" y1="413.2" x2="606.2" y2="427.6"/>
+  <polygon class="cpl-head" points="606.2,427.6 598.4,426.3 602.8,420.5"/>
+  <circle class="tail-d" cx="587.0" cy="413.2" r="3.6"/>
+  <text class="clbl" x="618.0" y="424.4">size, alignment</text>
+  <line class="cpl" x1="635.0" y1="449.2" x2="615.8" y2="434.8"/>
+  <polygon class="cpl-head" points="615.8,434.8 623.5,436.1 619.2,441.9"/>
+  <circle class="tail-d" cx="635.0" cy="449.2" r="3.6"/>
+  <text class="clbl" x="646.8" y="446.0">layout</text>
+  <rect class="box" x="334.0" y="24.0" width="160.5" height="46.0"/>
+  <text class="lbl" x="414.2" y="43.5" text-anchor="middle">ComponentVec::grow</text>
+  <text class="sub" x="414.2" y="58.5" text-anchor="middle">Chart 6, also Chart 9</text>
+  <rect class="box" x="355.8" y="274.0" width="117.0" height="46.0"/>
+  <text class="lbl" x="414.2" y="301.0" text-anchor="middle">array_layout</text>
+  <rect class="box" x="48.0" y="524.0" width="117.0" height="46.0"/>
+  <line class="libbar" x1="55.0" y1="524.0" x2="55.0" y2="570.0"/>
+  <line class="libbar" x1="158.0" y1="524.0" x2="158.0" y2="570.0"/>
+  <text class="lbl" x="106.5" y="551.0" text-anchor="middle">Layout::size</text>
+  <rect class="box" x="229.0" y="524.0" width="160.5" height="46.0"/>
+  <line class="libbar" x1="236.0" y1="524.0" x2="236.0" y2="570.0"/>
+  <line class="libbar" x1="382.5" y1="524.0" x2="382.5" y2="570.0"/>
+  <text class="lbl" x="309.2" y="551.0" text-anchor="middle">usize::checked_mul</text>
+  <rect class="box" x="453.5" y="524.0" width="124.2" height="46.0"/>
+  <line class="libbar" x1="460.5" y1="524.0" x2="460.5" y2="570.0"/>
+  <line class="libbar" x1="570.8" y1="524.0" x2="570.8" y2="570.0"/>
+  <text class="lbl" x="515.6" y="551.0" text-anchor="middle">Layout::align</text>
+  <rect class="box" x="641.8" y="524.0" width="138.8" height="60.0"/>
+  <line class="libbar" x1="648.8" y1="524.0" x2="648.8" y2="584.0"/>
+  <line class="libbar" x1="773.5" y1="524.0" x2="773.5" y2="584.0"/>
+  <text class="lbl" x="711.1" y="550.5" text-anchor="middle">Layout::</text>
+  <text class="lbl" x="711.1" y="564.5" text-anchor="middle">from_size_align</text>
+</svg>
+  </div>
+  <figcaption><p><code>array_layout</code> turns the layout of one component into the layout of a block with room for
+  <code>count</code> of them. <code>usize::checked_mul</code> returns <code>None</code> where the multiplication
+  overflows. <code>Layout::from_size_align</code> returns an error where the size exceeds <code>isize::MAX</code>. An
+  <code>expect</code> follows each of those two calls, and panics on the failure.</p></figcaption>
+</figure>
+<figure class="sheet" id="chart-8">
+  <div class="titleblock">
+    <div><span class="tb-label">Chart</span><span class="tb-num">8</span></div>
+    <div><span class="tb-label">Title</span><h3>Moving a component to another vector</h3></div>
+    <div><span class="tb-label">Entry point</span><span class="tb-entry">ComponentVec::move_component(usize, &amp;mut ComponentVec)</span></div>
+  </div>
+  <div class="sheet-body">
+<svg class="sc" viewBox="0 0 495.5 610.0" width="495.5" height="610.0" role="img" aria-label="Structure chart 8, part 1 of 2: ComponentVec::move_component pushes the component onto the target." style="--w:495.5">
+  <line class="call" x1="247.8" y1="70.0" x2="247.8" y2="270.0"/>
+  <polygon class="head" points="247.8,274.0 243.2,264.5 252.2,264.5"/>
+  <line class="call" x1="239.2" y1="334.0" x2="137.4" y2="520.5"/>
+  <polygon class="head" points="135.5,524.0 136.1,513.5 144.0,517.8"/>
+  <line class="call" x1="256.2" y1="334.0" x2="365.2" y2="520.5"/>
+  <polygon class="head" points="367.2,524.0 358.6,518.1 366.3,513.5"/>
+  <line class="cpl" x1="261.8" y1="182.4" x2="261.8" y2="206.4"/>
+  <polygon class="cpl-head" points="261.8,206.4 258.1,199.4 265.4,199.4"/>
+  <circle class="tail-d" cx="261.8" cy="182.4" r="3.6"/>
+  <text class="clbl" x="272.8" y="198.4">index, target</text>
+  <line class="cpl" x1="179.1" y1="415.0" x2="167.6" y2="436.0"/>
+  <polygon class="cpl-head" points="167.6,436.0 167.8,428.2 174.1,431.6"/>
+  <circle class="tail-d" cx="179.1" cy="415.0" r="3.6"/>
+  <text class="clbl" x="156.1" y="429.5" text-anchor="end">index</text>
+  <line class="cpl" x1="150.3" y1="467.6" x2="161.8" y2="446.6"/>
+  <polygon class="cpl-head" points="161.8,446.6 161.6,454.4 155.3,451.0"/>
+  <circle class="tail-d" cx="150.3" cy="467.6" r="3.6"/>
+  <text class="clbl" x="138.9" y="461.1" text-anchor="end">source</text>
+  <line class="cpl" x1="329.9" y1="432.3" x2="342.0" y2="453.0"/>
+  <polygon class="cpl-head" points="342.0,453.0 335.4,448.8 341.6,445.2"/>
+  <circle class="tail-d" cx="329.9" cy="432.3" r="3.6"/>
+  <text class="clbl" x="353.5" y="446.7">source</text>
+  <rect class="box ext" x="191.8" y="24.0" width="112.0" height="46.0"/>
+  <text class="lbl ext" x="247.8" y="43.5" text-anchor="middle">caller</text>
+  <text class="sub" x="247.8" y="58.5" text-anchor="middle">other files</text>
+  <rect class="box" x="182.0" y="274.0" width="131.5" height="60.0"/>
+  <text class="lbl" x="247.8" y="300.5" text-anchor="middle">ComponentVec::</text>
+  <text class="lbl" x="247.8" y="314.5" text-anchor="middle">move_component</text>
+  <rect class="box" x="48.0" y="524.0" width="175.0" height="46.0"/>
+  <text class="lbl" x="135.5" y="551.0" text-anchor="middle">ComponentVec::ptr_at</text>
+  <rect class="box" x="287.0" y="524.0" width="160.5" height="46.0"/>
+  <text class="lbl" x="367.2" y="543.5" text-anchor="middle">ComponentVec::push</text>
+  <text class="sub" x="367.2" y="558.5" text-anchor="middle">on target</text>
+  <text class="note" x="367.2" y="588.0" text-anchor="middle">continues in Chart 5</text>
+</svg>
+<svg class="sc" viewBox="0 0 922.8 610.0" width="922.8" height="610.0" role="img" aria-label="Structure chart 8, part 2 of 2: ComponentVec::move_component fills the gap with the last component." style="--w:922.8">
+  <line class="call" x1="461.4" y1="70.0" x2="461.4" y2="270.0"/>
+  <polygon class="head" points="461.4,274.0 456.9,264.5 465.9,264.5"/>
+  <line class="call" x1="435.9" y1="334.0" x2="110.0" y2="522.0"/>
+  <polygon class="head" points="106.5,524.0 112.5,515.4 117.0,523.2"/>
+  <polygon class="diamond" points="422.9,334.5 428.9,341.5 422.9,348.5 416.9,341.5"/>
+  <line class="call" x1="452.9" y1="334.0" x2="318.8" y2="520.8"/>
+  <polygon class="head" points="316.5,524.0 318.4,513.7 325.7,518.9"/>
+  <polygon class="diamond" points="444.1,339.2 450.1,346.2 444.1,353.2 438.1,346.2"/>
+  <line class="call" x1="469.9" y1="334.0" x2="553.9" y2="520.4"/>
+  <polygon class="head" points="555.5,524.0 547.5,517.2 555.7,513.5"/>
+  <polygon class="diamond" points="476.0,340.7 482.0,347.7 476.0,354.7 470.0,347.7"/>
+  <line class="call" x1="486.9" y1="334.0" x2="787.5" y2="521.9"/>
+  <polygon class="head" points="790.9,524.0 780.4,522.8 785.2,515.1"/>
+  <polygon class="diamond" points="499.6,334.9 505.6,341.9 499.6,348.9 493.6,341.9"/>
+  <line class="cpl" x1="475.4" y1="182.4" x2="475.4" y2="206.4"/>
+  <polygon class="cpl-head" points="475.4,206.4 471.8,199.4 479.0,199.4"/>
+  <circle class="tail-d" cx="475.4" cy="182.4" r="3.6"/>
+  <text class="clbl" x="486.4" y="198.4">index, target</text>
+  <line class="cpl" x1="222.6" y1="440.9" x2="243.4" y2="428.9"/>
+  <polygon class="cpl-head" points="243.4,428.9 239.1,435.5 235.5,429.3"/>
+  <circle class="tail-d" cx="222.6" cy="440.9" r="3.6"/>
+  <text class="clbl" x="210.7" y="438.9" text-anchor="end">size</text>
+  <line class="cpl" x1="377.2" y1="415.5" x2="363.2" y2="435.0"/>
+  <polygon class="cpl-head" points="363.2,435.0 364.3,427.2 370.2,431.4"/>
+  <circle class="tail-d" cx="377.2" cy="415.5" r="3.6"/>
+  <text class="clbl" x="351.6" y="429.2" text-anchor="end">last</text>
+  <line class="cpl" x1="342.2" y1="464.2" x2="356.2" y2="444.7"/>
+  <polygon class="cpl-head" points="356.2,444.7 355.0,452.5 349.2,448.3"/>
+  <circle class="tail-d" cx="342.2" cy="464.2" r="3.6"/>
+  <text class="clbl" x="330.6" y="458.5" text-anchor="end">from</text>
+  <line class="cpl" x1="521.7" y1="414.9" x2="531.5" y2="436.8"/>
+  <polygon class="cpl-head" points="531.5,436.8 525.4,431.9 532.0,428.9"/>
+  <circle class="tail-d" cx="521.7" cy="414.9" r="3.6"/>
+  <text class="clbl" x="543.0" y="429.8">index</text>
+  <line class="cpl" x1="546.3" y1="469.6" x2="536.5" y2="447.7"/>
+  <polygon class="cpl-head" points="536.5,447.7 542.6,452.6 536.1,455.6"/>
+  <circle class="tail-d" cx="546.3" cy="469.6" r="3.6"/>
+  <text class="clbl" x="557.8" y="462.7">to</text>
+  <line class="cpl" x1="668.2" y1="430.8" x2="688.6" y2="443.5"/>
+  <polygon class="cpl-head" points="688.6,443.5 680.7,442.9 684.5,436.8"/>
+  <circle class="tail-d" cx="668.2" cy="430.8" r="3.6"/>
+  <text class="clbl" x="700.4" y="441.2">from, to, size</text>
+  <rect class="box ext" x="405.4" y="24.0" width="112.0" height="46.0"/>
+  <text class="lbl ext" x="461.4" y="43.5" text-anchor="middle">caller</text>
+  <text class="sub" x="461.4" y="58.5" text-anchor="middle">other files</text>
+  <rect class="box" x="395.6" y="274.0" width="131.5" height="60.0"/>
+  <text class="lbl" x="461.4" y="300.5" text-anchor="middle">ComponentVec::</text>
+  <text class="lbl" x="461.4" y="314.5" text-anchor="middle">move_component</text>
+  <rect class="box" x="48.0" y="524.0" width="117.0" height="46.0"/>
+  <line class="libbar" x1="55.0" y1="524.0" x2="55.0" y2="570.0"/>
+  <line class="libbar" x1="158.0" y1="524.0" x2="158.0" y2="570.0"/>
+  <text class="lbl" x="106.5" y="551.0" text-anchor="middle">Layout::size</text>
+  <rect class="box" x="229.0" y="524.0" width="175.0" height="46.0"/>
+  <text class="lbl" x="316.5" y="551.0" text-anchor="middle">ComponentVec::ptr_at</text>
+  <rect class="box" x="468.0" y="524.0" width="175.0" height="46.0"/>
+  <text class="lbl" x="555.5" y="551.0" text-anchor="middle">ComponentVec::ptr_at</text>
+  <rect class="box" x="707.0" y="524.0" width="167.8" height="60.0"/>
+  <line class="libbar" x1="714.0" y1="524.0" x2="714.0" y2="584.0"/>
+  <line class="libbar" x1="867.8" y1="524.0" x2="867.8" y2="584.0"/>
+  <text class="lbl" x="790.9" y="550.5" text-anchor="middle">ptr::</text>
+  <text class="lbl" x="790.9" y="564.5" text-anchor="middle">copy_nonoverlapping</text>
+</svg>
+  </div>
+  <figcaption><p><code>ComponentVec::move_component</code> does two jobs, and the chart gives each job one part. In part 1, two calls copy the component onto the end of
+  <code>target</code>. The caller MUST guarantee that <code>index</code> is below the length, and that
+  <code>target</code> stores the same type. In part 2, four calls
+  fill the gap at <code>index</code> with the last component, and each one runs only where <code>index</code> is below
+  the last index. Three of the calls go to <code>ComponentVec::ptr_at</code>, with different results, and the chart draws
+  each one. <code>ComponentVec::push</code> runs on <code>target</code>, and it can grow the block in
+  <code>target</code>. The block in <code>self</code> keeps its address throughout.</p></figcaption>
+</figure>
+<figure class="sheet" id="chart-9">
+  <div class="titleblock">
+    <div><span class="tb-label">Chart</span><span class="tb-num">9</span></div>
+    <div><span class="tb-label">Title</span><h3>Dropping a vector</h3></div>
+    <div><span class="tb-label">Entry point</span><span class="tb-entry">Drop::drop(&amp;mut ComponentVec)</span></div>
+  </div>
+  <div class="sheet-body">
+<svg class="sc" viewBox="0 0 447.0 610.0" width="447.0" height="610.0" role="img" aria-label="Structure chart 9, part 1 of 2: ComponentVec::drop runs the clean-up code once per component." style="--w:447.0">
+  <line class="call hidden" x1="223.5" y1="70.0" x2="223.5" y2="270.0"/>
+  <polygon class="head" points="223.5,274.0 219.0,264.5 228.0,264.5"/>
+  <line class="call" x1="215.0" y1="320.0" x2="137.0" y2="520.3"/>
+  <polygon class="head" points="135.5,524.0 134.8,513.5 143.1,516.8"/>
+  <polygon class="diamond" points="209.6,327.0 215.6,334.0 209.6,341.0 203.6,334.0"/>
+  <line class="call" x1="232.0" y1="320.0" x2="341.1" y2="520.5"/>
+  <polygon class="head" points="343.0,524.0 334.5,517.8 342.4,513.5"/>
+  <polygon class="diamond" points="239.2,326.2 245.2,333.2 239.2,340.2 233.2,333.2"/>
+  <path class="loop" d="M166.8,382.0 Q228.3,408.0 289.7,382.0"/>
+  <polygon class="head" points="289.7,382.0 283.5,389.6 279.9,382.5"/>
+  <line class="cpl" x1="165.1" y1="409.4" x2="156.4" y2="431.7"/>
+  <polygon class="cpl-head" points="156.4,431.7 155.6,423.9 162.3,426.5"/>
+  <circle class="tail-d" cx="165.1" cy="409.4" r="3.6"/>
+  <text class="clbl" x="145.1" y="424.5" text-anchor="end">index</text>
+  <line class="cpl" x1="143.4" y1="465.3" x2="152.1" y2="442.9"/>
+  <polygon class="cpl-head" points="152.1,442.9 152.9,450.7 146.2,448.1"/>
+  <circle class="tail-d" cx="143.4" cy="465.3" r="3.6"/>
+  <text class="clbl" x="132.0" y="458.1" text-anchor="end">pointer</text>
+  <line class="cpl" x1="306.1" y1="426.9" x2="317.6" y2="448.0"/>
+  <polygon class="cpl-head" points="317.6,448.0 311.1,443.6 317.4,440.1"/>
+  <circle class="tail-d" cx="306.1" cy="426.9" r="3.6"/>
+  <text class="clbl" x="329.1" y="441.5">pointer</text>
+  <rect class="box ext" x="165.0" y="24.0" width="117.0" height="46.0"/>
+  <text class="lbl ext" x="223.5" y="43.5" text-anchor="middle">owning scope</text>
+  <text class="sub" x="223.5" y="58.5" text-anchor="middle">compiler adds the call</text>
+  <rect class="box" x="143.2" y="274.0" width="160.5" height="46.0"/>
+  <text class="lbl" x="223.5" y="301.0" text-anchor="middle">ComponentVec::drop</text>
+  <rect class="box" x="48.0" y="524.0" width="175.0" height="46.0"/>
+  <text class="lbl" x="135.5" y="551.0" text-anchor="middle">ComponentVec::ptr_at</text>
+  <text class="note" x="135.5" y="588.0" text-anchor="middle">continues in Chart 4</text>
+  <rect class="box" x="287.0" y="524.0" width="112.0" height="46.0"/>
+  <text class="lbl" x="343.0" y="543.5" text-anchor="middle">drop_value</text>
+  <text class="sub" x="343.0" y="558.5" text-anchor="middle">through info.drop</text>
+  <text class="note" x="343.0" y="588.0" text-anchor="middle">continues in Chart 10</text>
+</svg>
+<svg class="sc" viewBox="0 0 792.2 610.0" width="792.2" height="610.0" role="img" aria-label="Structure chart 9, part 2 of 2: ComponentVec::drop frees the block." style="--w:792.2">
+  <line class="call hidden" x1="396.1" y1="70.0" x2="396.1" y2="270.0"/>
+  <polygon class="head" points="396.1,274.0 391.6,264.5 400.6,264.5"/>
+  <line class="call" x1="370.6" y1="320.0" x2="109.7" y2="521.6"/>
+  <polygon class="head" points="106.5,524.0 111.3,514.6 116.8,521.8"/>
+  <line class="call" x1="387.6" y1="320.0" x2="289.3" y2="520.4"/>
+  <polygon class="head" points="287.5,524.0 287.6,513.5 295.7,517.5"/>
+  <polygon class="diamond" points="381.0,326.5 387.0,333.5 381.0,340.5 375.0,333.5"/>
+  <line class="call" x1="404.6" y1="320.0" x2="478.0" y2="520.2"/>
+  <polygon class="head" points="479.4,524.0 471.9,516.6 480.3,513.5"/>
+  <polygon class="diamond" points="409.8,327.1 415.8,334.1 409.8,341.1 403.8,334.1"/>
+  <line class="call" x1="421.6" y1="320.0" x2="675.4" y2="521.5"/>
+  <polygon class="head" points="678.5,524.0 668.3,521.6 673.9,514.6"/>
+  <polygon class="diamond" points="433.4,322.3 439.4,329.3 433.4,336.3 427.4,329.3"/>
+  <line class="cpl" x1="195.7" y1="437.4" x2="214.7" y2="422.8"/>
+  <polygon class="cpl-head" points="214.7,422.8 211.3,429.9 206.9,424.2"/>
+  <circle class="tail-d" cx="195.7" cy="437.4" r="3.6"/>
+  <text class="clbl" x="183.9" y="434.1" text-anchor="end">size</text>
+  <line class="cpl" x1="328.2" y1="409.3" x2="317.6" y2="430.8"/>
+  <polygon class="cpl-head" points="317.6,430.8 317.5,423.0 323.9,426.1"/>
+  <circle class="tail-d" cx="328.2" cy="409.3" r="3.6"/>
+  <text class="clbl" x="306.2" y="411.1" text-anchor="end">layout,</text>
+  <text class="clbl" x="306.2" y="424.1" text-anchor="end">capacity</text>
+  <line class="cpl" x1="301.8" y1="463.2" x2="312.3" y2="441.6"/>
+  <polygon class="cpl-head" points="312.3,441.6 312.5,449.5 306.0,446.3"/>
+  <circle class="tail-d" cx="301.8" cy="463.2" r="3.6"/>
+  <text class="clbl" x="290.3" y="456.4" text-anchor="end">layout</text>
+  <line class="cpl" x1="466.1" y1="447.0" x2="457.8" y2="424.4"/>
+  <polygon class="cpl-head" points="457.8,424.4 463.6,429.8 456.8,432.2"/>
+  <circle class="tail-d" cx="466.1" cy="447.0" r="3.6"/>
+  <text class="clbl" x="477.4" y="439.7">data</text>
+  <line class="cpl" x1="576.6" y1="425.2" x2="595.4" y2="440.1"/>
+  <polygon class="cpl-head" points="595.4,440.1 587.7,438.6 592.2,433.0"/>
+  <circle class="tail-d" cx="576.6" cy="425.2" r="3.6"/>
+  <text class="clbl" x="607.2" y="436.7">data, layout</text>
+  <rect class="box ext" x="337.6" y="24.0" width="117.0" height="46.0"/>
+  <text class="lbl ext" x="396.1" y="43.5" text-anchor="middle">owning scope</text>
+  <text class="sub" x="396.1" y="58.5" text-anchor="middle">compiler adds the call</text>
+  <rect class="box" x="315.9" y="274.0" width="160.5" height="46.0"/>
+  <text class="lbl" x="396.1" y="301.0" text-anchor="middle">ComponentVec::drop</text>
+  <rect class="box" x="48.0" y="524.0" width="117.0" height="46.0"/>
+  <line class="libbar" x1="55.0" y1="524.0" x2="55.0" y2="570.0"/>
+  <line class="libbar" x1="158.0" y1="524.0" x2="158.0" y2="570.0"/>
+  <text class="lbl" x="106.5" y="551.0" text-anchor="middle">Layout::size</text>
+  <rect class="box" x="229.0" y="524.0" width="117.0" height="46.0"/>
+  <text class="lbl" x="287.5" y="551.0" text-anchor="middle">array_layout</text>
+  <text class="note" x="287.5" y="588.0" text-anchor="middle">continues in Chart 7</text>
+  <rect class="box" x="410.0" y="524.0" width="138.8" height="46.0"/>
+  <line class="libbar" x1="417.0" y1="524.0" x2="417.0" y2="570.0"/>
+  <line class="libbar" x1="541.8" y1="524.0" x2="541.8" y2="570.0"/>
+  <text class="lbl" x="479.4" y="551.0" text-anchor="middle">NonNull::as_ptr</text>
+  <rect class="box" x="612.8" y="524.0" width="131.5" height="46.0"/>
+  <line class="libbar" x1="619.8" y1="524.0" x2="619.8" y2="570.0"/>
+  <line class="libbar" x1="737.2" y1="524.0" x2="737.2" y2="570.0"/>
+  <text class="lbl" x="678.5" y="551.0" text-anchor="middle">alloc::dealloc</text>
+</svg>
+  </div>
+  <figcaption><p><code>ComponentVec::drop</code> does two jobs, and the chart gives each job one part. In part 1, two calls run once per component, where the
+  <code>drop</code> field contains a function. The curved arrow marks that loop. The method calls that function through
+  the stored address, and the address leads to the <code>drop_value::&lt;T&gt;</code> that Chart 2 stored. In part 2, four
+  calls free the block. <code>Layout::size</code> supplies the first half of the test, which also requires a capacity
+  above zero. <code>array_layout</code> rebuilds the layout from the capacity, since <code>alloc::dealloc</code> requires
+  the layout that the block was allocated with.</p></figcaption>
+</figure>
+<figure class="sheet" id="chart-10">
+  <div class="titleblock">
+    <div><span class="tb-label">Chart</span><span class="tb-num">10</span></div>
+    <div><span class="tb-label">Title</span><h3>Dropping one component</h3></div>
+    <div><span class="tb-label">Entry point</span><span class="tb-entry">drop_value&lt;T&gt;(*mut u8)</span></div>
+  </div>
+  <div class="sheet-body">
+<svg class="sc" viewBox="0 0 408.5 610.0" width="408.5" height="610.0" role="img" aria-label="Structure chart 10: drop_value casts the byte pointer to a pointer to T, then runs the clean-up code of T." style="--w:408.5">
+  <line class="call" x1="204.2" y1="70.0" x2="204.2" y2="270.0"/>
+  <polygon class="head" points="204.2,274.0 199.8,264.5 208.8,264.5"/>
+  <line class="call" x1="195.8" y1="320.0" x2="111.7" y2="520.3"/>
+  <polygon class="head" points="110.1,524.0 109.7,513.5 118.0,517.0"/>
+  <line class="call" x1="212.8" y1="320.0" x2="296.8" y2="520.3"/>
+  <polygon class="head" points="298.4,524.0 290.5,517.0 298.8,513.5"/>
+  <line class="cpl" x1="218.2" y1="182.4" x2="218.2" y2="206.4"/>
+  <polygon class="cpl-head" points="218.2,206.4 214.7,199.4 221.8,199.4"/>
+  <circle class="tail-d" cx="218.2" cy="182.4" r="3.6"/>
+  <text class="clbl" x="229.2" y="198.4">pointer</text>
+  <line class="cpl" x1="127.6" y1="446.2" x2="136.9" y2="424.1"/>
+  <polygon class="cpl-head" points="136.9,424.1 137.5,431.9 130.9,429.1"/>
+  <circle class="tail-d" cx="127.6" cy="446.2" r="3.6"/>
+  <text class="clbl" x="116.2" y="439.1" text-anchor="end">typed_pointer</text>
+  <rect class="box" x="124.0" y="24.0" width="160.5" height="46.0"/>
+  <text class="lbl" x="204.2" y="43.5" text-anchor="middle">ComponentVec::drop</text>
+  <text class="sub" x="204.2" y="58.5" text-anchor="middle">through info.drop</text>
+  <rect class="box" x="148.2" y="274.0" width="112.0" height="46.0"/>
+  <text class="lbl" x="204.2" y="301.0" text-anchor="middle">drop_value</text>
+  <rect class="box" x="48.0" y="524.0" width="124.2" height="46.0"/>
+  <line class="libbar" x1="55.0" y1="524.0" x2="55.0" y2="570.0"/>
+  <line class="libbar" x1="165.2" y1="524.0" x2="165.2" y2="570.0"/>
+  <text class="lbl" x="110.1" y="551.0" text-anchor="middle">pointer::cast</text>
+  <rect class="box" x="236.2" y="524.0" width="124.2" height="60.0"/>
+  <line class="libbar" x1="243.2" y1="524.0" x2="243.2" y2="584.0"/>
+  <line class="libbar" x1="353.5" y1="524.0" x2="353.5" y2="584.0"/>
+  <text class="lbl" x="298.4" y="550.5" text-anchor="middle">pointer::</text>
+  <text class="lbl" x="298.4" y="564.5" text-anchor="middle">drop_in_place</text>
+</svg>
+  </div>
+  <figcaption><p><code>drop_value</code> restores the type that the bytes lost. <code>pointer::cast</code> turns the
+  <code>*mut u8</code> into a <code>*mut T</code>, which the chart calls <code>typed_pointer</code>.
+  <code>pointer::drop_in_place</code> then runs the clean-up code of <code>T</code> on that address. The second call
+  takes its only value as <code>self</code>, meaning its arrow has no couple. The clean-up code belongs to whichever
+  type <code>T</code> is, and the chart ends at that boundary.</p></figcaption>
+</figure>
+<figure class="sheet" id="chart-11">
+  <div class="titleblock">
+    <div><span class="tb-label">Chart</span><span class="tb-num">11</span></div>
+    <div><span class="tb-label">Title</span><h3>Adding a component by type</h3></div>
+    <div><span class="tb-label">Entry point</span><span class="tb-entry">ComponentVec::push_typed&lt;T&gt;(T)</span></div>
+  </div>
+  <div class="sheet-body">
+<svg class="sc" viewBox="0 0 1135.0 610.0" width="1135.0" height="610.0" role="img" aria-label="Structure chart 11: ComponentVec::push_typed checks the type, stops the value from being dropped, turns it into a byte pointer, and calls ComponentVec::push." style="--w:1135.0">
+  <line class="call" x1="567.5" y1="70.0" x2="567.5" y2="270.0"/>
+  <polygon class="head" points="567.5,274.0 572.0,264.0 563.0,264.0"/>
+  <line class="cpl" x1="581.5" y1="170.2" x2="581.5" y2="194.2"/>
+  <polygon class="cpl-head" points="581.5,194.2 585.1,187.2 577.9,187.2"/>
+  <circle class="tail-d" cx="581.5" cy="170.2" r="3.6"/>
+  <text class="clbl" x="592.5" y="186.2">value</text>
+  <line class="call" x1="533.5" y1="320.0" x2="163.9" y2="522.1"/>
+  <polygon class="head" points="160.4,524.0 171.3,523.2 167.0,515.3"/>
+  <line class="call" x1="550.5" y1="320.0" x2="415.1" y2="520.7"/>
+  <polygon class="head" points="412.9,524.0 422.2,518.2 414.7,513.2"/>
+  <line class="cpl" x1="493.3" y1="379.7" x2="479.9" y2="399.6"/>
+  <polygon class="cpl-head" points="479.9,399.6 486.8,395.8 480.8,391.8"/>
+  <circle class="tail-d" cx="493.3" cy="379.7" r="3.6"/>
+  <text class="clbl" x="475.6" y="393.7" text-anchor="end">value</text>
+  <line class="cpl" x1="438.6" y1="460.8" x2="452.0" y2="440.9"/>
+  <polygon class="cpl-head" points="452.0,440.9 451.1,448.8 445.1,444.7"/>
+  <circle class="tail-d" cx="438.6" cy="460.8" r="3.6"/>
+  <text class="clbl" x="434.3" y="454.9" text-anchor="end">value</text>
+  <line class="call" x1="567.5" y1="320.0" x2="613.7" y2="520.1"/>
+  <polygon class="head" points="614.6,524.0 616.8,513.2 608.0,515.3"/>
+  <line class="cpl" x1="596.3" y1="382.7" x2="601.7" y2="406.1"/>
+  <polygon class="cpl-head" points="601.7,406.1 603.7,398.4 596.7,400.1"/>
+  <circle class="tail-d" cx="596.3" cy="382.7" r="3.6"/>
+  <text class="clbl" x="610.0" y="398.4">value</text>
+  <line class="cpl" x1="615.9" y1="467.3" x2="610.5" y2="443.9"/>
+  <polygon class="cpl-head" points="610.5,443.9 615.6,449.9 608.6,451.5"/>
+  <circle class="tail-d" cx="615.9" cy="467.3" r="3.6"/>
+  <text class="clbl" x="624.2" y="459.6">pointer</text>
+  <line class="call" x1="584.5" y1="320.0" x2="799.0" y2="521.3"/>
+  <polygon class="head" points="801.9,524.0 797.7,513.9 791.5,520.4"/>
+  <line class="cpl" x1="711.5" y1="420.0" x2="694.0" y2="403.6"/>
+  <polygon class="cpl-head" points="694.0,403.6 701.6,405.7 696.7,411.0"/>
+  <circle class="tail-d" cx="711.5" cy="420.0" r="3.6"/>
+  <text class="clbl" x="713.8" y="415.8">bytes</text>
+  <line class="call" x1="601.5" y1="320.0" x2="1003.7" y2="522.2"/>
+  <polygon class="head" points="1007.2,524.0 1000.3,515.5 996.3,523.5"/>
+  <line class="cpl" x1="799.9" y1="404.1" x2="821.4" y2="414.9"/>
+  <polygon class="cpl-head" points="821.4,414.9 816.7,408.5 813.5,415.0"/>
+  <circle class="tail-d" cx="799.9" cy="404.1" r="3.6"/>
+  <text class="clbl" x="821.7" y="413.5">bytes</text>
+  <rect class="box ext" x="511.5" y="24.0" width="112.0" height="46.0"/>
+  <text class="lbl ext" x="567.5" y="43.5" text-anchor="middle">caller</text>
+  <text class="sub" x="567.5" y="58.5" text-anchor="middle">other files</text>
+  <rect class="box" x="466.0" y="274.0" width="203.0" height="46.0"/>
+  <text class="lbl" x="567.5" y="301.0" text-anchor="middle">ComponentVec::push_typed</text>
+  <rect class="box" x="48.0" y="524.0" width="224.8" height="46.0"/>
+  <text class="lbl" x="160.4" y="551.0" text-anchor="middle">ComponentVec::assert_stores</text>
+  <text class="note" x="160.4" y="588.0" text-anchor="middle">continues in Chart 13</text>
+  <rect class="box" x="336.8" y="524.0" width="152.2" height="46.0"/>
+  <line class="libbar" x1="343.8" y1="524.0" x2="343.8" y2="570.0"/>
+  <line class="libbar" x1="482.0" y1="524.0" x2="482.0" y2="570.0"/>
+  <text class="lbl" x="412.9" y="551.0" text-anchor="middle">ManuallyDrop::new</text>
+  <rect class="box" x="553.0" y="524.0" width="123.2" height="46.0"/>
+  <line class="libbar" x1="560.0" y1="524.0" x2="560.0" y2="570.0"/>
+  <line class="libbar" x1="669.2" y1="524.0" x2="669.2" y2="570.0"/>
+  <text class="lbl" x="614.6" y="551.0" text-anchor="middle">ptr::from_ref</text>
+  <rect class="box" x="740.2" y="524.0" width="123.2" height="46.0"/>
+  <line class="libbar" x1="747.2" y1="524.0" x2="747.2" y2="570.0"/>
+  <line class="libbar" x1="856.5" y1="524.0" x2="856.5" y2="570.0"/>
+  <text class="lbl" x="801.9" y="551.0" text-anchor="middle">pointer::cast</text>
+  <rect class="box" x="927.5" y="524.0" width="159.5" height="46.0"/>
+  <text class="lbl" x="1007.2" y="551.0" text-anchor="middle">ComponentVec::push</text>
+  <text class="note" x="1007.2" y="588.0" text-anchor="middle">continues in Chart 5</text>
+</svg>
+  </div>
+  <figcaption><p><code>ComponentVec::push_typed</code> is the safe way to add a component. It first calls
+  <code>ComponentVec::assert_stores</code>, which panics on the wrong type. <code>ManuallyDrop::new</code> wraps
+  <code>value</code>. The wrapper stops <code>value</code> from being dropped when the method returns. The vector owns the component from
+  that point. <code>ptr::from_ref</code> then takes the address of the wrapped value, and <code>pointer::cast</code>
+  turns that address into <code>bytes</code>, the <code>*const u8</code> that <code>ComponentVec::push</code> accepts.
+  The <code>*</code> in <code>&amp;*value</code> is an operator, and it takes no box.</p></figcaption>
+</figure>
+<figure class="sheet" id="chart-12">
+  <div class="titleblock">
+    <div><span class="tb-label">Chart</span><span class="tb-num">12</span></div>
+    <div><span class="tb-label">Title</span><h3>Reading components as slices</h3></div>
+    <div><span class="tb-label">Entry point</span><span class="tb-entry">ComponentVec::as_slice&lt;T&gt;() and as_mut_slice&lt;T&gt;()</span></div>
+  </div>
+  <div class="sheet-body">
+<svg class="sc" viewBox="0 0 955.0 610.0" width="955.0" height="610.0" role="img" aria-label="Structure chart 12, part 1 of 2: ComponentVec::as_slice checks the type, casts the start of the block, and builds a slice." style="--w:955.0">
+  <line class="call" x1="477.5" y1="70.0" x2="477.5" y2="270.0"/>
+  <polygon class="head" points="477.5,274.0 482.0,264.0 473.0,264.0"/>
+  <line class="cpl" x1="491.5" y1="194.2" x2="491.5" y2="170.2"/>
+  <polygon class="cpl-head" points="491.5,170.2 495.1,177.2 487.9,177.2"/>
+  <circle class="tail-d" cx="491.5" cy="194.2" r="3.6"/>
+  <text class="clbl" x="502.5" y="186.2">slice</text>
+  <line class="call" x1="452.0" y1="320.0" x2="163.7" y2="521.7"/>
+  <polygon class="head" points="160.4,524.0 171.1,522.0 166.0,514.6"/>
+  <line class="call" x1="469.0" y1="320.0" x2="406.8" y2="520.2"/>
+  <polygon class="head" points="405.6,524.0 412.9,515.8 404.3,513.1"/>
+  <line class="cpl" x1="420.4" y1="429.3" x2="427.5" y2="406.4"/>
+  <polygon class="cpl-head" points="427.5,406.4 428.9,414.1 422.0,412.0"/>
+  <circle class="tail-d" cx="420.4" cy="429.3" r="3.6"/>
+  <text class="clbl" x="412.9" y="421.8" text-anchor="end">start</text>
+  <line class="call" x1="486.0" y1="320.0" x2="598.2" y2="520.5"/>
+  <polygon class="head" points="600.1,524.0 599.2,513.1 591.3,517.5"/>
+  <line class="cpl" x1="561.1" y1="425.6" x2="549.4" y2="404.7"/>
+  <polygon class="cpl-head" points="549.4,404.7 556.0,409.0 549.7,412.6"/>
+  <circle class="tail-d" cx="561.1" cy="425.6" r="3.6"/>
+  <text class="clbl" x="566.3" y="419.2">typed_pointer</text>
+  <line class="call" x1="503.0" y1="320.0" x2="813.0" y2="521.8"/>
+  <polygon class="head" points="816.4,524.0 810.4,514.8 805.5,522.3"/>
+  <line class="cpl" x1="619.7" y1="379.2" x2="639.8" y2="392.3"/>
+  <polygon class="cpl-head" points="639.8,392.3 635.9,385.5 631.9,391.5"/>
+  <circle class="tail-d" cx="619.7" cy="379.2" r="3.6"/>
+  <text class="clbl" x="640.7" y="389.8">typed_pointer, len</text>
+  <line class="cpl" x1="733.8" y1="453.5" x2="713.7" y2="440.4"/>
+  <polygon class="cpl-head" points="713.7,440.4 721.5,441.2 717.6,447.3"/>
+  <circle class="tail-d" cx="733.8" cy="453.5" r="3.6"/>
+  <text class="clbl" x="734.7" y="451.0">slice</text>
+  <rect class="box ext" x="421.5" y="24.0" width="112.0" height="46.0"/>
+  <text class="lbl ext" x="477.5" y="43.5" text-anchor="middle">caller</text>
+  <text class="sub" x="477.5" y="58.5" text-anchor="middle">other files</text>
+  <rect class="box" x="383.2" y="274.0" width="188.5" height="46.0"/>
+  <text class="lbl" x="477.5" y="301.0" text-anchor="middle">ComponentVec::as_slice</text>
+  <rect class="box" x="48.0" y="524.0" width="224.8" height="46.0"/>
+  <text class="lbl" x="160.4" y="551.0" text-anchor="middle">ComponentVec::assert_stores</text>
+  <text class="note" x="160.4" y="588.0" text-anchor="middle">continues in Chart 13</text>
+  <rect class="box" x="336.8" y="524.0" width="137.8" height="46.0"/>
+  <line class="libbar" x1="343.8" y1="524.0" x2="343.8" y2="570.0"/>
+  <line class="libbar" x1="467.5" y1="524.0" x2="467.5" y2="570.0"/>
+  <text class="lbl" x="405.6" y="551.0" text-anchor="middle">NonNull::as_ptr</text>
+  <rect class="box" x="538.5" y="524.0" width="123.2" height="46.0"/>
+  <line class="libbar" x1="545.5" y1="524.0" x2="545.5" y2="570.0"/>
+  <line class="libbar" x1="654.8" y1="524.0" x2="654.8" y2="570.0"/>
+  <text class="lbl" x="600.1" y="551.0" text-anchor="middle">pointer::cast</text>
+  <rect class="box" x="725.8" y="524.0" width="181.2" height="46.0"/>
+  <line class="libbar" x1="732.8" y1="524.0" x2="732.8" y2="570.0"/>
+  <line class="libbar" x1="900.0" y1="524.0" x2="900.0" y2="570.0"/>
+  <text class="lbl" x="816.4" y="551.0" text-anchor="middle">slice::from_raw_parts</text>
+</svg>
+<svg class="sc" viewBox="0 0 984.0 610.0" width="984.0" height="610.0" role="img" aria-label="Structure chart 12, part 2 of 2: ComponentVec::as_mut_slice does the same, and builds a slice that allows changes." style="--w:984.0">
+  <line class="call" x1="492.0" y1="70.0" x2="492.0" y2="270.0"/>
+  <polygon class="head" points="492.0,274.0 496.5,264.0 487.5,264.0"/>
+  <line class="cpl" x1="506.0" y1="194.2" x2="506.0" y2="170.2"/>
+  <polygon class="cpl-head" points="506.0,170.2 509.6,177.2 502.4,177.2"/>
+  <circle class="tail-d" cx="506.0" cy="194.2" r="3.6"/>
+  <text class="clbl" x="517.0" y="186.2">slice</text>
+  <line class="call" x1="466.5" y1="320.0" x2="163.7" y2="521.8"/>
+  <polygon class="head" points="160.4,524.0 171.2,522.2 166.2,514.7"/>
+  <line class="call" x1="483.5" y1="320.0" x2="407.1" y2="520.3"/>
+  <polygon class="head" points="405.6,524.0 413.4,516.3 405.0,513.1"/>
+  <line class="cpl" x1="427.2" y1="428.2" x2="435.8" y2="405.8"/>
+  <polygon class="cpl-head" points="435.8,405.8 436.6,413.6 429.9,411.1"/>
+  <circle class="tail-d" cx="427.2" cy="428.2" r="3.6"/>
+  <text class="clbl" x="420.5" y="421.0" text-anchor="end">start</text>
+  <line class="call" x1="500.5" y1="320.0" x2="598.4" y2="520.4"/>
+  <polygon class="head" points="600.1,524.0 599.8,513.0 591.7,517.0"/>
+  <line class="cpl" x1="568.2" y1="426.6" x2="557.6" y2="405.1"/>
+  <polygon class="cpl-head" points="557.6,405.1 563.9,409.8 557.5,412.9"/>
+  <circle class="tail-d" cx="568.2" cy="426.6" r="3.6"/>
+  <text class="clbl" x="573.9" y="419.9">typed_pointer</text>
+  <line class="call" x1="517.5" y1="320.0" x2="827.5" y2="521.8"/>
+  <polygon class="head" points="830.9,524.0 824.9,514.8 820.0,522.3"/>
+  <line class="cpl" x1="634.2" y1="379.2" x2="654.3" y2="392.3"/>
+  <polygon class="cpl-head" points="654.3,392.3 650.4,385.5 646.4,391.5"/>
+  <circle class="tail-d" cx="634.2" cy="379.2" r="3.6"/>
+  <text class="clbl" x="655.2" y="389.8">typed_pointer, len</text>
+  <line class="cpl" x1="748.3" y1="453.5" x2="728.2" y2="440.4"/>
+  <polygon class="cpl-head" points="728.2,440.4 736.0,441.2 732.1,447.3"/>
+  <circle class="tail-d" cx="748.3" cy="453.5" r="3.6"/>
+  <text class="clbl" x="749.2" y="451.0">slice</text>
+  <rect class="box ext" x="436.0" y="24.0" width="112.0" height="46.0"/>
+  <text class="lbl ext" x="492.0" y="43.5" text-anchor="middle">caller</text>
+  <text class="sub" x="492.0" y="58.5" text-anchor="middle">other files</text>
+  <rect class="box" x="383.2" y="274.0" width="217.5" height="46.0"/>
+  <text class="lbl" x="492.0" y="301.0" text-anchor="middle">ComponentVec::as_mut_slice</text>
+  <rect class="box" x="48.0" y="524.0" width="224.8" height="46.0"/>
+  <text class="lbl" x="160.4" y="551.0" text-anchor="middle">ComponentVec::assert_stores</text>
+  <text class="note" x="160.4" y="588.0" text-anchor="middle">continues in Chart 13</text>
+  <rect class="box" x="336.8" y="524.0" width="137.8" height="46.0"/>
+  <line class="libbar" x1="343.8" y1="524.0" x2="343.8" y2="570.0"/>
+  <line class="libbar" x1="467.5" y1="524.0" x2="467.5" y2="570.0"/>
+  <text class="lbl" x="405.6" y="551.0" text-anchor="middle">NonNull::as_ptr</text>
+  <rect class="box" x="538.5" y="524.0" width="123.2" height="46.0"/>
+  <line class="libbar" x1="545.5" y1="524.0" x2="545.5" y2="570.0"/>
+  <line class="libbar" x1="654.8" y1="524.0" x2="654.8" y2="570.0"/>
+  <text class="lbl" x="600.1" y="551.0" text-anchor="middle">pointer::cast</text>
+  <rect class="box" x="725.8" y="524.0" width="210.2" height="46.0"/>
+  <line class="libbar" x1="732.8" y1="524.0" x2="732.8" y2="570.0"/>
+  <line class="libbar" x1="929.0" y1="524.0" x2="929.0" y2="570.0"/>
+  <text class="lbl" x="830.9" y="551.0" text-anchor="middle">slice::from_raw_parts_mut</text>
+</svg>
+  </div>
+  <figcaption><p>The two methods make the same calls, apart from the last. Each first calls <code>ComponentVec::assert_stores</code>,
+  which panics on the wrong type. <code>NonNull::as_ptr</code> returns the start of the block, and
+  <code>pointer::cast</code> turns it into <code>typed_pointer</code>, a <code>*mut T</code>. The last call builds the
+  slice from that pointer and the length. <code>ComponentVec::as_slice</code> takes <code>&amp;self</code>, and
+  <code>ComponentVec::as_mut_slice</code> takes <code>&amp;mut self</code>. The slice borrows the vector in the same way,
+  meaning the compiler rejects a push while either slice is in use.</p></figcaption>
+</figure>
+<figure class="sheet" id="chart-13">
+  <div class="titleblock">
+    <div><span class="tb-label">Chart</span><span class="tb-num">13</span></div>
+    <div><span class="tb-label">Title</span><h3>Checking the component type</h3></div>
+    <div><span class="tb-label">Entry point</span><span class="tb-entry">ComponentVec::assert_stores&lt;T&gt;()</span></div>
+  </div>
+  <div class="sheet-body">
+<svg class="sc" viewBox="0 0 402.5 610.0" width="402.5" height="610.0" role="img" aria-label="Structure chart 13: ComponentVec::assert_stores compares TypeId::of with the stored type, and reads the requested type name for the panic message." style="--w:402.5">
+  <line class="call" x1="201.2" y1="70.0" x2="201.2" y2="270.0"/>
+  <polygon class="head" points="201.2,274.0 205.8,264.0 196.8,264.0"/>
+  <line class="call" x1="192.8" y1="320.0" x2="105.6" y2="520.3"/>
+  <polygon class="head" points="104.0,524.0 112.1,516.6 103.9,513.0"/>
+  <line class="cpl" x1="130.8" y1="427.4" x2="140.3" y2="405.4"/>
+  <polygon class="cpl-head" points="140.3,405.4 140.8,413.3 134.2,410.4"/>
+  <circle class="tail-d" cx="130.8" cy="427.4" r="3.6"/>
+  <text class="clbl" x="124.5" y="420.4" text-anchor="end">type_id</text>
+  <line class="call" x1="209.8" y1="320.0" x2="287.8" y2="520.3"/>
+  <polygon class="head" points="289.2,524.0 289.8,513.0 281.4,516.3"/>
+  <line class="cpl" x1="266.9" y1="428.1" x2="258.2" y2="405.7"/>
+  <polygon class="cpl-head" points="258.2,405.7 264.1,411.0 257.4,413.6"/>
+  <circle class="tail-d" cx="266.9" cy="428.1" r="3.6"/>
+  <text class="clbl" x="273.5" y="420.9">requested</text>
+  <rect class="box" x="145.2" y="24.0" width="112.0" height="46.0"/>
+  <text class="lbl" x="201.2" y="43.5" text-anchor="middle">three methods</text>
+  <text class="sub" x="201.2" y="58.5" text-anchor="middle">Charts 11 and 12</text>
+  <rect class="box" x="88.9" y="274.0" width="224.8" height="46.0"/>
+  <text class="lbl" x="201.2" y="301.0" text-anchor="middle">ComponentVec::assert_stores</text>
+  <rect class="box" x="48.0" y="524.0" width="112.0" height="46.0"/>
+  <line class="libbar" x1="55.0" y1="524.0" x2="55.0" y2="570.0"/>
+  <line class="libbar" x1="153.0" y1="524.0" x2="153.0" y2="570.0"/>
+  <text class="lbl" x="104.0" y="551.0" text-anchor="middle">TypeId::of</text>
+  <rect class="box" x="224.0" y="524.0" width="130.5" height="46.0"/>
+  <line class="libbar" x1="231.0" y1="524.0" x2="231.0" y2="570.0"/>
+  <line class="libbar" x1="347.5" y1="524.0" x2="347.5" y2="570.0"/>
+  <text class="lbl" x="289.2" y="551.0" text-anchor="middle">any::type_name</text>
+</svg>
+  </div>
+  <figcaption><p><code>ComponentVec::assert_stores</code> compares <code>TypeId::of</code> with the stored type. Only where they differ
+  does the <code>assert_eq!</code> macro evaluate its message, and that is when <code>any::type_name</code> runs. The
+  message contains the stored name and the requested name. This method and its three callers carry
+  <code>#[track_caller]</code>, meaning the panic reports the line that called <code>push_typed</code>,
+  <code>as_slice</code> or <code>as_mut_slice</code>.</p></figcaption>
+</figure>
+
+</section>
+
+<section class="stack-lg" aria-labelledby="table-h">
+  <div class="stack prose">
+    <h2 id="table-h">Modules and their calls</h2>
+    <p>The table below lists every module in the file. <em>In</em> is the fan-in, the number of different modules that
+    call it. <em>Out</em> is the fan-out, the number of different modules that it calls. The highlighted rows are the two
+    worth a closer look.</p>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th scope="col">Module</th><th scope="col">In</th><th scope="col">Called by</th><th scope="col">Out</th><th scope="col">Calls</th></tr></thead>
+      <tbody>
+<tr><td><span class="mono">ComponentInfo::of</span></td><td class="num">1</td><td><span class="mono">caller</span></td><td class="num">4</td><td><span class="mono">mem::needs_drop, TypeId::of, any::type_name, Layout::new</span></td></tr>
+<tr><td><span class="mono">ComponentVec::new</span></td><td class="num">1</td><td><span class="mono">caller</span></td><td class="num">4</td><td><span class="mono">Layout::align, ptr::without_provenance_mut, NonNull::new, Layout::size</span></td></tr>
+<tr><td><span class="mono">ComponentVec::info</span></td><td class="num">1</td><td><span class="mono">caller</span></td><td class="num">0</td><td><span class="mono"></span></td></tr>
+<tr><td><span class="mono">ComponentVec::data</span></td><td class="num">1</td><td><span class="mono">caller</span></td><td class="num">0</td><td><span class="mono"></span></td></tr>
+<tr class=hi><td><span class="mono">ComponentVec::ptr_at</span></td><td class="num">4</td><td><span class="mono">caller, ComponentVec::push, ComponentVec::move_component, ComponentVec::drop</span></td><td class="num">3</td><td><span class="mono">Layout::size, NonNull::as_ptr, pointer::wrapping_add</span></td></tr>
+<tr><td><span class="mono">ComponentVec::push</span></td><td class="num">2</td><td><span class="mono">ComponentVec::push_typed, ComponentVec::move_component</span></td><td class="num">4</td><td><span class="mono">ComponentVec::grow, ComponentVec::ptr_at, Layout::size, ptr::copy_nonoverlapping</span></td></tr>
+<tr class=hi><td><span class="mono">ComponentVec::grow</span></td><td class="num">1</td><td><span class="mono">ComponentVec::push</span></td><td class="num">7</td><td><span class="mono">Layout::size, array_layout, alloc::alloc, NonNull::as_ptr, alloc::realloc, NonNull::new, Option::unwrap_or_else</span></td></tr>
+<tr><td><span class="mono">closure in grow</span></td><td class="num">1</td><td><span class="mono">Option::unwrap_or_else</span></td><td class="num">1</td><td><span class="mono">alloc::handle_alloc_error</span></td></tr>
+<tr><td><span class="mono">ComponentVec::push_typed</span></td><td class="num">1</td><td><span class="mono">caller</span></td><td class="num">5</td><td><span class="mono">ComponentVec::assert_stores, ManuallyDrop::new, ptr::from_ref, pointer::cast, ComponentVec::push</span></td></tr>
+<tr><td><span class="mono">ComponentVec::as_slice</span></td><td class="num">1</td><td><span class="mono">caller</span></td><td class="num">4</td><td><span class="mono">ComponentVec::assert_stores, NonNull::as_ptr, pointer::cast, slice::from_raw_parts</span></td></tr>
+<tr><td><span class="mono">ComponentVec::as_mut_slice</span></td><td class="num">1</td><td><span class="mono">caller</span></td><td class="num">4</td><td><span class="mono">ComponentVec::assert_stores, NonNull::as_ptr, pointer::cast, slice::from_raw_parts_mut</span></td></tr>
+<tr><td><span class="mono">ComponentVec::assert_stores</span></td><td class="num">3</td><td><span class="mono">ComponentVec::push_typed, ComponentVec::as_slice, ComponentVec::as_mut_slice</span></td><td class="num">2</td><td><span class="mono">TypeId::of, any::type_name</span></td></tr>
+<tr><td><span class="mono">ComponentVec::move_component</span></td><td class="num">1</td><td><span class="mono">caller</span></td><td class="num">4</td><td><span class="mono">ComponentVec::ptr_at, ComponentVec::push, Layout::size, ptr::copy_nonoverlapping</span></td></tr>
+<tr><td><span class="mono">ComponentVec::drop</span></td><td class="num">1</td><td><span class="mono">the compiler</span></td><td class="num">6</td><td><span class="mono">ComponentVec::ptr_at, drop_value, Layout::size, array_layout, NonNull::as_ptr, alloc::dealloc</span></td></tr>
+<tr><td><span class="mono">drop_value</span></td><td class="num">1</td><td><span class="mono">ComponentVec::drop</span></td><td class="num">2</td><td><span class="mono">pointer::cast, pointer::drop_in_place</span></td></tr>
+<tr><td><span class="mono">array_layout</span></td><td class="num">2</td><td><span class="mono">ComponentVec::grow, ComponentVec::drop</span></td><td class="num">4</td><td><span class="mono">Layout::size, usize::checked_mul, Layout::align, Layout::from_size_align</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="stack-lg" aria-labelledby="notes-h">
+  <div class="stack prose">
+    <h2 id="notes-h">What the charts say about the design</h2>
+    <p>The notes below use the charts to judge the design of the file. Structured Design judges a design by how much
+    each module depends on the others, which it calls <em>coupling</em>.</p>
+  </div>
+  <div class="notes">
+<article class="note-item"><h3>A type that survives through drop_value</h3><p><code>ComponentVec</code> has no type parameter for its components, yet Chart 9 still runs the clean-up code of their type. Chart 2 makes this possible. The compiler generates one copy of <code>drop_value</code> for each <code>T</code>, and <code>ComponentInfo::of</code> stores the address of the matching copy. Each copy accepts a <code>*mut u8</code>, meaning every copy fits the same field type. A Java programmer would pass a <code>Consumer&lt;Object&gt;</code> for the same job. The comparison stops at generics. Java erases a type parameter and shares one method body, whereas Rust generates a separate body for each type.</p></article>
+<article class="note-item"><h3>One address calculation in ptr_at</h3><p>Fan-in counts the modules that call a module. <code>ComponentVec::ptr_at</code> has a fan-in of four on these charts, the highest of any module on them. Every path to a component passes through its one multiplication, which gives the formula for an address, index times size, one home.</p></article>
+<article class="note-item"><h3>Matching layouts through array_layout</h3><p>The allocator requires <code>alloc::realloc</code> and <code>alloc::dealloc</code> to receive the layout that the block was allocated with. The vector stores no layout for its block. <code>array_layout</code> rebuilds one from the capacity each time, on Charts 6 and 9. Its fan-in of two therefore enforces a rule of the allocator. The two callers stay in agreement for as long as <code>capacity</code> matches the block, and only <code>ComponentVec::grow</code> changes <code>capacity</code> after creation.</p></article>
+<article class="note-item"><h3>The fan-out of grow</h3><p><code>ComponentVec::grow</code> calls seven different modules, and designers commonly keep fan-out to about seven. It reaches that limit. Six of the seven are library calls, and parts 2 and 3 of Chart 6 add three of the seven.</p></article>
+<article class="note-item"><h3>The call from move_component to push</h3><p>Chart 8 reuses <code>ComponentVec::push</code> for the copy onto <code>target</code>. A move therefore inherits the growth rule of Chart 5, along with its pointer rule. A pointer into <code>target</code> from before the move stops being valid when the move grows that block. Pointers into <code>self</code> keep their address, although the component at <code>index</code> has changed. The address of the old last component now contains a stale copy, and dropping through it drops that component twice.</p></article>
+  </div>
+</section>
+
+<footer>
+  Drawn from <span class="mono">crates/enki/src/component.rs</span>.
+</footer>
+
+</div>
+
+</body>
+</html>

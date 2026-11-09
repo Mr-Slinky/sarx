@@ -405,12 +405,7 @@ impl Archetype {
             // Moves the entity's component where the target stores its type, and drops it otherwise
             match target.components_of_mut(type_id) {
                 // Moves the component to the end of the target's column for the same type
-                // SAFETY: `move_component` requires an index below the length and a target of the
-                // same type. The caller MUST guarantee that `row` is below the length of every
-                // column, and `components_of_mut` returns the target column with this `TypeId`
-                Some(target_components) => unsafe {
-                    components.move_component(row, target_components);
-                },
+                Some(target_components) => components.move_component(row, target_components),
                 // Drops the component, since the target has no column for its type
                 None => components.swap_remove(row),
             }

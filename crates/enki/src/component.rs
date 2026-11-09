@@ -108,9 +108,7 @@
 //! }
 //!
 //! // Moves the component at index 0 to `target`, and fills index 0 with the last component
-//! // SAFETY: `move_component` requires an index below the length and a target of the same type.
-//! // Index 0 is below the length of 3, and `target` uses the same `ComponentInfo`
-//! unsafe { source.move_component(0, &mut target) };
+//! source.move_component(0, &mut target);
 //!
 //! // Borrows the components as slices of `Position`. The vectors keep ownership of them
 //! let remaining = source.as_slice::<Position>();
@@ -383,16 +381,7 @@ impl ComponentVec {
     /// Also panics where `target` is full and a larger block would exceed `isize::MAX` bytes. A
     /// target for a type of size zero panics once it stores `usize::MAX` components. The program
     /// aborts where the allocator cannot supply a larger block for `target`.
-    ///
-    /// # Safety
-    ///
-    /// The caller MUST guarantee two things:
-    ///
-    /// - `index` is below the length of `self`.
-    /// - `target` stores the same component type as `self`.
-    ///
-    /// Every build checks both, and panics where either fails, as the Panics section sets out.
-    pub(crate) unsafe fn move_component(&mut self, index: usize, target: &mut ComponentVec) {
+    pub(crate) fn move_component(&mut self, index: usize, target: &mut ComponentVec) {
         // Panics before anything changes, where `index` lies past the last component. A stale row
         // from a caller would otherwise copy the bytes of a component that is already dropped
         assert!(index < self.len, "the index must be below the length");
@@ -1050,9 +1039,7 @@ mod tests {
 
         let mut target = ComponentVec::new(source.info());
 
-        // SAFETY: `move_component` requires an index below the length and a target of the same
-        // type. Index 1 is below the length of 4, and `target` uses the same `ComponentInfo`
-        unsafe { source.move_component(1, &mut target) };
+        source.move_component(1, &mut target);
 
         assert_eq!(
             source.as_slice::<u32>(),
@@ -1085,9 +1072,7 @@ mod tests {
 
             let mut target = ComponentVec::new(source.info());
 
-            // SAFETY: `move_component` requires an index below the length and a target of the same
-            // type. Each case gives its last index, and `target` uses the same `ComponentInfo`
-            unsafe { source.move_component(index, &mut target) };
+            source.move_component(index, &mut target);
 
             assert_eq!(source.as_slice::<u32>(), remaining, "source for {values:?}");
             assert_eq!(
@@ -1109,9 +1094,7 @@ mod tests {
             target.push_typed(value);
         }
 
-        // SAFETY: `move_component` requires an index below the length and a target of the same
-        // type. Index 0 is below the length of 1, and `target` uses the same `ComponentInfo`
-        unsafe { source.move_component(0, &mut target) };
+        source.move_component(0, &mut target);
 
         assert_eq!(target.capacity, 8, "target capacity after the move");
         assert_eq!(
@@ -1135,13 +1118,8 @@ mod tests {
 
         let mut target = ComponentVec::new(source.info());
 
-        // SAFETY: `move_component` requires an index below the length and a target of the same
-        // type. Index 1 is below the length of 5, index 3 is below the length of 4, and `target`
-        // uses the same `ComponentInfo`
-        unsafe {
-            source.move_component(1, &mut target); // fills the gap with the last component
-            source.move_component(3, &mut target); // moves the last component, which does not leave a gap
-        }
+        source.move_component(1, &mut target); // fills the gap with the last component
+        source.move_component(3, &mut target); // moves the last component, which does not leave a gap
         let drops_after_moves = drops.load(Ordering::Relaxed);
 
         drop(source);
@@ -1231,9 +1209,7 @@ mod tests {
 
         let mut target = ComponentVec::new(source.info());
 
-        // SAFETY: `move_component` requires an index below the length and a target of the same
-        // type. Index 0 is below the length of 3, and `target` uses the same `ComponentInfo`
-        unsafe { source.move_component(0, &mut target) };
+        source.move_component(0, &mut target);
 
         let source_len = source.as_slice::<Marker>().len();
         let target_len = target.as_slice::<Marker>().len();
@@ -1327,9 +1303,7 @@ mod tests {
 
         let mut target = ComponentVec::new(source.info());
 
-        // SAFETY: this call breaks the index requirement on purpose. The `assert` in
-        // `move_component` panics before any memory is read
-        unsafe { source.move_component(1, &mut target) };
+        source.move_component(1, &mut target);
     }
 
     /// Checks that every build catches a move between columns of different types
@@ -1341,9 +1315,7 @@ mod tests {
 
         let mut target = ComponentVec::new(ComponentInfo::of::<f32>(ComponentMask::single(0)));
 
-        // SAFETY: this call breaks the type requirement on purpose. The `assert_eq` in
-        // `move_component` panics before any memory is read
-        unsafe { source.move_component(0, &mut target) };
+        source.move_component(0, &mut target);
     }
 
     /// Checks the size calculation for an ordinary block, and for the largest block allowed
@@ -1420,12 +1392,8 @@ mod tests {
         let mut target_health = ComponentVec::new(source_health.info());
         let mut target_names = ComponentVec::new(source_names.info());
 
-        // SAFETY: `move_component` requires an index below the length and a target of the same
-        // type. Index 0 is below the length of 3, and each target uses its source's `ComponentInfo`
-        unsafe {
-            source_health.move_component(0, &mut target_health);
-            source_names.move_component(0, &mut target_names);
-        }
+        source_health.move_component(0, &mut target_health);
+        source_names.move_component(0, &mut target_names);
 
         assert_eq!(source_health.as_slice::<u32>(), [30, 20], "source health");
         assert_eq!(
@@ -1868,9 +1836,7 @@ mod tests {
             target.push_typed(String::from(name));
         }
 
-        // SAFETY: `move_component` requires an index below the length and a target of the same
-        // type. Index 0 is below the length of 3, and `target` uses the same `ComponentInfo`
-        unsafe { source.move_component(0, &mut target) };
+        source.move_component(0, &mut target);
 
         assert_eq!(source.as_slice::<String>(), ["Cy", "Bo"], "source");
         assert_eq!(
@@ -1896,13 +1862,8 @@ mod tests {
             });
         }
         source.swap_remove(2);
-        // SAFETY: `move_component` requires an index below the length and a target of the same
-        // type. Index 0 is below the length of 6, index 4 is below the length of 5, and `target`
-        // uses the same `ComponentInfo`
-        unsafe {
-            source.move_component(0, &mut target);
-            source.move_component(4, &mut target);
-        }
+        source.move_component(0, &mut target);
+        source.move_component(4, &mut target);
         target.reserve(10);
         let drops_before_vectors = drops.load(Ordering::Relaxed);
         let lengths = (source.len(), target.len());

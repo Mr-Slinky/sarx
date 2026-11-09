@@ -1,5 +1,5 @@
 [package]
-name = "sarx-ecs"
+name = "enki"
 version.workspace = true
 edition.workspace = true
 publish.workspace = true

@@ -61,7 +61,7 @@
 use crate::archetype::Archetype;
 use crate::component::{Component, ComponentInfo, ComponentVec};
 use crate::mask::ComponentMask;
-use crate::{Bundle, Entity};
+use crate::{query, Bundle, Entity, Query};
 use std::any::TypeId;
 use std::collections::HashMap;
 
@@ -456,9 +456,39 @@ impl World {
         })
     }
 
+    pub fn query_tables_mut<Q: Query>(&mut self) -> impl Iterator<Item = Q::Columns<'_>> {
+        // Panics where `Q` changes a component type that it also asks for elsewhere
+        query::check_access::<Q>();
+        let query_mask = self.find_query_mask::<Q>();
+        self.archetypes
+            .iter()
+            .filter(move |archetype| archetype.len() > 0 && archetype.has_all(query_mask))
+            .filter_map(|archetype| {
+                unsafe { Q::find_columns(archetype) }
+            })
+    }
+
+    pub fn query_mut<Q: Query>(&mut self) -> impl Iterator<Item = Q::Item<'_>> {
+        self.query_tables_mut::<Q>().flat_map(Q::split_rows)
+    }
+
     // ========================================================================================== \\
     //                                       Helper Methods                                       \\
     // ========================================================================================== \\
+
+    fn find_query_mask<Q: Query>(&mut self) -> ComponentMask {
+        let mut accesses = Vec::new();
+        Q::add_access(&mut accesses);
+
+        let mut mask = ComponentMask::EMPTY;
+        // Visits each type in the list, ignoring whether the query reads or changes it
+        for (type_id, _) in accesses {
+            // Sets the type's bit in the mask, giving the type a bit where it has none yet
+            mask |= self.find_or_assign_bit(type_id);
+        }
+        // Returns the finished mask
+        mask
+    }
 
     /// Returns where `entity` is stored, or `None` where the handle does not refer to a living
     /// entity.

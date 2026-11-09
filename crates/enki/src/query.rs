@@ -38,7 +38,7 @@ pub enum Access {
 /// The world runs a query in three steps. It first calls [`Query::add_access`] to collect the
 /// component types that the query asks for. It then calls [`Query::find_columns`] to borrow the
 /// matching columns of each table. Finally, it calls [`Query::split_rows`] to split those columns
-/// into one item per entity. `World::query_tables_mut` stops after the second step, and returns
+/// into one item per entity. `World::query_archetype_mut` stops after the second step, and returns
 /// the columns.
 ///
 /// # Lifetimes

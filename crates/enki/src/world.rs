@@ -119,7 +119,7 @@ pub struct World {
     /// Maps the mask of each table to its position in `archetypes`.
     indices: HashMap<ComponentMask, usize>,
     /// Maps each component type to its bit.
-    component_bits: HashMap<TypeId, ComponentMask>,
+    arch_masks: HashMap<TypeId, ComponentMask>,
     /// Stores one slot for each entity index, at that index.
     slots: Vec<Slot>,
     /// Stores the index of each slot that `spawn_empty_ent` can reuse.
@@ -142,7 +142,7 @@ impl World {
         Self {
             archetypes,
             indices: archetype_indices,
-            component_bits: HashMap::new(),
+            arch_masks: HashMap::new(),
             slots: Vec::new(),
             free_slots: Vec::new(),
         }
@@ -484,9 +484,9 @@ impl World {
     /// component types.
     pub(crate) fn find_or_assign_bit(&mut self, type_id: TypeId) -> ComponentMask {
         // Counts the bits handed out so far, which is also the position of the next free bit
-        let next_position = self.component_bits.len();
+        let next_position = self.arch_masks.len();
         // Returns the type's bit, first giving it the next free bit where it has none yet
-        *self.component_bits.entry(type_id).or_insert_with(|| {
+        *self.arch_masks.entry(type_id).or_insert_with(|| {
             // Panics where every bit is taken, since a mask has no bit left for another type
             let capacity = ComponentMask::CAPACITY;
             assert!(
@@ -548,10 +548,8 @@ impl World {
     pub fn query_archetype_mut<Q: Query>(&mut self) -> impl Iterator<Item = Q::Columns<'_>> {
         // Panics where `Q` changes a component type that it also asks for elsewhere
         query::check_access::<Q>();
-        let query_mask = self.find_query_mask::<Q>();
-        self.archetypes
-            .iter()
-            .filter(move |archetype| archetype.len() > 0 && archetype.has_all(query_mask))
+        // Visits each table that has entities and stores every type in the query
+        self.find_matching_archetypes::<Q>()
             // SAFETY: `find_columns` requires three guarantees. `&mut self` keeps every other
             // reference off the world for as long as the iterator lives, `check_access` passed
             // above, and the iterator visits each table once
@@ -615,26 +613,36 @@ impl World {
     //                                       Helper Methods                                       \\
     // ========================================================================================== \\
 
-    /// Returns the mask with one set bit for each component type that the query `Q` asks for.
-    ///
-    /// Gives a bit to each of those types that the world has not met before.
-    ///
     /// # Panics
     ///
     /// Panics where `Q` brings in more component types than the world has room for, which
     /// [`ComponentMask::CAPACITY`] defines.
-    fn find_query_mask<Q: Query>(&mut self) -> ComponentMask {
+    fn find_query_mask<Q: Query>(&self) -> Option<ComponentMask> {
+        // Starts an empty list of the types that the query asks for
         let mut accesses = Vec::new();
+        // Fills the list with one entry for each type in `Q`
         Q::add_access(&mut accesses);
 
+        // Starts with a mask that has no bits set
         let mut mask = ComponentMask::EMPTY;
         // Visits each type in the list, ignoring whether the query reads or changes it
         for (type_id, _) in accesses {
-            // Sets the type's bit in the mask, giving the type a bit where it has none yet
-            mask |= self.find_or_assign_bit(type_id);
+            // Finds the type's bit, and returns `None` where the world has never given it one
+            let bit = self.arch_masks.get(&type_id)?;
+            mask |= *bit;
         }
-        // Returns the finished mask
-        mask
+        Some(mask)
+    }
+
+    fn find_matching_archetypes<Q: Query>(&self) -> impl Iterator<Item = &Archetype> {
+        // Builds the query's mask, or `None` where one of its types has no bit
+        let query_mask = self.find_query_mask::<Q>();
+        // Filter tables by those who are non-empty and contain matching components
+        self.archetypes.iter().filter(move |archetype| {
+            let has_rows = archetype.len() > 0;
+            let has_types = query_mask.is_some_and(|mask| archetype.has_all(mask));
+            has_rows && has_types
+        })
     }
 
     /// Returns where `entity` is stored, or `None` where the handle does not refer to a living
@@ -738,7 +746,7 @@ impl World {
     /// that has checked that table `source` stores the type never meets this case.
     fn find_or_create_archetype_without(&mut self, source: usize, type_id: TypeId) -> usize {
         // Finds the bit of the type being removed
-        let bit = self.component_bits[&type_id];
+        let bit = self.arch_masks[&type_id];
         // Builds the target table's mask, which is the source table's mask with that bit cleared
         let mask = self.archetypes[source].mask().without(bit);
         // Returns the table that already has that mask, where one exists
@@ -1014,7 +1022,7 @@ mod tests {
             Some(&World::EMPTY),
             "table under the empty mask"
         );
-        assert!(world.component_bits.is_empty(), "component types");
+        assert!(world.arch_masks.is_empty(), "component types");
         assert!(world.slots.is_empty(), "slots");
         assert!(world.free_slots.is_empty(), "free slots");
     }
@@ -1219,7 +1227,7 @@ mod tests {
         world.add_component(entity, Position(1.5));
 
         let location = locate_alive(&world, entity);
-        let bit = world.component_bits[&TypeId::of::<Position>()];
+        let bit = world.arch_masks[&TypeId::of::<Position>()];
         let mask = world.archetypes[location.arch_index()].mask();
         assert_eq!(world.archetypes.len(), 2, "number of tables");
         assert_eq!(location.arch_index(), 1, "table of the entity");
@@ -1466,7 +1474,7 @@ mod tests {
         assert_eq!(repeat, first, "bit for the repeated type");
         let expected = [ComponentMask::single(0), ComponentMask::single(1)];
         assert_eq!([first, other], expected, "bits in order of first sight");
-        assert_eq!(world.component_bits.len(), 2, "component types");
+        assert_eq!(world.arch_masks.len(), 2, "component types");
     }
 
     /// Checks that removing a component drops it, and keeps the entity's other components
@@ -1480,7 +1488,7 @@ mod tests {
         let removed = world.remove::<Health>(entity);
 
         let location = locate_alive(&world, entity);
-        let position_bit = world.component_bits[&TypeId::of::<Position>()];
+        let position_bit = world.arch_masks[&TypeId::of::<Position>()];
         let mask = world.archetypes[location.arch_index()].mask();
         assert!(removed, "answer for a stored component");
         assert_eq!(world.get::<Health>(entity), None, "removed component");
@@ -1536,7 +1544,7 @@ mod tests {
         world.remove::<Position>(entity);
 
         let location = locate_alive(&world, entity);
-        let health_bit = world.component_bits[&TypeId::of::<Health>()];
+        let health_bit = world.arch_masks[&TypeId::of::<Health>()];
         let mask = world.archetypes[location.arch_index()].mask();
         assert_eq!(world.archetypes.len(), 4, "number of tables");
         assert_eq!(mask, health_bit, "mask of the new table");
@@ -1739,7 +1747,7 @@ mod tests {
             "table under the empty mask"
         );
         assert_eq!(empty_mask, ComponentMask::EMPTY, "mask of the empty table");
-        assert!(world.component_bits.is_empty(), "component types");
+        assert!(world.arch_masks.is_empty(), "component types");
         assert!(world.free_slots.is_empty(), "free slots");
     }
 
@@ -1798,7 +1806,7 @@ mod tests {
             assert!(!added, "answer for {label}");
             assert_eq!(world.archetypes.len(), 1, "number of tables for {label}");
             assert!(
-                world.component_bits.is_empty(),
+                world.arch_masks.is_empty(),
                 "component types for {label}"
             );
         }
@@ -1851,7 +1859,7 @@ mod tests {
             assert!(!added, "answer for {label}");
             assert_eq!(world.archetypes.len(), 1, "number of tables for {label}");
             assert!(
-                world.component_bits.is_empty(),
+                world.arch_masks.is_empty(),
                 "component types for {label}"
             );
         }
@@ -2063,8 +2071,8 @@ mod tests {
 
         world.reserve::<(Position, Health)>(4);
 
-        let position_bit = world.component_bits[&TypeId::of::<Position>()];
-        let health_bit = world.component_bits[&TypeId::of::<Health>()];
+        let position_bit = world.arch_masks[&TypeId::of::<Position>()];
+        let health_bit = world.arch_masks[&TypeId::of::<Health>()];
         let table = &world.archetypes[1];
         let table_index = world.indices.get(&(position_bit | health_bit));
         assert_eq!(world.archetypes.len(), 2, "number of tables");
@@ -2172,7 +2180,7 @@ mod tests {
         let last = world.find_or_assign_bit(type_ids[63]);
 
         assert_eq!(last, ComponentMask::single(63), "bit of the last type");
-        assert_eq!(world.component_bits.len(), 64, "component types");
+        assert_eq!(world.arch_masks.len(), 64, "component types");
     }
 
     /// Checks that `find_or_assign_bit` panics on a 65th type, since a mask has room for 64 bits

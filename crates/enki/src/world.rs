@@ -61,7 +61,7 @@
 use crate::archetype::Archetype;
 use crate::component::{Component, ComponentInfo};
 use crate::mask::ComponentMask;
-use crate::{Bundle, Entity, Query, query};
+use crate::{query, Bundle, Entity, Query, ReadOnlyQuery};
 use std::any::TypeId;
 use std::collections::HashMap;
 
@@ -609,6 +609,19 @@ impl World {
         self.query_archetype_mut::<Q>().flat_map(Q::split_rows)
     }
 
+    pub fn query_archetype<Q: ReadOnlyQuery>(&self) -> impl Iterator<Item = Q::Columns<'_>> {
+        query::check_access::<Q>(); // Adds READ access to all components in Query
+        self.find_matching_archetypes::<Q>()
+            // SAFETY: `find_columns` requires three guarantees. `Q` builds only shared slices, and
+            // `&self` stops any change to the world for as long as the iterator lives.
+            // `check_access` passed above, and the iterator visits each table once
+            .filter_map(|archetype| unsafe { Q::find_columns(archetype) })
+    }
+
+    pub fn query<Q: ReadOnlyQuery>(&self) -> impl Iterator<Item = Q::Item<'_>> {
+        // Splits each table's columns into one item for each entity
+        self.query_archetype::<Q>().flat_map(Q::split_rows)
+    }
     // ========================================================================================== \\
     //                                       Helper Methods                                       \\
     // ========================================================================================== \\

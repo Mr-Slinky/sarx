@@ -211,6 +211,11 @@ unsafe impl<T: Component> Query for &mut T {
     }
 }
 
+pub unsafe trait ReadOnlyQuery: Query {}
+
+/// SAFETY: `find_columns` for `&T` builds a `&[T]`, which is a shared slice
+unsafe impl<T: Component> ReadOnlyQuery for &T {}
+
 /// Implements [`Query`] for every tuple with one field per listed type parameter.
 ///
 /// The call `impl_query!(A, B, C)` implements [`Query`] for `(A, B, C)`, where each of `A`, `B`
@@ -263,6 +268,10 @@ macro_rules! impl_query {
                 iter::from_fn(move || Some(($($name.next()?,)+)))
             }
         }
+
+        // SAFETY: `find_columns` for a tuple builds the slices of its fields. Each field implements
+        // `ReadOnlyQuery`, meaning each builds only shared slices
+        unsafe impl<$($name: ReadOnlyQuery),+> ReadOnlyQuery for ($($name,)+) {}
     };
 }
 

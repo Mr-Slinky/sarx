@@ -12,5 +12,5 @@ mod world;
 pub use bundle::Bundle;
 pub use component::Component;
 pub use entity::Entity;
-pub use query::Query;
+pub use query::{Query, ReadOnlyQuery};
 pub use world::World;

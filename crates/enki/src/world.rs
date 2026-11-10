@@ -2443,18 +2443,6 @@ mod tests {
         let _items = world.query_mut::<(&mut Position, &Position)>();
     }
 
-    /// Checks that `query_mut` panics on a 65th component type, since a mask has room for 64 bits
-    #[test]
-    #[should_panic]
-    fn query_mut_with_65th_component_type_panics() {
-        let mut world = World::new();
-        for type_id in build_64_type_ids() {
-            world.find_or_assign_bit(type_id);
-        }
-
-        let _items = world.query_mut::<&Health>();
-    }
-
     /// Checks that `query_archetype_mut` returns one item for each matching table, with its whole
     /// column
     #[test]

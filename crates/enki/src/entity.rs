@@ -1,6 +1,8 @@
 //! Defines the handle that refers to one entity in a world.
 //!
 //! The world documentation sets out how a world uses the index and the version in each handle.
+//!
+//! The example on [`Entity`] spawns an entity, copies its handle, and despawns the entity.
 
 /// Refers to one entity in a [`World`](crate::World).
 ///
@@ -22,34 +24,48 @@
 ///
 /// // Spawns an entity, and copies its handle
 /// let mut world = World::new();
-/// let player = world.spawn_empty_ent();
+/// let player = world.spawn_empty();
 /// let copy = player;
 ///
 /// // Despawns the entity, after which the copy does not find an entity either
-/// world.despawn_ent(player);
-/// assert!(!world.despawn_ent(copy));
+/// world.despawn(player);
+/// assert!(!world.despawn(copy));
 /// ```
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Entity {
     /// Stores the position of the slot that the entity occupies in the world.
+    ///
+    /// The example on [`Entity::new`] reads the index back through [`Entity::index`].
     index: u32,
     /// Stores the version that the slot had when the world created this entity.
+    ///
+    /// The example on [`Entity::new`] reads the version back through [`Entity::version`].
     version: u32,
 }
 
 impl Entity {
     /// Returns a handle with the slot position `index` and the version `version`.
+    ///
+    /// # Examples
+    ///
+    /// `Entity::new(5, 2)` returns a handle whose `index` returns 5 and whose `version` returns 2.
+    /// The test `new_with_standard_and_extreme_values_returns_same_index_and_version` checks the
+    /// extreme values.
     pub(crate) fn new(index: u32, version: u32) -> Self {
         Self { index, version }
     }
 
     /// Returns the position of the slot that the entity occupies, as a `usize`, the type that
     /// indexes a `Vec`.
+    ///
+    /// The example on [`Entity::new`] creates a handle for slot 5, and this method returns `5`.
     pub(crate) fn index(self) -> usize {
         self.index as usize
     }
 
     /// Returns the version that the slot had when the world created this entity.
+    ///
+    /// The example on [`Entity::new`] creates a handle at version 2, and this method returns `2`.
     pub(crate) fn version(self) -> u32 {
         self.version
     }

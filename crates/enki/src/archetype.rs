@@ -96,14 +96,20 @@ use std::{mem, process};
 /// Stores every entity with one set of component types, as rows across one column per type.
 ///
 /// A caller reaches a column by [`TypeId`], through [`components_of`](Self::components_of) or
-/// [`components_of_mut`](Self::components_of_mut). The module documentation sets out how a caller
-/// adds a row and moves one to another table.
+/// [`components_of_mut`](Self::components_of_mut). The [module example](self#examples) shows how a
+/// caller adds a row and moves one to another table.
 pub struct Archetype {
     /// Stores one column for each component type, sorted by `TypeId`.
+    ///
+    /// The [module example](self#examples) fills the `Position` column and the `Health` column.
     components: Vec<ComponentVec>,
     /// Stores the entity that owns each row, in row order.
+    ///
+    /// The [module example](self#examples) adds two entities to this list.
     entities: Vec<Entity>,
     /// Stores one set bit for each component type in `components`.
+    ///
+    /// The [module example](self#examples) builds a table whose mask sets bits 0 and 1.
     mask: ComponentMask,
 }
 
@@ -126,6 +132,11 @@ impl Archetype {
     /// Panics in a debug build where two entries in `infos` share a bit. A release build skips that
     /// check, since the world builds every list that it passes here with a different bit for each
     /// type.
+    ///
+    /// # Examples
+    ///
+    /// The [module example](self#examples) builds a table for `{Position}` and a table for
+    /// `{Position, Health}`.
     pub(crate) fn new(infos: &[ComponentInfo]) -> Self {
         // Creates one empty column for each entry in `infos`
         let mut components: Vec<ComponentVec> =
@@ -150,6 +161,8 @@ impl Archetype {
     }
 
     /// Returns the number of entities in the table.
+    ///
+    /// The [module example](self#examples) checks that each table has one entity after a move.
     pub(crate) fn len(&self) -> usize {
         self.entities.len()
     }
@@ -157,11 +170,24 @@ impl Archetype {
     /// Returns the [`ComponentInfo`] for each component type in the table, sorted by [`TypeId`].
     ///
     /// Each call builds a new `Vec`, which the caller then owns.
+    ///
+    /// # Examples
+    ///
+    /// For a table built from `Position` and `Health`, `infos` returns both entries sorted by
+    /// `TypeId`, whatever order the caller passed them in. The test
+    /// `infos_with_any_entry_order_returns_each_type_and_bit_sorted_by_type_id` checks both orders.
     pub(crate) fn infos(&self) -> Vec<ComponentInfo> {
         self.components.iter().map(ComponentVec::info).collect()
     }
 
     /// Returns the mask of the table, with one set bit for each component type that it stores.
+    ///
+    /// # Examples
+    ///
+    /// For a table built from `Position` at bit 0 and `Health` at bit 1, `mask` returns the mask
+    /// with bits 0 and 1 set. The test
+    /// `new_with_varying_infos_returns_empty_table_with_combined_mask` checks the mask for several
+    /// sets of types.
     pub(crate) fn mask(&self) -> ComponentMask {
         self.mask
     }
@@ -171,6 +197,12 @@ impl Archetype {
     ///
     /// A `query_mask` of [`ComponentMask::EMPTY`] does not ask for any component types, and the
     /// method then returns `true` for every table.
+    ///
+    /// # Examples
+    ///
+    /// For a table with bits 0, 1 and 3, `has_all` returns `true` for the mask with bits 0 and 1,
+    /// `true` for `ComponentMask::EMPTY`, and `false` for bit 2. The test
+    /// `has_all_with_varying_query_masks_returns_expected_answer` checks more masks.
     pub(crate) fn has_all(&self, query_mask: ComponentMask) -> bool {
         self.mask.contains_all(query_mask)
     }
@@ -189,6 +221,11 @@ impl Archetype {
     /// Panics where any column lacks a component for the new row once `fill` returns. Also panics
     /// where the list is full and a larger block would exceed `isize::MAX` bytes. The program
     /// aborts where the allocator cannot supply the larger block.
+    ///
+    /// # Examples
+    ///
+    /// The [module example](self#examples) adds two entities, with a `fill` that pushes each
+    /// entity's `Position`.
     pub(crate) fn push_entity(&mut self, entity: Entity, fill: impl FnOnce(&mut Archetype, usize)) {
         self.entities.push(entity);
         let row = self.entities.len() - 1;
@@ -211,6 +248,12 @@ impl Archetype {
     ///
     /// Panics where the required capacity overflows a `usize`, or where a larger block would exceed
     /// `isize::MAX` bytes. The program aborts where the allocator cannot supply the block.
+    ///
+    /// # Examples
+    ///
+    /// The test `reserve_with_varying_additional_rows_fits_rows_without_moving_blocks` makes room
+    /// for a number of entities, pushes that many, and checks that neither the entity list nor any
+    /// column moved to a larger block.
     pub(crate) fn reserve(&mut self, additional: usize) {
         for components in &mut self.components {
             components.reserve(additional);
@@ -223,6 +266,11 @@ impl Archetype {
     /// The entity at index `i` in the returned slice owns the component at index `i` in every
     /// column. The slice borrows the table, meaning the compiler rejects any change to the table
     /// while the slice is in use.
+    ///
+    /// # Examples
+    ///
+    /// After pushes of `first` and then `second`, `entities` returns `[first, second]`. The test
+    /// `entities_with_varying_row_counts_returns_entities_in_row_order` checks several row counts.
     pub(crate) fn entities(&self) -> &[Entity] {
         &self.entities
     }
@@ -231,6 +279,12 @@ impl Archetype {
     ///
     /// The returned reference borrows the table, meaning the compiler rejects any change to the
     /// table while the reference is in use.
+    ///
+    /// # Examples
+    ///
+    /// The test `components_of_with_stored_and_absent_types_finds_only_stored_columns` asks a table
+    /// for a type that it stores, which returns the column, and for one that it lacks, which
+    /// returns `None`.
     pub(crate) fn components_of(&self, type_id: TypeId) -> Option<&ComponentVec> {
         let index = self.find_index_of(type_id)?;
         Some(&self.components[index])
@@ -246,6 +300,11 @@ impl Archetype {
     /// then leave every column with one component for each entity in the entity list, as the Rows
     /// section in the module documentation sets out. A replacement column MUST also store the same
     /// component type, since the search depends on the sorted order.
+    ///
+    /// # Examples
+    ///
+    /// The [module example](self#examples) pushes a `Position` and a `Health` through the columns
+    /// that this method returns.
     pub(crate) fn components_of_mut(&mut self, type_id: TypeId) -> Option<&mut ComponentVec> {
         let index = self.find_index_of(type_id)?;
         Some(&mut self.components[index])
@@ -268,19 +327,8 @@ impl Archetype {
     ///
     /// # Examples
     ///
-    /// The example borrows the `Position` and `Velocity` columns together, then moves the
-    /// position of the entity at row 0 by its velocity.
-    ///
-    /// ```ignore
-    /// // Borrows both columns at once, and panics where the table lacks either one
-    /// let [positions, velocities] = table
-    ///     .get_disjoint_components_mut([TypeId::of::<Position>(), TypeId::of::<Velocity>()])
-    ///     .expect("the table should store `Position` and `Velocity`");
-    ///
-    /// // Adds the velocity at row 0 to the position at row 0
-    /// let velocity = &velocities.as_mut_slice::<Velocity>()[0];
-    /// positions.as_mut_slice::<Position>()[0].0 += velocity.0;
-    /// ```
+    /// The test `get_disjoint_components_mut_with_stored_types_returns_columns_in_requested_order`
+    /// borrows two columns at once, and receives them in the order of the requested types.
     pub(crate) fn get_disjoint_components_mut<const N: usize>(
         &mut self,
         type_ids: [TypeId; N],
@@ -313,6 +361,12 @@ impl Archetype {
     /// one column at a time. Such a panic would therefore leave the columns already visited one
     /// component shorter than the other columns and the entity list. Ending the program stops any
     /// later call from using the table in that state.
+    ///
+    /// # Examples
+    ///
+    /// The test `remove_entity_with_varying_rows_fills_gap_with_last_row` removes rows from a table
+    /// of several rows. Removing row 0 moves the last entity into row 0 and returns it. Removing
+    /// the last row returns `None`.
     pub(crate) fn remove_entity(&mut self, row: usize) -> Option<Entity> {
         // Panics before anything changes, where `row` lies past the last entity
         assert!(
@@ -373,6 +427,11 @@ impl Archetype {
     /// first. The method moves one column at a time. Such a panic would therefore leave columns of
     /// different lengths, in this table and in `target`. Ending the program stops any later call
     /// from using either table in that state.
+    ///
+    /// # Examples
+    ///
+    /// The [module example](self#examples) moves an entity to a table that also stores `Health`,
+    /// with a `fill` that pushes its new `Health`.
     pub(crate) fn move_entity_dropping(
         &mut self,
         row: usize,
@@ -433,6 +492,11 @@ impl Archetype {
 
     /// Returns `true` where every column has one component for each entity in the entity list, and
     /// `false` where any column is longer or shorter than the entity list.
+    ///
+    /// # Examples
+    ///
+    /// For a table with one entity and one `Health`, the method returns `true`. Where a second
+    /// entity joins the entity list without a `Health`, it returns `false`.
     fn has_one_component_per_entity(&self) -> bool {
         let ent_count = self.entities.len();
         // Checks that every column has one component for each row
@@ -443,6 +507,12 @@ impl Archetype {
 
     /// Returns the position of the column for `type_id` in `components`, or `None` where the table
     /// has no such column.
+    ///
+    /// # Examples
+    ///
+    /// In a table for `{Position, Health}`, the method returns `Some(0)` for `Health` where the
+    /// `TypeId` of `Health` sorts before the one for `Position`, and `Some(1)` otherwise. It
+    /// returns `None` for `Velocity`, which the table lacks.
     fn find_index_of(&self, type_id: TypeId) -> Option<usize> {
         self.components
             .binary_search_by_key(&type_id, |components| components.info().type_id())
@@ -464,10 +534,20 @@ impl Archetype {
 ///
 /// The abort follows a decision that `ComponentVec` also takes. That decision treats a panicking
 /// `Drop` as a bug in the component.
+///
+/// # Examples
+///
+/// [`Archetype::remove_entity`] shows the pattern. It creates the guard before the first column
+/// changes length, removes the row from each column and from the entity list, then passes the guard
+/// to `mem::forget`. A panic between those two points drops the guard, and thereby aborts the
+/// program.
 struct AbortOnUnwind;
 
 impl Drop for AbortOnUnwind {
     /// Aborts the program. The panic hook has already printed the panic message by this point.
+    ///
+    /// The docs on [`AbortOnUnwind`] describe the one path that reaches this method, a panic
+    /// between creating the guard and passing it to [`mem::forget`].
     fn drop(&mut self) {
         process::abort();
     }

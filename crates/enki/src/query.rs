@@ -6,35 +6,66 @@
 //! up to thirty-two queries.
 //!
 //! The caller passes the query type to `World::query_mut`, which returns one item for each entity
-//! that has every type in the query. The documentation on `World::query_mut` shows a full example.
+//! that has every type in the query. A query that only reads implements [`ReadOnlyQuery`]. The
+//! caller can pass such a query to `World::query` instead, which borrows the world through a shared
+//! reference. The documentation on each of the two methods shows a full example.
 //!
-//! # Rules on access
+//! The example on [`Query`] passes the query `(&mut Position, &Velocity)` to a function that
+//! accepts any query type.
+//!
+//! # Rules on permissions
 //!
 //! A query changes a component type only where it asks for that type once. A query such as
 //! `(&mut Position, &Position)` would hand out two references to the same `Position`, one of them
-//! able to change it. Rust forbids that pair of references. [`check_access`] therefore panics on
-//! such a query, before the world hands out any reference.
+//! able to change it. Rust forbids that pair of references. [`check_permissions`] therefore panics
+//! on such a query, before the world hands out any reference.
 
 use crate::Component;
 use crate::archetype::Archetype;
 use std::any::TypeId;
 use std::{iter, slice};
 
-/// Declares the trait that seals [`Query`].
+/// Declares the traits that seal [`Query`] and [`ReadOnlyQuery`].
+///
+/// The example on [`Query`] passes the query `(&mut Position, &Velocity)`, one of the types that
+/// the crate implements `Sealed` for.
 mod sealed {
     /// Marks each type that the crate implements [`Query`](super::Query) for.
     ///
     /// The trait is `pub` inside a private module. Code outside the crate therefore cannot write a
     /// path to it, and cannot implement it.
+    ///
+    /// The example on [`Query`](super::Query) passes the query `(&mut Position, &Velocity)`, one of
+    /// the types that implement this trait.
     pub trait Sealed {}
+
+    /// Marks each type that the crate implements [`ReadOnlyQuery`](super::ReadOnlyQuery) for.
+    ///
+    /// The trait is `pub` inside a private module, as `Sealed` is. `Sealed` cannot seal
+    /// `ReadOnlyQuery` on its own, since `&mut T` implements `Sealed` as a `Query`. This trait
+    /// leaves `&mut T` out.
+    ///
+    /// The first example on [`ReadOnlyQuery`](super::ReadOnlyQuery) passes `&Position`, one of the
+    /// types that implement this trait.
+    pub trait ReadOnlySealed {}
 }
 
 /// Represents whether a query reads a component type or changes it.
+///
+/// The test `add_permissions_with_each_query_shape_pushes_entries_in_order` lists the `Permission`
+/// that each query shape records. `&Position` records `Permission::Read`, and `&mut Position`
+/// records `Permission::Write`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Access {
+pub enum Permission {
     /// The query reads the component, through a `&T`.
+    ///
+    /// The test `add_permissions_with_each_query_shape_pushes_entries_in_order` shows `&Position`
+    /// recording `Permission::Read`.
     Read,
     /// The query changes the component, through a `&mut T`.
+    ///
+    /// The test `add_permissions_with_each_query_shape_pushes_entries_in_order` shows
+    /// `&mut Position` recording `Permission::Write`.
     Write,
 }
 
@@ -44,11 +75,11 @@ pub enum Access {
 /// A tuple of one to thirty-two query types, such as `(A, B, C)`, is also a query, and asks for every
 /// type that its fields ask for.
 ///
-/// The world runs a query in three steps. It first calls [`Query::add_access`] to collect the
+/// The world runs a query in three steps. It first calls [`Query::add_permissions`] to collect the
 /// component types that the query asks for. It then calls [`Query::find_columns`] to borrow the
 /// matching columns of each table. Finally, it calls [`Query::split_rows`] to split those columns
-/// into one item per entity. `World::query_archetype_mut` stops after the second step, and returns
-/// the columns.
+/// into one item per entity. `World::query_archetype_mut` and `World::query_archetype` stop after
+/// the second step, and return the columns.
 ///
 /// # Lifetimes
 ///
@@ -67,13 +98,13 @@ pub enum Access {
 ///
 /// An implementation MUST guarantee the following:
 ///
-/// - [`Query::add_access`] pushes one entry for every component type that
-///   [`Query::find_columns`] borrows. The entry is `Access::Write` for every type that
+/// - [`Query::add_permissions`] pushes one entry for every component type that
+///   [`Query::find_columns`] borrows. The entry is `Permission::Write` for every type that
 ///   `find_columns` borrows mutably.
 /// - [`Query::find_columns`] borrows only the columns of the table that it receives.
 ///
-/// `check_access` relies on the first guarantee to reject a query that borrows one column mutably
-/// and also borrows it a second time. A missing entry would let a mutable reference reach a
+/// `check_permissions` relies on the first guarantee to reject a query that borrows one column
+/// mutably and also borrows it a second time. A missing entry would let a mutable reference reach a
 /// component that another reference also reaches, which is undefined behaviour.
 ///
 /// # Examples
@@ -84,12 +115,12 @@ pub enum Access {
 ///
 /// ```
 /// use enki::Query;
+/// # use enki::Component;
 ///
 /// struct Position(f32, f32);
 /// struct Velocity(f32, f32);
-///
-/// impl enki::Component for Position {}
-/// impl enki::Component for Velocity {}
+/// # impl Component for Position {}
+/// # impl Component for Velocity {}
 ///
 /// // Accepts any query type
 /// fn accept<Q: Query>() {}
@@ -102,20 +133,29 @@ pub unsafe trait Query: sealed::Sealed {
     ///
     /// `&T` borrows its column as a `&'w [T]`, and `&mut T` as a `&'w mut [T]`. A tuple borrows the
     /// columns that each of its fields borrows.
+    ///
+    /// The example on [`World::query_archetype_mut`](crate::World::query_archetype_mut) receives
+    /// the columns of `(&mut Position, &Velocity)` as a `(&mut [Position], &[Velocity])`.
     type Columns<'w>;
 
     /// Represents the item that the query produces for one entity, for the lifetime `'w`.
     ///
     /// `&T` produces a `&'w T`, and `&mut T` a `&'w mut T`. A tuple produces a tuple that contains
     /// the item that each field produces.
+    ///
+    /// The example on [`World::query_mut`](crate::World::query_mut) receives the item of
+    /// `(&mut Position, &Velocity)` as a `(&mut Position, &Velocity)`.
     type Item<'w>;
 
-    /// Pushes one entry onto `accesses` for each component type that the query asks for.
+    /// Pushes one entry onto `permissions` for each component type that the query asks for.
     ///
-    /// Each entry pairs the [`TypeId`] of the type with the `Access` that the query needs. A tuple
-    /// pushes the entries of each field, in field order. The method leaves every
-    /// existing entry in `accesses` in place.
-    fn add_access(accesses: &mut Vec<(TypeId, Access)>);
+    /// Each entry pairs the [`TypeId`] of the type with the `Permission` that the query needs. A
+    /// tuple pushes the entries of each field, in field order. The method leaves every existing
+    /// entry in `permissions` in place.
+    ///
+    /// The test `add_permissions_with_each_query_shape_pushes_entries_in_order` lists the entries
+    /// that single types, tuples and tuples inside tuples push.
+    fn add_permissions(permissions: &mut Vec<(TypeId, Permission)>);
 
     /// Returns the columns in `archetype` that the query asks for, or `None` where the table lacks
     /// one of the component types.
@@ -127,35 +167,44 @@ pub unsafe trait Query: sealed::Sealed {
     ///
     /// The caller MUST guarantee three things:
     ///
-    /// - Nothing outside the query reads or changes the columns of `archetype` during `'w`. A
-    ///   caller that borrows the world through `&mut World` for `'w` meets this guarantee.
-    /// - `check_access` has already returned for the query type, without a panic.
-    /// - The caller calls the method at most once for each table during `'w`. A tuple calls the
-    ///   method of each field once. It thereby calls the method of `&T` twice where two fields are
-    ///   `&T`, as in `(&Position, &Position)`. That repeat builds two shared slices of one column,
-    ///   which Rust allows, and `check_access` rejects any repeat that involves a `&mut T`.
+    /// - Nothing changes the columns of `archetype` during `'w`, apart from the query itself
+    ///   through a column that it borrows mutably. Nothing else reads such a column. A caller that
+    ///   holds `&mut World` for `'w` meets this guarantee. So does a caller that holds `&World` for
+    ///   a query that implements [`ReadOnlyQuery`].
+    /// - `check_permissions` has already returned for the query type, without a panic.
+    /// - No other live slice of a column that the query borrows mutably exists during `'w`. Shared
+    ///   slices of one column can overlap, which Rust allows. Two `query::<&Position>()` iterators
+    ///   over one `&World` build two such slices, and so does the query `(&Position, &Position)`.
     ///
     /// A broken guarantee lets a mutable slice reach a component that another reference also
     /// reaches, which is undefined behaviour.
+    ///
+    /// # Examples
+    ///
+    /// The test `find_columns_with_read_query_returns_column_in_row_order` builds a table with
+    /// three rows, and checks that `&Position` returns the `Position` column in row order.
     unsafe fn find_columns<'w>(archetype: &'w Archetype) -> Option<Self::Columns<'w>>;
 
     /// Returns an iterator over the rows in `columns`, with one item for each entity in the table.
     ///
     /// The items come in row order. The item for each entity borrows from the columns for the
     /// lifetime `'w`.
+    ///
+    /// The test `split_rows_with_read_query_yields_items_in_row_order` splits a `Position` column
+    /// of three rows, and checks that the items come in row order.
     fn split_rows<'w>(columns: Self::Columns<'w>) -> impl Iterator<Item = Self::Item<'w>>;
 }
 
 impl<T: Component> sealed::Sealed for &T {}
 
-// SAFETY: `add_access` pushes one `Access::Read` entry for `T`, which is the one type that
+// SAFETY: `add_permissions` pushes one `Permission::Read` entry for `T`, which is the one type that
 // `find_columns` borrows. `find_columns` borrows only the `T` column of the table that it receives
 unsafe impl<T: Component> Query for &T {
     type Columns<'w> = &'w [T];
     type Item<'w> = &'w T;
 
-    fn add_access(accesses: &mut Vec<(TypeId, Access)>) {
-        accesses.push((TypeId::of::<T>(), Access::Read));
+    fn add_permissions(permissions: &mut Vec<(TypeId, Permission)>) {
+        permissions.push((TypeId::of::<T>(), Permission::Read));
     }
 
     unsafe fn find_columns<'w>(archetype: &'w Archetype) -> Option<Self::Columns<'w>> {
@@ -170,15 +219,15 @@ unsafe impl<T: Component> Query for &T {
 
 impl<T: Component> sealed::Sealed for &mut T {}
 
-// SAFETY: `add_access` pushes one `Access::Write` entry for `T`, which is the one type that
-// `find_columns` borrows, and borrows mutably. `find_columns` borrows only the `T` column of the
-// table that it receives
+// SAFETY: `add_permissions` pushes one `Permission::Write` entry for `T`, which is the one type
+// that `find_columns` borrows, and borrows mutably. `find_columns` borrows only the `T` column of
+// the table that it receives
 unsafe impl<T: Component> Query for &mut T {
     type Columns<'w> = &'w mut [T];
     type Item<'w> = &'w mut T;
 
-    fn add_access(accesses: &mut Vec<(TypeId, Access)>) {
-        accesses.push((TypeId::of::<T>(), Access::Write));
+    fn add_permissions(permissions: &mut Vec<(TypeId, Permission)>) {
+        permissions.push((TypeId::of::<T>(), Permission::Write));
     }
 
     unsafe fn find_columns<'w>(archetype: &'w Archetype) -> Option<Self::Columns<'w>> {
@@ -198,11 +247,13 @@ unsafe impl<T: Component> Query for &mut T {
         // through `start`. Three guarantees from the caller keep every other reference off it:
         //
         // - The caller holds `&mut World` for `'w`, meaning nothing outside the query reaches any
-        //   table.
-        // - `check_access` has passed, meaning `T` appears once in the query. Every other part of the
-        //   query borrows a column of another type, which has its own block.
-        // - The caller visits each table once, meaning no later call builds a second slice of this
-        //   column.
+        //   table. A `&mut T` query reaches this method only through the `_mut` methods on
+        //   `World`, since `&mut T` does not implement `ReadOnlyQuery`, and the seal on
+        //   `ReadOnlyQuery` stops any other crate from implementing it.
+        // - `check_permissions` has passed, meaning `T` appears once in the query. Every other part
+        //   of the query borrows a column of another type, which has its own block.
+        // - No other live slice of this column exists during `'w`, as the third guarantee in the
+        //   Safety section of `find_columns` requires.
         Some(unsafe { slice::from_raw_parts_mut(start.as_ptr(), len) })
     }
 
@@ -211,9 +262,86 @@ unsafe impl<T: Component> Query for &mut T {
     }
 }
 
-pub unsafe trait ReadOnlyQuery: Query {}
+/// Marks a query that only reads its components.
+///
+/// `&T` implements the trait, and so does a tuple whose fields all implement it. `&mut T` does not
+/// implement it, and neither does a tuple with a `&mut T` field. The trait declares no methods. It
+/// requires [`Query`], which describes the component types that the query asks for.
+///
+/// [`World::query`](crate::World::query) and
+/// [`World::query_archetype`](crate::World::query_archetype) accept only a query that implements
+/// the trait. Both methods borrow the world through a shared reference. As a result, two read
+/// queries can run at once, and a loop over one query can call `World::get`.
+///
+/// # Visibility
+///
+/// Code outside the crate can name the trait as a bound, and can pass any query type that the
+/// crate implements it for. Code outside the crate cannot implement the trait. `ReadOnlyQuery`
+/// requires the trait `ReadOnlySealed`, which a private module in `query.rs` declares. Code outside
+/// the crate cannot write a path to `ReadOnlySealed`, and therefore cannot implement it.
+///
+/// The seal matters for `&mut T`. Rust treats `&mut T` as a type of the crate that defines `T`. A
+/// crate that defines a component could otherwise implement `ReadOnlyQuery` for `&mut` of that
+/// component, and `World::query` would then hand out mutable slices through `&World`.
+///
+/// # Safety
+///
+/// An implementation MUST guarantee that [`Query::find_columns`] builds only shared slices. A
+/// mutable slice built through `&World` would let a caller change a component while another caller
+/// reads it, which is undefined behaviour.
+///
+/// # Examples
+///
+/// The example accepts `&Position` as a `ReadOnlyQuery`.
+///
+/// ```
+/// use enki::ReadOnlyQuery;
+/// # use enki::Component;
+///
+/// struct Position(f32, f32);
+/// # impl Component for Position {}
+///
+/// // Accepts any query that only reads
+/// fn accept<Q: ReadOnlyQuery>() {}
+///
+/// // Passes a query that reads each `Position`
+/// accept::<&Position>();
+/// ```
+///
+/// The compiler rejects `&mut Position` in [`World::query`](crate::World::query), since
+/// `find_columns` for `&mut T` builds a mutable slice.
+///
+/// ```compile_fail
+/// use enki::World;
+/// # use enki::Component;
+///
+/// struct Position(f32, f32);
+/// # impl Component for Position {}
+///
+/// let world = World::new();
+///
+/// // Fails to compile, since `&mut Position` does not implement `ReadOnlyQuery`
+/// for position in world.query::<&mut Position>() {}
+/// ```
+///
+/// The compiler also rejects an implementation for `&mut Position` written outside the crate,
+/// since `&mut Position` does not implement `ReadOnlySealed`.
+///
+/// ```compile_fail
+/// use enki::ReadOnlyQuery;
+/// # use enki::Component;
+///
+/// struct Position(f32, f32);
+/// # impl Component for Position {}
+///
+/// // Fails to compile, since code outside `enki` cannot implement the sealing trait
+/// unsafe impl ReadOnlyQuery for &mut Position {}
+/// ```
+pub unsafe trait ReadOnlyQuery: Query + sealed::ReadOnlySealed {}
 
-/// SAFETY: `find_columns` for `&T` builds a `&[T]`, which is a shared slice
+impl<T: Component> sealed::ReadOnlySealed for &T {}
+
+// SAFETY: `find_columns` for `&T` builds a `&[T]`, which is a shared slice
 unsafe impl<T: Component> ReadOnlyQuery for &T {}
 
 /// Implements [`Query`] for every tuple with one field per listed type parameter.
@@ -238,21 +366,22 @@ macro_rules! impl_query {
         impl<$($name: Query),+> sealed::Sealed for ($($name,)+) {}
 
         // SAFETY: each field implements `Query`, and thereby meets both guarantees on its own.
-        // `add_access` pushes every entry of each field, in field order. `find_columns` borrows
-        // the columns that the fields borrow, from the one table that it receives
+        // `add_permissions` pushes every entry of each field, in field order. `find_columns`
+        // borrows the columns that the fields borrow, from the one table that it receives
         unsafe impl<$($name: Query),+> Query for ($($name,)+) {
             type Columns<'w> = ($(<$name as Query>::Columns<'w>,)+);
             type Item<'w> = ($(<$name as Query>::Item<'w>,)+);
 
-            fn add_access(accesses: &mut Vec<(TypeId, Access)>) {
-                $(<$name as Query>::add_access(accesses);)+
+            fn add_permissions(permissions: &mut Vec<(TypeId, Permission)>) {
+                $(<$name as Query>::add_permissions(permissions);)+
             }
 
             unsafe fn find_columns<'w>(archetype: &'w Archetype) -> Option<Self::Columns<'w>> {
                 // SAFETY: `find_columns` requires the three guarantees in its Safety section. The
                 // caller gives them for the tuple, and they carry over to each field.
-                // `check_access` for the tuple covers every entry of every field. Each field is
-                // called once for this table
+                // `check_permissions` for the tuple covers every entry of every field. Two fields
+                // can therefore share a column only where both read it, which builds two shared
+                // slices
                 Some(($(unsafe { <$name as Query>::find_columns(archetype) }?,)+))
             }
 
@@ -268,6 +397,8 @@ macro_rules! impl_query {
                 iter::from_fn(move || Some(($($name.next()?,)+)))
             }
         }
+
+        impl<$($name: ReadOnlyQuery),+> sealed::ReadOnlySealed for ($($name,)+) {}
 
         // SAFETY: `find_columns` for a tuple builds the slices of its fields. Each field implements
         // `ReadOnlyQuery`, meaning each builds only shared slices
@@ -345,14 +476,15 @@ impl_query!(
 ///
 /// Panics where `Q` asks for one component type twice, and changes it through at least one of the
 /// two. `(&mut Position, &Position)` panics, for example, whereas `(&Position, &Position)` passes.
-pub(crate) fn check_access<Q: Query>() {
-    let mut accesses = Vec::new();
-    Q::add_access(&mut accesses);
-    for (index, &(type_id, access)) in accesses.iter().enumerate() {
-        for &(other_id, other_access) in &accesses[index + 1..] {
-            // Records whether either access of the pair changes its component
-            let writes = access == Access::Write || other_access == Access::Write;
-            // Panics where both accesses are for one type and at least one of them changes that type
+pub(crate) fn check_permissions<Q: Query>() {
+    let mut permissions = Vec::new();
+    Q::add_permissions(&mut permissions);
+    for (index, &(type_id, permission)) in permissions.iter().enumerate() {
+        for &(other_id, other_permission) in &permissions[index + 1..] {
+            // Records whether either permission of the pair changes its component
+            let writes = permission == Permission::Write || other_permission == Permission::Write;
+            // Panics where both permissions are for one type and at least one of them changes that
+            // type
             if type_id == other_id && writes {
                 panic!("a query must not change a component type that it also asks for elsewhere");
             }
@@ -395,10 +527,10 @@ mod tests {
     impl Component for Health {}
 
     /// Returns the entries that `Q` pushes onto an empty list.
-    fn collect_accesses<Q: Query>() -> Vec<(TypeId, Access)> {
-        let mut accesses = Vec::new();
-        Q::add_access(&mut accesses);
-        accesses
+    fn collect_permissions<Q: Query>() -> Vec<(TypeId, Permission)> {
+        let mut permissions = Vec::new();
+        Q::add_permissions(&mut permissions);
+        permissions
     }
 
     /// Defines the query type with the most fields that `impl_query!` implements `Query` for. It
@@ -469,18 +601,18 @@ mod tests {
         table
     }
 
-    /// Runs `check_access` for `Q`, then returns the columns in `table` that `Q` asks for.
+    /// Runs `check_permissions` for `Q`, then returns the columns in `table` that `Q` asks for.
     ///
     /// The columns borrow `table` exclusively, meaning the compiler rejects any other use of the
     /// table while they are in use.
     fn find_checked<Q: Query>(table: &mut Archetype) -> Option<Q::Columns<'_>> {
-        check_access::<Q>();
+        check_permissions::<Q>();
 
         // SAFETY: `find_columns` requires three things. First, nothing outside the query reaches
         // the columns during the borrow, since `table` is an exclusive borrow that the returned
-        // columns inherit. Second, `check_access` has returned for `Q`, on the line above. Third,
-        // the method runs once for the table during the borrow, since the exclusive borrow stops
-        // any second call until the columns are gone
+        // columns inherit. Second, `check_permissions` has returned for `Q`, on the line above.
+        // Third, the method runs once for the table during the borrow, since the exclusive borrow
+        // stops any second call until the columns are gone
         unsafe { Q::find_columns(table) }
     }
 
@@ -494,7 +626,7 @@ mod tests {
 
     /// Checks the entries and their order for single types, pairs and pairs inside pairs
     #[test]
-    fn add_access_with_each_query_shape_pushes_entries_in_order() {
+    fn add_permissions_with_each_query_shape_pushes_entries_in_order() {
         let position = TypeId::of::<Position>();
         let velocity = TypeId::of::<Velocity>();
         let tag = TypeId::of::<Tag>();
@@ -504,69 +636,69 @@ mod tests {
         let cases = [
             (
                 "&Position",
-                collect_accesses::<&Position>(),
-                vec![(position, Access::Read)],
+                collect_permissions::<&Position>(),
+                vec![(position, Permission::Read)],
             ),
             (
                 "&mut Position",
-                collect_accesses::<&mut Position>(),
-                vec![(position, Access::Write)],
+                collect_permissions::<&mut Position>(),
+                vec![(position, Permission::Write)],
             ),
             (
                 "(&mut Position, &Velocity)",
-                collect_accesses::<(&mut Position, &Velocity)>(),
-                vec![(position, Access::Write), (velocity, Access::Read)],
+                collect_permissions::<(&mut Position, &Velocity)>(),
+                vec![(position, Permission::Write), (velocity, Permission::Read)],
             ),
             (
                 "(&Velocity, &mut Position)",
-                collect_accesses::<(&Velocity, &mut Position)>(),
-                vec![(velocity, Access::Read), (position, Access::Write)],
+                collect_permissions::<(&Velocity, &mut Position)>(),
+                vec![(velocity, Permission::Read), (position, Permission::Write)],
             ),
             (
                 "((&Position, &mut Velocity), &Tag)",
-                collect_accesses::<((&Position, &mut Velocity), &Tag)>(),
+                collect_permissions::<((&Position, &mut Velocity), &Tag)>(),
                 vec![
-                    (position, Access::Read),
-                    (velocity, Access::Write),
-                    (tag, Access::Read),
+                    (position, Permission::Read),
+                    (velocity, Permission::Write),
+                    (tag, Permission::Read),
                 ],
             ),
             (
                 "(&Position, (&Velocity, &mut Tag))",
-                collect_accesses::<(&Position, (&Velocity, &mut Tag))>(),
+                collect_permissions::<(&Position, (&Velocity, &mut Tag))>(),
                 vec![
-                    (position, Access::Read),
-                    (velocity, Access::Read),
-                    (tag, Access::Write),
+                    (position, Permission::Read),
+                    (velocity, Permission::Read),
+                    (tag, Permission::Write),
                 ],
             ),
             (
                 "(&Position, &Position)",
-                collect_accesses::<(&Position, &Position)>(),
-                vec![(position, Access::Read), (position, Access::Read)],
+                collect_permissions::<(&Position, &Position)>(),
+                vec![(position, Permission::Read), (position, Permission::Read)],
             ),
             (
                 "(&mut Position,)",
-                collect_accesses::<(&mut Position,)>(),
-                vec![(position, Access::Write)],
+                collect_permissions::<(&mut Position,)>(),
+                vec![(position, Permission::Write)],
             ),
             (
                 "(&Position, &mut Velocity, &Tag)",
-                collect_accesses::<(&Position, &mut Velocity, &Tag)>(),
+                collect_permissions::<(&Position, &mut Velocity, &Tag)>(),
                 vec![
-                    (position, Access::Read),
-                    (velocity, Access::Write),
-                    (tag, Access::Read),
+                    (position, Permission::Read),
+                    (velocity, Permission::Write),
+                    (tag, Permission::Read),
                 ],
             ),
             (
                 "(&Tag, (&Position, &Velocity), &mut Name)",
-                collect_accesses::<(&Tag, (&Position, &Velocity), &mut Name)>(),
+                collect_permissions::<(&Tag, (&Position, &Velocity), &mut Name)>(),
                 vec![
-                    (tag, Access::Read),
-                    (position, Access::Read),
-                    (velocity, Access::Read),
-                    (name, Access::Write),
+                    (tag, Permission::Read),
+                    (position, Permission::Read),
+                    (velocity, Permission::Read),
+                    (name, Permission::Write),
                 ],
             ),
         ];
@@ -578,71 +710,71 @@ mod tests {
 
     /// Checks the largest tuple, of thirty-two fields, with one entry per field in field order
     #[test]
-    fn add_access_with_32_fields_pushes_32_entries_in_order() {
+    fn add_permissions_with_32_fields_pushes_32_entries_in_order() {
         let position = TypeId::of::<Position>();
         let velocity = TypeId::of::<Velocity>();
 
-        let found = collect_accesses::<Query32>();
+        let found = collect_permissions::<Query32>();
 
-        let mut expected = vec![(position, Access::Read); 31];
-        expected.push((velocity, Access::Write));
+        let mut expected = vec![(position, Permission::Read); 31];
+        expected.push((velocity, Permission::Write));
         assert_eq!(found, expected);
     }
 
     /// Checks that the method adds its entries after the ones already in the list
     #[test]
-    fn add_access_with_existing_entries_keeps_them_in_front() {
+    fn add_permissions_with_existing_entries_keeps_them_in_front() {
         let health = TypeId::of::<Health>();
         let position = TypeId::of::<Position>();
         let velocity = TypeId::of::<Velocity>();
-        let mut accesses = vec![(health, Access::Write)];
+        let mut permissions = vec![(health, Permission::Write)];
 
-        <(&Position, &mut Velocity)>::add_access(&mut accesses);
+        <(&Position, &mut Velocity)>::add_permissions(&mut permissions);
 
         assert_eq!(
-            accesses,
+            permissions,
             [
-                (health, Access::Write),
-                (position, Access::Read),
-                (velocity, Access::Write),
+                (health, Permission::Write),
+                (position, Permission::Read),
+                (velocity, Permission::Write),
             ]
         );
     }
 
     /// Checks that every query asking for each changed type once passes, including repeated reads
     #[test]
-    fn check_access_with_valid_queries_returns() {
+    fn check_permissions_with_valid_queries_returns() {
         // Lists each query that should pass, with the check for that query
         let cases: [(&str, fn()); 9] = [
-            ("&Position", check_access::<&Position>),
-            ("&mut Position", check_access::<&mut Position>),
+            ("&Position", check_permissions::<&Position>),
+            ("&mut Position", check_permissions::<&mut Position>),
             (
                 "(&Position, &Velocity)",
-                check_access::<(&Position, &Velocity)>,
+                check_permissions::<(&Position, &Velocity)>,
             ),
             (
                 "(&mut Position, &mut Velocity)",
-                check_access::<(&mut Position, &mut Velocity)>,
+                check_permissions::<(&mut Position, &mut Velocity)>,
             ),
             (
                 "(&Position, &Position)",
-                check_access::<(&Position, &Position)>,
+                check_permissions::<(&Position, &Position)>,
             ),
             (
                 "((&Position, &Velocity), &Position)",
-                check_access::<((&Position, &Velocity), &Position)>,
+                check_permissions::<((&Position, &Velocity), &Position)>,
             ),
             (
                 "((&mut Position, &Velocity), &mut Tag)",
-                check_access::<((&mut Position, &Velocity), &mut Tag)>,
+                check_permissions::<((&mut Position, &Velocity), &mut Tag)>,
             ),
             (
                 "(&mut Tag, (&Position, &mut Name))",
-                check_access::<(&mut Tag, (&Position, &mut Name))>,
+                check_permissions::<(&mut Tag, (&Position, &mut Name))>,
             ),
             (
                 "(&mut Position, &Velocity, &mut Tag)",
-                check_access::<(&mut Position, &Velocity, &mut Tag)>,
+                check_permissions::<(&mut Position, &Velocity, &mut Tag)>,
             ),
         ];
 
@@ -659,58 +791,58 @@ mod tests {
     /// Checks that a query that changes a type and then reads it panics
     #[test]
     #[should_panic]
-    fn check_access_with_write_then_read_panics() {
-        check_access::<(&mut Position, &Position)>();
+    fn check_permissions_with_write_then_read_panics() {
+        check_permissions::<(&mut Position, &Position)>();
     }
 
     /// Checks that a query that reads a type and then changes it panics
     #[test]
     #[should_panic]
-    fn check_access_with_read_then_write_panics() {
-        check_access::<(&Position, &mut Position)>();
+    fn check_permissions_with_read_then_write_panics() {
+        check_permissions::<(&Position, &mut Position)>();
     }
 
     /// Checks that a query that changes one type twice panics
     #[test]
     #[should_panic]
-    fn check_access_with_write_then_write_panics() {
-        check_access::<(&mut Position, &mut Position)>();
+    fn check_permissions_with_write_then_write_panics() {
+        check_permissions::<(&mut Position, &mut Position)>();
     }
 
     /// Checks that a changed type inside a pair still clashes with the same type outside it
     #[test]
     #[should_panic]
-    fn check_access_with_duplicate_in_nested_first_part_panics() {
-        check_access::<((&mut Position, &Velocity), &Position)>();
+    fn check_permissions_with_duplicate_in_nested_first_part_panics() {
+        check_permissions::<((&mut Position, &Velocity), &Position)>();
     }
 
     /// Checks that a changed type outside a pair still clashes with the same type inside it
     #[test]
     #[should_panic]
-    fn check_access_with_duplicate_in_nested_second_part_panics() {
-        check_access::<(&mut Position, (&Velocity, &Position))>();
+    fn check_permissions_with_duplicate_in_nested_second_part_panics() {
+        check_permissions::<(&mut Position, (&Velocity, &Position))>();
     }
 
     /// Checks that a clash between two separate inner pairs panics
     #[test]
     #[should_panic]
-    fn check_access_with_duplicate_across_nested_pairs_panics() {
-        check_access::<((&Velocity, &Position), (&Tag, &mut Position))>();
+    fn check_permissions_with_duplicate_across_nested_pairs_panics() {
+        check_permissions::<((&Velocity, &Position), (&Tag, &mut Position))>();
     }
 
     /// Checks that a changed type in the first field of a flat tuple clashes with the same type in
     /// the last field
     #[test]
     #[should_panic]
-    fn check_access_with_duplicate_across_flat_tuple_panics() {
-        check_access::<(&mut Position, &Velocity, &Tag, &Position)>();
+    fn check_permissions_with_duplicate_across_flat_tuple_panics() {
+        check_permissions::<(&mut Position, &Velocity, &Tag, &Position)>();
     }
 
     /// Checks that a size-zero type that the query changes twice panics like any other type
     #[test]
     #[should_panic]
-    fn check_access_with_duplicate_zero_size_type_panics() {
-        check_access::<(&mut Tag, &mut Tag)>();
+    fn check_permissions_with_duplicate_zero_size_type_panics() {
+        check_permissions::<(&mut Tag, &mut Tag)>();
     }
 
     /// Checks that a missing type gives `None`, alone and on either side of a pair

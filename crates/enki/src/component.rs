@@ -156,11 +156,30 @@ use std::{mem, ptr, slice};
 /// impl Component for Health {}
 ///
 /// let mut world = World::new();
-/// let player = world.spawn_empty_ent();
+/// let player = world.spawn_empty();
 /// world.add_component(player, Health(100));
 ///
 /// let health = world.get::<Health>(player).map(|health| health.0);
 /// assert_eq!(health, Some(100));
+/// ```
+///
+/// The compiler rejects a type that does not implement the trait. The example passes a tuple to
+/// `add_component` by mistake, in place of `add_components`, and fails to compile.
+///
+/// ```compile_fail
+/// use enki::World;
+/// # use enki::Component;
+///
+/// struct Position(f32, f32);
+/// struct Health(u32);
+/// # impl Component for Position {}
+/// # impl Component for Health {}
+///
+/// let mut world = World::new();
+/// let player = world.spawn_empty();
+///
+/// // Fails to compile, since the tuple `(Position, Health)` does not implement `Component`
+/// world.add_component(player, (Position(0.0, 0.0), Health(100)));
 /// ```
 pub trait Component: Send + Sync + 'static {}
 
@@ -176,22 +195,10 @@ pub trait Component: Send + Sync + 'static {}
 ///
 /// # Examples
 ///
-/// The example creates a vector for `f32`, pushes one component, borrows it, then changes it.
-///
-/// ```ignore
-/// // Creates an empty vector for `f32` components, with the bit at position 0 for that type
-/// let mut components = ComponentVec::new(ComponentInfo::of::<f32>(ComponentMask::single(0)));
-///
-/// // Pushes one component, which the vector then owns
-/// components.push_typed(1.5_f32);
-///
-/// // Borrows index 0 as an `f32`. `as_slice` checks the type, and the slice checks the index
-/// let stored = &components.as_slice::<f32>()[0];
-/// assert_eq!(*stored, 1.5);
-///
-/// // Changes index 0, through a slice that allows changes
-/// components.as_mut_slice::<f32>()[0] = 2.5;
-/// ```
+/// The [module example](self#examples) pushes components into one vector, moves one into another,
+/// and borrows both as slices. The test
+/// `as_mut_slice_with_changed_value_updates_only_that_component` changes one component through
+/// `as_mut_slice`.
 pub(crate) struct ComponentVec {
     info: ComponentInfo, // describes the component type that the vector stores
     data: NonNull<u8>,   // points at the start of the block
@@ -205,6 +212,8 @@ impl ComponentVec {
     /// The first call to [`grow`](Self::grow) allocates the block. A push, or a move into this
     /// vector, leads to that call where the vector has no block yet. A vector for a type of size
     /// zero starts with a capacity of `usize::MAX`, and never allocates.
+    ///
+    /// The [module example](self#examples) creates two vectors with this method.
     pub(crate) fn new(info: ComponentInfo) -> Self {
         // Points `data` at an aligned address, which stands in until `grow` allocates a block
         let alignment = info.layout.align();
@@ -228,6 +237,9 @@ impl ComponentVec {
     }
 
     /// Returns the [`ComponentInfo`] that describes the component type in the vector.
+    ///
+    /// The [module example](self#examples) passes this `ComponentInfo` to a second vector, which
+    /// then stores the same component type.
     pub(crate) fn info(&self) -> ComponentInfo {
         self.info
     }
@@ -241,11 +253,21 @@ impl ComponentVec {
     /// pointer does not point at any memory. The pointer stops being valid when the vector grows its
     /// block or is dropped. The Pointer validity section in the module documentation sets out every
     /// rule.
+    ///
+    /// # Examples
+    ///
+    /// For a vector with at least one component, `data` returns the same address as `ptr_at(0)`.
+    /// The test `data_with_pushed_components_returns_address_of_first_component` checks it.
     pub(crate) fn data(&self) -> NonNull<u8> {
         self.data
     }
 
     /// Returns the number of components in the vector.
+    ///
+    /// # Examples
+    ///
+    /// After three pushes, `len` returns 3. The test
+    /// `len_with_varying_counts_returns_number_of_components` checks several counts.
     pub(crate) fn len(&self) -> usize {
         self.len
     }
@@ -266,6 +288,12 @@ impl ComponentVec {
     ///
     /// A debug build panics where `index` times the component size overflows `usize`. A release
     /// build wraps around instead, meaning the pointer can land inside the block.
+    ///
+    /// # Examples
+    ///
+    /// For a vector of `f32`, `ptr_at(1)` returns the address 4 bytes past `data`, since each `f32`
+    /// takes 4 bytes. The test `ptr_at_with_standard_and_extreme_indices_returns_offset_address`
+    /// checks other indices.
     pub(crate) fn ptr_at(&self, index: usize) -> *mut u8 {
         let offset = index * self.info.layout.size();
         self.data.as_ptr().wrapping_add(offset)
@@ -281,6 +309,9 @@ impl ComponentVec {
     /// for a type of size zero panics once it stores `usize::MAX` components. The program aborts
     /// where the allocator cannot supply the larger block.
     ///
+    /// After such a panic, the vector does not own the component. The third guarantee below still
+    /// binds the caller, meaning nothing drops the original, and the component leaks.
+    ///
     /// # Safety
     ///
     /// The caller MUST guarantee three things:
@@ -288,6 +319,12 @@ impl ComponentVec {
     /// - `value` points at a live component of the type that the vector stores.
     /// - `value` points outside the block of this vector, since growing can free the block.
     /// - Nothing drops the original afterwards, and nothing uses it unless its type is `Copy`.
+    ///
+    /// # Examples
+    ///
+    /// `push_typed` shows a call, along with the SAFETY comment that the call needs. The test
+    /// `push_with_manually_dropped_string_stores_value_for_as_slice` pushes a `String` that
+    /// `ManuallyDrop` keeps from being dropped twice.
     unsafe fn push(&mut self, value: *const u8) {
         if self.len == self.capacity {
             self.grow();
@@ -312,6 +349,11 @@ impl ComponentVec {
     /// and a larger block would exceed `isize::MAX` bytes. A vector for a type of size zero panics
     /// once it stores `usize::MAX` components. The program aborts where the allocator cannot supply
     /// the larger block.
+    ///
+    /// After such a panic, nothing drops `value`, and it leaks.
+    ///
+    /// The [module example](self#examples) pushes three `Position` components with this method, and
+    /// the [`ComponentVec`] example pushes one `f32`.
     #[track_caller]
     pub(crate) fn push_typed<T: 'static>(&mut self, value: T) {
         self.assert_stores::<T>();
@@ -332,6 +374,8 @@ impl ComponentVec {
     /// # Panics
     ///
     /// Panics where `T` differs from the type that the vector stores.
+    ///
+    /// The [module example](self#examples) borrows the components of two vectors with this method.
     #[track_caller]
     pub(crate) fn as_slice<T: 'static>(&self) -> &[T] {
         self.assert_stores::<T>();
@@ -355,6 +399,11 @@ impl ComponentVec {
     /// # Panics
     ///
     /// Panics where `T` differs from the type that the vector stores.
+    ///
+    /// # Examples
+    ///
+    /// The test `as_mut_slice_with_changed_value_updates_only_that_component` changes one component
+    /// through the slice, and checks that the others keep their values.
     #[track_caller]
     pub(crate) fn as_mut_slice<T: 'static>(&mut self) -> &mut [T] {
         self.assert_stores::<T>();
@@ -381,6 +430,9 @@ impl ComponentVec {
     /// Also panics where `target` is full and a larger block would exceed `isize::MAX` bytes. A
     /// target for a type of size zero panics once it stores `usize::MAX` components. The program
     /// aborts where the allocator cannot supply a larger block for `target`.
+    ///
+    /// The [module example](self#examples) moves the component at index 0 with this method, and
+    /// shows the last component filling that index.
     pub(crate) fn move_component(&mut self, index: usize, target: &mut ComponentVec) {
         // Panics before anything changes, where `index` lies past the last component. A stale row
         // from a caller would otherwise copy the bytes of a component that is already dropped
@@ -428,6 +480,12 @@ impl ComponentVec {
     ///
     /// Also panics where the `Drop` implementation of the component panics. The vector is already
     /// one component shorter at that point, and stays safe to use.
+    ///
+    /// # Examples
+    ///
+    /// For a vector of `"Ada"`, `"Bo"` and `"Cy"`, `swap_remove(0)` drops `"Ada"` and moves `"Cy"`
+    /// into index 0, which leaves `["Cy", "Bo"]`. The test
+    /// `swap_remove_with_non_last_index_fills_gap_with_last_component` checks it.
     pub(crate) fn swap_remove(&mut self, index: usize) {
         // Panics before anything changes, where `index` lies past the last component
         assert!(index < self.len, "the index must be below the length");
@@ -498,6 +556,12 @@ impl ComponentVec {
     ///
     /// Panics where the component type has a size of zero, or where the new block would exceed
     /// `isize::MAX` bytes. The program aborts where the allocator cannot supply the block.
+    ///
+    /// # Examples
+    ///
+    /// An empty vector of `u32` grows to a capacity of 4 on the first call, and to 8 on the second.
+    /// The test `push_typed_with_increasing_counts_returns_expected_capacity` checks the capacity
+    /// as the vector fills.
     fn grow(&mut self) {
         // Keeps a type of size zero away from the allocator, which requires a size above zero
         self.assert_non_zero();
@@ -525,6 +589,13 @@ impl ComponentVec {
     ///
     /// Panics where the component type has a size of zero, or where the new block would exceed
     /// `isize::MAX` bytes. The program aborts where the allocator cannot supply the block.
+    ///
+    /// # Examples
+    ///
+    /// For an empty vector of `u32`, `increase_capacity(10)` allocates a block of 40 bytes, sets
+    /// the capacity to 10, and leaves the length at 0. The test
+    /// `reserve_with_standard_and_extreme_amounts_returns_expected_capacity` reaches it through
+    /// `reserve`.
     fn increase_capacity(&mut self, new_capacity: usize) {
         // Panics in a debug build where the caller does not ask for more room than the block has
         debug_assert!(
@@ -566,6 +637,11 @@ impl ComponentVec {
     ///
     /// Panics where `T` differs from the stored type. The message contains both type names, and the
     /// panic reports the line that called the outermost `#[track_caller]` method.
+    ///
+    /// # Examples
+    ///
+    /// For a vector of `f32`, `assert_stores::<f32>()` returns, and `assert_stores::<u32>()`
+    /// panics. The test `push_typed_with_wrong_type_panics` reaches the panic through `push_typed`.
     #[track_caller]
     fn assert_stores<T: 'static>(&self) {
         assert_eq!(
@@ -585,6 +661,12 @@ impl ComponentVec {
     /// # Panics
     ///
     /// Panics where the component type has a size of zero.
+    ///
+    /// # Examples
+    ///
+    /// For a vector of `f32`, which takes 4 bytes, the method returns. For a vector of `()`, a type
+    /// of size zero, it panics. The test `push_typed_with_full_zero_size_vector_panics` reaches the
+    /// panic through `push_typed`.
     fn assert_non_zero(&self) {
         assert_ne!(
             self.info.layout.size(),
@@ -601,6 +683,11 @@ impl Drop for ComponentVec {
     /// components after it never get dropped, and the block never gets freed. This is a memory leak
     /// rather than undefined behaviour. Accepting the leak is a decision. A panicking clean-up is
     /// a bug in the component, and an uncaught panic on the main thread ends the program.
+    ///
+    /// # Examples
+    ///
+    /// The test `drop_with_varying_counts_drops_each_component_once` drops vectors of several
+    /// lengths, and counts one drop for each component.
     fn drop(&mut self) {
         if let Some(drop_component) = self.info.drop {
             for index in 0..self.len {
@@ -633,9 +720,16 @@ impl Drop for ComponentVec {
 
 // SAFETY: `ComponentInfo::of` is the only way to build a `ComponentInfo`, and it requires
 // `T: Send + Sync`. Every component in the vector can therefore move between threads, and be read
-// from several threads at the same time. Changing a component or the vector requires `&mut`, or an
-// `unsafe` write through a raw pointer, whose caller MUST guarantee that nothing else accesses that
-// component
+// from several threads at the same time.
+//
+// Changing a component or the vector requires `&mut`, or an `unsafe` write through a raw pointer,
+// whose caller MUST guarantee that nothing else accesses that component. `Query::find_columns` for
+// `&mut T` makes such a write possible through a shared `&Archetype`, by building a mutable slice
+// from the raw pointer `data`. `Sync` therefore also relies on `&mut T` never implementing
+// `ReadOnlyQuery`, which the seal on that trait ensures. `World::query` and
+// `World::query_archetype` take `&World`, which other threads can share, and they accept only a
+// `ReadOnlyQuery`. A `&mut T` that implemented `ReadOnlyQuery` would let two threads build mutable
+// slices of one column at once, which is undefined behaviour
 unsafe impl Send for ComponentVec {}
 // SAFETY: the comment on `Send` above covers `Sync` as well
 unsafe impl Sync for ComponentVec {}
@@ -647,24 +741,35 @@ unsafe impl Sync for ComponentVec {}
 ///
 /// # Examples
 ///
-/// The example builds the `ComponentInfo` for `f32`, with the bit at position 0 for that type.
-///
-/// ```ignore
-/// // Builds the `ComponentInfo` for `f32`, a type with no clean-up code
-/// let info = ComponentInfo::of::<f32>(ComponentMask::single(0));
-/// ```
+/// `ComponentInfo::of::<f32>(ComponentMask::single(0))` builds the `ComponentInfo` for `f32`, with
+/// the bit at position 0. The test
+/// `of_with_standard_and_extreme_types_returns_layout_and_drop_function` builds one for several
+/// types.
 #[derive(Clone, Copy, Debug)]
 pub struct ComponentInfo {
     /// Identifies the component type.
+    ///
+    /// For the `ComponentInfo` in the [`ComponentInfo`] example, the field equals
+    /// `TypeId::of::<f32>()`.
     type_id: TypeId,
     /// Stores the name of the component type, which a panic message reports.
+    ///
+    /// For the `ComponentInfo` in the [`ComponentInfo`] example, the field equals `"f32"`.
     type_name: &'static str,
     /// Defines the size and alignment of one component.
+    ///
+    /// For the `ComponentInfo` in the [`ComponentInfo`] example, the field has a size of 4 bytes and
+    /// an alignment of 4.
     layout: Layout,
     /// Stores the function that runs the clean-up code of the component at the given address. The
     /// field is `None` where the type has no clean-up code.
+    ///
+    /// The field is `Some` for `String`, which frees its text, and `None` for `f32`.
     drop: Option<unsafe fn(*mut u8)>,
     /// Stores the mask with the one bit that stands for the component type, within one world.
+    ///
+    /// For the `ComponentInfo` in the [`ComponentInfo`] example, the field equals
+    /// `ComponentMask::single(0)`.
     bit: ComponentMask,
 }
 
@@ -680,6 +785,8 @@ impl ComponentInfo {
     /// vector can then keep a `T` for as long as it needs. `TypeId::of` requires the same bound.
     ///
     /// The bound `T: Send + Sync` lets a vector move its components between threads, and share them.
+    ///
+    /// The [`ComponentInfo`] example builds the `ComponentInfo` for `f32` with this method.
     pub(crate) fn of<T: Send + Sync + 'static>(bit: ComponentMask) -> Self {
         let drop = if mem::needs_drop::<T>() {
             Some(drop_value::<T> as unsafe fn(*mut u8))
@@ -697,11 +804,22 @@ impl ComponentInfo {
     }
 
     /// Returns the [`TypeId`] that identifies the component type.
+    ///
+    /// # Examples
+    ///
+    /// For the `ComponentInfo` of `f32`, `type_id` returns `TypeId::of::<f32>()`. The test
+    /// `type_id_with_standard_and_extreme_types_returns_type_id_of_type` checks several types.
     pub(crate) fn type_id(self) -> TypeId {
         self.type_id
     }
 
     /// Returns the mask with the one bit that stands for the component type.
+    ///
+    /// # Examples
+    ///
+    /// For `ComponentInfo::of::<f32>(ComponentMask::single(2))`, `bit` returns
+    /// `ComponentMask::single(2)`. The test
+    /// `bit_with_standard_and_extreme_positions_returns_mask_from_of` checks several positions.
     pub(crate) fn bit(self) -> ComponentMask {
         self.bit
     }
@@ -718,6 +836,13 @@ impl ComponentInfo {
 ///
 /// - `pointer` points at a live `T`, at an address that is correctly aligned for `T`.
 /// - Nothing uses or drops that `T` afterwards, since its clean-up code has already run.
+///
+/// # Examples
+///
+/// Given a pointer to the bytes of a `String`, `drop_value::<String>` runs the clean-up code of
+/// `String`, which frees its text. `ComponentInfo::of` stores it as the drop function for each type
+/// with clean-up code. The test `drop_with_varying_counts_drops_each_component_once` reaches it
+/// through the drop of a `ComponentVec`.
 unsafe fn drop_value<T>(pointer: *mut u8) {
     // SAFETY: `drop_in_place` requires a pointer to a live `T`, at an address that is correctly
     // aligned for `T`. The caller MUST guarantee both, under the Safety section above. The caller
@@ -730,6 +855,12 @@ unsafe fn drop_value<T>(pointer: *mut u8) {
 /// # Panics
 ///
 /// Panics where the block would exceed `isize::MAX` bytes.
+///
+/// # Examples
+///
+/// For 3 components of 8 bytes, each aligned to 4, `array_layout` returns a layout of 24 bytes,
+/// aligned to 4. The test `array_layout_with_standard_and_extreme_counts_returns_block_layout`
+/// checks other counts.
 fn array_layout(item: Layout, count: usize) -> Layout {
     let size = item
         .size()

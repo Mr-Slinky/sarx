@@ -10,7 +10,7 @@
 //!
 //! ```ignore
 //! let mut world = World::new();
-//! let player = world.spawn_empty_ent();
+//! let player = world.spawn_empty();
 //!
 //! // Gives the player a `Position`, a `Velocity` and a `Health`
 //! world.add_components(player, (Position(0.0, 0.0), Velocity(1.0, 0.0), Health(100)));
@@ -34,11 +34,17 @@ use std::mem;
 // ========================================================================================== \\
 
 /// Declares the trait that seals [`Bundle`].
+///
+/// The example on [`Bundle`] passes a tuple of a `Position` and a `Health`, one of the tuple types
+/// that the crate implements `Sealed` for.
 mod sealed {
     /// Marks each type that the crate implements [`Bundle`](super::Bundle) for.
     ///
     /// The trait is `pub` inside a private module. Code outside the crate therefore cannot write a
     /// path to it, and cannot implement it.
+    ///
+    /// The example on [`Bundle`](super::Bundle) passes a tuple of a `Position` and a `Health`, one
+    /// of the tuple types that implement this trait.
     pub trait Sealed {}
 }
 
@@ -73,13 +79,13 @@ mod sealed {
 /// accepts any bundle.
 ///
 /// ```
-/// use enki::{Bundle, Component};
+/// use enki::Bundle;
+/// # use enki::Component;
 ///
 /// struct Position(f32, f32);
 /// struct Health(u32);
-///
-/// impl Component for Position {}
-/// impl Component for Health {}
+/// # impl Component for Position {}
+/// # impl Component for Health {}
 ///
 /// // Accepts any bundle
 /// fn accept<B: Bundle>(_bundle: B) {}
@@ -102,49 +108,40 @@ pub trait Bundle: sealed::Sealed + Send + Sync + 'static {
     /// # Panics
     ///
     /// Panics where one of the types has no bit in the world yet, and the world already has
-    /// `ComponentMask::CAPACITY` component types.
+    /// [`World::MAX_COMPONENT_TYPES`](crate::World::MAX_COMPONENT_TYPES) component types.
     ///
     /// # Examples
     ///
-    /// <b>From inside a generic method on `World`</b>
+    /// `add_components` on `World` calls it as `B::infos(self)`, where `B` is the type of the
+    /// bundle and `self` is the `&mut World`. The call borrows the world through `self` for the
+    /// length of the call only, meaning the method can use `self` again once the call returns.
     ///
-    /// The example calls `infos` inside a method such as `add_components`. In that method, `B` is the
-    /// type of the bundle, and `self` is the `&mut World`. The call `B::infos(self)` borrows the
-    /// world through `self` for the length of the call only. The method can then use `self` again
-    /// once the call returns.
-    ///
-    /// ```ignore
-    /// pub fn add_components<B: Bundle>(&mut self, entity: Entity, components: B) {
-    ///     // Returns one `ComponentInfo` for each type in `B`, and gives each type a bit where the
-    ///     // world has no bit for it yet
-    ///     let infos: Vec<ComponentInfo> = B::infos(self);
-    ///
-    ///     // ...
-    /// }
-    /// ```
-    ///
-    /// <b>For a tuple type written out in full</b>
-    ///
-    /// The example calls `infos` for the tuple type `(Position, Health)`. The call writes out the
-    /// tuple type and the trait in full. Written that way, the call shows that the implementation
-    /// for tuples of two fields runs.
-    ///
-    /// ```ignore
-    /// // Returns two `ComponentInfo` values, the first for `Position` and the second for `Health`
-    /// let infos: Vec<ComponentInfo> = <(Position, Health) as Bundle>::infos(&mut world);
-    /// ```
+    /// The test `infos_with_new_types_in_any_order_returns_infos_in_field_order` calls it for a
+    /// tuple type written out in full, as in `<(Position, Health) as Bundle>::infos(&mut world)`.
     #[doc(hidden)]
     fn infos(world: &mut World) -> Vec<ComponentInfo>;
 
-    /// Stores each component in the bundle in `table`, at row `row`.
+    /// Represents the components that [`Bundle::push_into`] replaces, with one `Option` for each
+    /// field of the bundle.
+    ///
+    /// For the bundle `(Position, Health)`, the type is `(Option<Position>, Option<Health>)`. A
+    /// field is `Some` where the new component replaced one at the row, and `None` where it was
+    /// pushed. The test `push_into_with_some_types_present_pushes_new_and_replaces_existing`
+    /// receives a value of this type.
+    #[doc(hidden)]
+    type Replaced;
+
+    /// Stores each component in the bundle in `table`, at row `row`, and returns the components
+    /// that it replaces.
     ///
     /// Each component goes into the column in `table` that stores its type. Where `existing` has
     /// the bit for that type, the entity already had a component of that type, and the new component
-    /// replaces the one at `row`. The method drops the old one. Otherwise the method pushes the new
-    /// component onto the end of the column.
+    /// replaces the one at `row`. The method returns the old one in that field of the result.
+    /// Otherwise the method pushes the new component onto the end of the column.
     ///
-    /// The method drops the replaced components only once every component is stored. A `Drop`
-    /// implementation that panics therefore leaves every column at its new length.
+    /// The caller owns the replaced components, and decides when they drop. `World` drops them
+    /// once its slots record where the entity now lives. A `Drop` implementation that panics
+    /// therefore runs only once the table and the slots agree.
     ///
     /// The method takes the bundle by value, meaning the table owns each component from then on.
     ///
@@ -160,35 +157,19 @@ pub trait Bundle: sealed::Sealed + Send + Sync + 'static {
     /// # Panics
     ///
     /// Panics where `table` has no column for one of the types in the bundle, or where a column for
-    /// a type in `existing` has no component at `row`. Also panics where the `Drop` implementation
-    /// of a replaced component panics.
+    /// a type in `existing` has no component at `row`.
     ///
     /// # Examples
     ///
     /// The method has a `self` parameter, unlike [`Bundle::infos`]. A caller therefore calls it on
-    /// the bundle itself, with the dot syntax.
+    /// the bundle itself, with the dot syntax, as in `components.push_into(target, row, existing)`.
+    /// The call takes the bundle by value, and the compiler rejects any use of it afterwards.
     ///
-    /// The example stores a bundle of a `Position` and a `Health` in `target`, a table with a
-    /// `Position` column and a `Health` column. The entity has already moved into `target`, at row
-    /// `row`. The entity had a `Health` before the move, and lacked a `Position`. `existing` is the
-    /// mask of the entity's old table, which has the bit for `Health` and lacks the bit for
-    /// `Position`.
-    ///
-    /// ```ignore
-    /// // Creates a tuple of a `Position` and a `Health`. The tuple implements `Bundle`
-    /// let components: (Position, Health) = (Position(0.0, 0.0), Health(100));
-    ///
-    /// // Borrows the table that the entity moved into
-    /// let target: &mut Archetype = &mut self.archetypes[target_index];
-    ///
-    /// // Pushes the `Position` onto the `Position` column, and replaces the entity's `Health`
-    /// components.push_into(target, row, existing);
-    ///
-    /// // `push_into` took `components` by value. The compiler therefore rejects any use of
-    /// // `components` from here on
-    /// ```
+    /// The test `push_into_with_some_types_present_pushes_new_and_replaces_existing` stores a
+    /// bundle for an entity that already has some of its types. It pushes the new components, and
+    /// receives the replaced ones back.
     #[doc(hidden)]
-    fn push_into(self, table: &mut Archetype, row: usize, existing: ComponentMask);
+    fn push_into(self, table: &mut Archetype, row: usize, existing: ComponentMask) -> Self::Replaced;
 }
 
 // ========================================================================================== \\
@@ -207,6 +188,14 @@ pub trait Bundle: sealed::Sealed + Send + Sync + 'static {
 ///
 /// Panics where `table` has no column for `T`, or where `existing` has the bit for `T` and the
 /// column has no component at `row`.
+///
+/// # Examples
+///
+/// For an empty `Health` column, `push_or_replace(&mut table, 0, Health(100),
+/// ComponentMask::EMPTY)` pushes the component and returns `None`. A second call at row 0, with the
+/// bit for `Health` in `existing`, replaces it and returns `Some(Health(100))`. The tests
+/// `push_or_replace_with_row_at_end_pushes_and_returns_none` and
+/// `push_or_replace_with_existing_row_replaces_and_returns_old_component` check both cases.
 fn push_or_replace<T: Component>(
     table: &mut Archetype,
     row: usize,
@@ -305,21 +294,21 @@ fn push_or_replace<T: Component>(
 ///         ]
 ///     }
 ///
+///     // Names the type of the replaced values, with one `Option` per field
+///     type Replaced = (Option<A>, Option<B>, Option<C>,);
+///
 ///     // Allows the variables `A`, `B` and `C` below to have names in capitals
 ///     #[allow(non_snake_case)]
-///     fn push_into(self, table: &mut Archetype, row: usize, existing: ComponentMask) {
+///     fn push_into(self, table: &mut Archetype, row: usize, existing: ComponentMask) -> Self::Replaced {
 ///         // Moves the three fields out of the tuple, into the variables `A`, `B` and `C`
 ///         let (A, B, C,) = self;
 ///
-///         // Stores each value at `row`, and keeps each replaced value in the tuple `replaced`
-///         let replaced = (
+///         // Stores each value at `row`, and returns each replaced value for the caller to drop
+///         (
 ///             push_or_replace(table, row, A, existing),
 ///             push_or_replace(table, row, B, existing),
 ///             push_or_replace(table, row, C, existing),
-///         );
-///
-///         // Drops the replaced values, now that every column has its new length
-///         drop(replaced);
+///         )
 ///     }
 /// }
 /// ```
@@ -361,15 +350,20 @@ macro_rules! impl_bundle {
                 }),+]
             }
 
+            type Replaced = ($(Option<$name>,)+);
+
             // Allows the variables below to take the type parameter names, which are in capitals
             #[allow(non_snake_case)]
-            fn push_into(self, table: &mut Archetype, row: usize, existing: ComponentMask) {
+            fn push_into(
+                self,
+                table: &mut Archetype,
+                row: usize,
+                existing: ComponentMask,
+            ) -> Self::Replaced {
                 // Moves each field out of the tuple, into a variable with the name of its type
                 let ($($name,)+) = self;
-                // Stores each component at `row`, and keeps each replaced component in `replaced`
-                let replaced = ($(push_or_replace(table, row, $name, existing),)+);
-                // Drops the replaced components, now that every column has its new length
-                drop(replaced);
+                // Stores each component at `row`, and returns each replaced component
+                ($(push_or_replace(table, row, $name, existing),)+)
             }
         }
     };

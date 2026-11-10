@@ -2,13 +2,16 @@
 //!
 //! A world gives each component type a position, from 0 upwards, the first time that it meets the
 //! type. For each type in its set, a [`ComponentMask`] sets the bit at that position. A table
-//! stores a mask for the component types that it stores, and a query builds a mask for the types
-//! that it asks for. The table then compares the two masks to answer whether it stores every type in the
-//! query. The comparison does not visit any column.
+//! stores a mask for the component types that it stores. `World::find_query_mask` builds a mask for
+//! the types that a query asks for. The table then compares the two masks to answer whether it
+//! stores every type in the query. The comparison does not visit any column.
 //!
 //! A mask has room for [`ComponentMask::CAPACITY`] component types. That number is also the limit
 //! on the component types in one world. This module defines every operation on the bits. As a
 //! result, a change to the limit changes this module alone.
+//!
+//! The example on [`ComponentMask`] builds a mask for two types, then checks which types it
+//! contains.
 
 use std::fmt;
 use std::ops::{BitOr, BitOrAssign};
@@ -47,12 +50,24 @@ pub struct ComponentMask(u64);
 
 impl ComponentMask {
     /// Defines the number of component types that a mask has room for.
+    ///
+    /// # Examples
+    ///
+    /// A mask has room for 64 component types, one for each bit of a `u64`. The test
+    /// `capacity_with_u64_mask_returns_64` checks the value.
     pub(crate) const CAPACITY: usize = u64::BITS as usize;
 
     /// Defines the mask for the set with no component types.
+    ///
+    /// # Examples
+    ///
+    /// `ComponentMask::EMPTY | ComponentMask::single(3)` equals `ComponentMask::single(3)`. The
+    /// test `default_with_no_data_returns_empty` checks that the default mask equals `EMPTY`.
     pub(crate) const EMPTY: Self = Self(0);
 
     /// Returns the mask with one set bit, at `position`.
+    ///
+    /// The example on [`ComponentMask`] builds the masks for two types with this method.
     ///
     /// # Panics
     ///
@@ -72,6 +87,13 @@ impl ComponentMask {
     /// # Panics
     ///
     /// Panics where an entry is not below [`CAPACITY`](Self::CAPACITY).
+    ///
+    /// # Examples
+    ///
+    /// `ComponentMask::from_positions(&[0, 3])` equals `ComponentMask::single(0) |
+    /// ComponentMask::single(3)`. The test
+    /// `from_positions_with_standard_and_extreme_positions_returns_combined_mask` checks more
+    /// positions.
     #[cfg(test)]
     pub(crate) fn from_positions(positions: &[usize]) -> Self {
         positions

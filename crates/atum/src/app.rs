@@ -19,13 +19,13 @@ use crate::executor::block_on;
 
 /// Owns the window and the renderer, and defines the methods that winit calls for each event.
 ///
-/// `App::default()` sets both fields to `None`. The first call to `resumed` then creates the
+/// `App::default()` sets both fields to `None`, and the first call to `resumed` then creates the
 /// window and the renderer.
 ///
 /// # Examples
 ///
-/// The example hands a new `App` to winit's event loop. The event loop calls its methods for every
-/// event until the program ends.
+/// The example hands a new `App` to winit's event loop, which calls its methods for every event
+/// until the program ends.
 ///
 /// ```ignore
 /// // Creates the event loop, then hands it a new `App` with both fields set to `None`
@@ -37,8 +37,8 @@ use crate::executor::block_on;
 pub(crate) struct App {
     /// The window, or `None` before the first `resumed`.
     ///
-    /// The `Arc` lets the app and the renderer's surface share the window. An `Arc` counts its
-    /// owners, and drops the window once the last owner is gone.
+    /// An `Arc` counts its owners, and drops the window once the last one is gone. The app and the
+    /// renderer's surface are both owners, sharing the one window.
     window: Option<Arc<Window>>,
     /// The renderer, or `None` before the first `resumed`. It stays `None` where the setup fails.
     renderer: Option<Renderer>,
@@ -75,9 +75,8 @@ impl ApplicationHandler for App {
     ///
     /// Panics where winit cannot create the window.
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
-        // Gives the renderer a new surface on every call after the first. winit calls `resumed`
-        // again only on a platform that can take the window away from a running app, such as a
-        // phone
+        // Gives the renderer a new surface on every call after the first, once the platform hands
+        // the window back
         if let (Some(window), Some(renderer)) = (&self.window, self.renderer.as_mut()) {
             let size = window.inner_size();
             let window_handle = Arc::clone(window);
@@ -92,7 +91,7 @@ impl ApplicationHandler for App {
             return;
         }
 
-        // Creates the window and the renderer on the first call, while no window exists yet
+        // Creates the window and the renderer on the first call, when no window exists yet
         if self.window.is_none() {
             let attributes = Window::default_attributes().with_title("Sarx");
             let window = event_loop
@@ -116,11 +115,11 @@ impl ApplicationHandler for App {
 
     /// Handles one event for the window.
     ///
-    /// When the player closes the window, `window_event` ends the program. It passes each resize
-    /// and each redraw on to the renderer. It prints every other event to standard output.
+    /// `window_event` passes each resize and redraw on to the renderer, ends the program when the
+    /// player closes the window, and prints every other event to standard output.
     ///
-    /// `render` returns an error when the renderer loses its surface and cannot create a new one.
-    /// `window_event` then ends the program too.
+    /// Where `render` returns an error, such as a lost connection to the GPU or a surface that it
+    /// cannot replace, `window_event` prints the error and ends the program too.
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _: WindowId, event: WindowEvent) {
         match event {
             WindowEvent::CloseRequested => event_loop.exit(),
@@ -138,10 +137,9 @@ impl ApplicationHandler for App {
                 }
             }
             other => println!("{other:?}"),
-            // TODO:
-            //  WindowEvent::KeyboardInput { event, .. } => input.record_key(event),
-            //  _ => {}
-            //  etc...
+            // TODO: the match must pass each `KeyboardInput` to the input system, as in
+            //  `WindowEvent::KeyboardInput { event, .. } => input.record_key(event)`, and must
+            //  ignore every other event with `_ => {}` in place of the `other` arm
         }
     }
 

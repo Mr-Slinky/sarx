@@ -1,13 +1,13 @@
 //! Runs a future to completion on the current thread.
 //!
-//! A future is a value that produces its result later, like a `CompletableFuture` in Java. Unlike
-//! a Java future, a Rust future does not run until something polls it. Polling asks the future to
-//! make as much progress as it can.
+//! A future is a value that produces its result later, like a `CompletableFuture` in Java. To poll
+//! a future is to ask it to make as much progress as it can. Unlike a Java future, a Rust future
+//! does not run until something polls it.
 //!
 //! Setting up the GPU is asynchronous, meaning `Renderer::new` returns a future. The methods that
-//! winit calls on the app are ordinary functions, which cannot use `.await` to wait for that
-//! future. The app therefore passes the future to [`block_on`], which polls it on the calling thread until it
-//! finishes.
+//! winit calls on the app are not `async`, and only an `async` function can use `.await` to wait
+//! for that future. The app therefore passes the future to [`block_on`], which polls it on the
+//! calling thread until it finishes.
 
 use std::future::Future;
 use std::pin::pin;
@@ -21,8 +21,8 @@ use std::thread::{self, Thread};
 /// `Poll::Pending` where the future has to wait.
 ///
 /// On `Poll::Pending`, `block_on` parks the thread, which puts the thread to sleep. Once the future
-/// can make progress, it wakes the thread through a [`ThreadWaker`]. `block_on` then polls the
-/// future again.
+/// can make progress, whatever it is waiting on wakes the thread through a [`ThreadWaker`], and
+/// `block_on` then polls the future again.
 ///
 /// # Examples
 ///
@@ -53,8 +53,8 @@ pub(crate) fn block_on<F: Future>(future: F) -> F::Output {
 /// Wakes the thread that [`block_on`] parked.
 ///
 /// The waker stores the `Thread` that called `block_on`. A future that returns `Poll::Pending`
-/// keeps a copy of the waker. Once the future is ready to be polled again, it calls `wake` on that
-/// copy.
+/// keeps a copy of the waker. Once the future can be polled again, the code that it is waiting on
+/// calls `wake` on that copy.
 struct ThreadWaker(Thread);
 
 impl Wake for ThreadWaker {

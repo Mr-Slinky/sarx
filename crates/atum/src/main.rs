@@ -3,9 +3,9 @@
 //! An event loop waits for events from the operating system, such as a resize or a key press. It
 //! hands each event to the program as it arrives.
 //!
-//! `main` creates winit's event loop and hands it an [`App`]. winit then calls a method on the
-//! `App` for each event. The first call, to `resumed`, creates the window. The player closing the
-//! window ends the program.
+//! `main` creates winit's event loop and hands it an [`App`], and winit then calls a method on the
+//! `App` for each event. The first call, to `resumed`, creates the window, and the program ends
+//! when the player closes it.
 
 mod app;
 mod executor;
@@ -14,9 +14,7 @@ use winit::event_loop::EventLoop;
 
 use app::App;
 
-/// Creates the event loop and hands it an `App`.
-///
-/// winit then calls a method on the `App` for every event, until the program ends.
+/// Creates the event loop and runs it with a new [`App`] until the program ends.
 ///
 /// # Panics
 ///

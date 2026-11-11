@@ -2,8 +2,8 @@
 //! entity. A query also states whether the caller reads or changes each of those types.
 //!
 //! A caller writes a query as a type. `&T` reads the `T` of each entity, and `&mut T` changes it. A
-//! tuple such as `(&mut Position, &Velocity, &Health)` asks for every type in it at once, and holds
-//! up to thirty-two queries.
+//! tuple such as `(&mut Position, &Velocity, &Health)` asks for every type in it at once, and can
+//! contain up to thirty-two queries.
 //!
 //! The caller passes the query type to `World::query_mut`, which returns one item for each entity
 //! that has every type in the query. A query that only reads implements [`ReadOnlyQuery`]. The
@@ -87,8 +87,8 @@ pub enum Permission {
 ///
 /// The world runs a query in three steps. It first calls [`Query::add_permissions`] to collect the
 /// component types that the query asks for. It then calls [`Query::find_columns`] to borrow the
-/// matching columns of each table. Finally, it calls [`Query::split_rows`] to split those columns
-/// into one item per entity, which reads each row through [`Query::fetch_row`].
+/// matching columns of each table. Finally, it calls [`Query::split_rows`], which reads each row
+/// through [`Query::fetch_row`], to split those columns into one item per entity.
 /// `World::query_archetype_mut` and `World::query_archetype` stop after the second step, and
 /// return the columns.
 ///
@@ -505,9 +505,9 @@ unsafe impl<T: Component> ReadOnlyQuery for &T {}
 /// # Rows
 ///
 /// `build_rows` turns the columns of each field into that field's rows. `count_rows` returns the
-/// smallest row count among the fields. Every column in one table has one component per entity, so
-/// the counts are equal in practice. `fetch_row` reads one row from every field, and puts the
-/// results together into the item for that row.
+/// smallest row count among the fields. Every column in one table has one component per entity,
+/// meaning the counts are equal in practice. `fetch_row` reads one row from every field, and puts
+/// the results together into the item for that row.
 macro_rules! impl_query {
     ($($name:ident),+) => {
         impl<$($name: Query),+> sealed::Sealed for ($($name,)+) {}

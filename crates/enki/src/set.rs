@@ -71,9 +71,9 @@ mod sealed {
 /// `Sealed`, and therefore cannot implement it. As a result, the tuple implementations in the crate
 /// are the only ones.
 ///
-/// A method on `World` that adds a component set must rely on that guarantee. The method must build
-/// a table from the `ComponentInfo` values that [`ComponentSet::infos`] returns. It must then rely
-/// on [`ComponentSet::push_into`] to push one component onto each new column.
+/// `World::add_components` relies on that guarantee. It finds or creates the table for the
+/// `ComponentInfo` values that [`ComponentSet::infos`] returns, then relies on
+/// [`ComponentSet::push_into`] to push one component onto each new column.
 ///
 /// # Examples
 ///
@@ -103,7 +103,7 @@ pub trait ComponentSet: sealed::Sealed + Send + Sync + 'static {
     /// `S::infos(registry)`. The result depends on the types in the component set, and on the bits
     /// that `registry` assigns to them.
     ///
-    /// Only `enki` can create a `ComponentRegistry`. As a result, only `enki` can call the method.
+    /// Only `enki` can create a `ComponentRegistry`, meaning only `enki` can call the method.
     ///
     /// # Arguments
     ///
@@ -223,7 +223,7 @@ fn push_or_replace<T: Component>(
 
     // Replaces the component at `row`, where the entity already had a `T`
     let bit = column.info().bit();
-    if existing.intersects(bit) {
+    if existing.contains_any(bit) {
         // Finds the component at `row`
         let slot = &mut column.as_mut_slice::<T>()[row];
         // Puts `value` in its place, and returns the old component for the caller to drop
@@ -308,7 +308,7 @@ fn push_or_replace<T: Component>(
 ///         ]
 ///     }
 ///
-///     // Names the type of the replaced values, with one `Option` per field
+///     // Defines the type of the replaced values, with one `Option` per field
 ///     type Replaced = (Option<A>, Option<B>, Option<C>,);
 ///
 ///     // Allows the variables `A`, `B` and `C` below to have names in capitals

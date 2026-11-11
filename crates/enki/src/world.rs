@@ -21,9 +21,8 @@
 //!
 //! # Masks
 //!
-//! The world gives each component type a bit, the first time that it meets the type. Its
-//! `ComponentRegistry` keeps the bit of each type. The first type takes bit 0, the second takes
-//! bit 1, and the order continues up to the last bit. A mask is a
+//! The world gives each component type a bit, the first time that it meets the type, and records
+//! the bit in its [`ComponentRegistry`], which sets out the order of the bits. A mask is a
 //! [`ComponentMask`] that combines the bits of a set of types. A world has room for as many
 //! component types as a mask has bits, which [`ComponentMask::CAPACITY`] defines.
 //!
@@ -53,9 +52,9 @@
 //! # Rows after a move
 //!
 //! A table keeps its rows packed, with no gaps between them. When an entity leaves a row, the last
-//! entity in the table moves into that row. Each move therefore changes the location of up to two
-//! entities. One is the entity that left. The other is the entity that filled its row, unless the
-//! entity left the last row. The world updates the slot of each.
+//! entity in the table moves into that row. Each move therefore changes the location of the entity
+//! that left, and also of the entity that filled its row, unless the row was the last. The world
+//! updates the slot of each.
 //!
 //! Every method that moves an entity MUST update both slots. If a method leaves a slot pointing
 //! at the wrong row, a later call would read or change the components of a different entity. A row
@@ -145,7 +144,7 @@ pub struct World {
     /// Stores, for each bit position, the position in `archetypes` of every table that stores the
     /// component type with that bit.
     ///
-    /// Each list grows in the order that the world creates tables, and so stays sorted. For
+    /// Each list grows in the order that the world creates tables, which keeps it sorted. For
     /// example, a world with tables for `{Position}` and `{Position, Health}`, with `Position` at
     /// bit 0, stores `[1, 2]` at entry 0.
     tables_by_type: Vec<Vec<usize>>,
@@ -222,7 +221,7 @@ impl World {
         // Takes a handle, from a freed slot where one exists, with the slot pointing at that row
         let entity = self.entities.alloc(location);
         // Adds the entity to the end of the empty table, at the row that `location` records. The
-        // table has no columns, so there is nothing to push
+        // table has no columns, meaning the closure is empty
         self.archetypes[Self::EMPTY].push_entity(entity, |_, _| {});
         entity
     }
@@ -260,14 +259,14 @@ impl World {
     }
 
     /// Makes room for at least `additional` more entities that have exactly the component types in
-    /// the component set type `S`.
+    /// the component set `S`.
     ///
     /// The world finds or creates the table for the types in `S`. It then makes room in every
     /// column of that table, and in its entity list. It also makes room in the list of slots, for
     /// each of the `additional` entities that a freed slot will not take.
     ///
     /// The table and the list of slots then keep their blocks of memory while the caller spawns
-    /// the next `additional` entities and gives each one a `S`. The empty table, where each new
+    /// the next `additional` entities and gives each one an `S`. The empty table, where each new
     /// entity starts, grows as usual.
     ///
     /// The world gives a bit to each type in `S` that it has not met before. It keeps the table
@@ -320,27 +319,25 @@ impl World {
         self.entities.reserve(additional);
     }
 
-    /// Gives `entity` every component in the component set `components`, in one call.
+    /// Gives `entity` every component in `components`, a component set, in one call.
     ///
-    /// For each component in the component set, the entity either gains it or has its existing
-    /// component of that type replaced. The world drops each replaced component. The entity keeps
-    /// every component that the component set does not replace. The entity moves to another table
-    /// at most once, whatever the number of components in the component set.
+    /// For each component in `components`, the entity either gains it or has its existing
+    /// component of that type replaced, and the world drops each replaced component. The entity
+    /// keeps every other component, and moves to another table at most once per call.
     ///
-    /// Each component type in the component set must implement [`Component`].
+    /// Each component type in `components` must implement [`Component`].
     ///
-    /// Returns `Ok(())` where the entity now has every component in the component set. Returns
-    /// `Err` with the whole component set where the handle does not refer to a living entity. The
-    /// world is then left unchanged, and the caller owns the component set again.
+    /// Returns `Ok(())` where the entity now has every component in `components`. Returns
+    /// `Err(components)` where the handle does not refer to a living entity. The world is then left
+    /// unchanged, and the caller owns `components` again.
     ///
     /// # Panics
     ///
-    /// Panics where the component set lists the same component type twice. Also panics where the
-    /// component set brings in more component types than the world has room for, which
-    /// [`MAX_COMPONENT_TYPES`](Self::MAX_COMPONENT_TYPES) defines. Also panics where the `Drop`
-    /// implementation of a replaced component panics. The world drops the replaced components last,
-    /// meaning every entity is already where the world records it, and a caller that catches the
-    /// panic can go on using the world.
+    /// Panics where `components` lists the same component type twice, or brings in more component
+    /// types than the world has room for, which [`MAX_COMPONENT_TYPES`](Self::MAX_COMPONENT_TYPES)
+    /// defines. Also panics where the `Drop` implementation of a replaced component panics. The
+    /// world drops the replaced components last, once every entity is where the world records it. A
+    /// caller that catches the panic can therefore go on using the world.
     ///
     /// The [crate example](crate#examples) gives a villager three components with one call.
     pub fn add_components<S: ComponentSet>(
@@ -441,7 +438,7 @@ impl World {
         // Finds or creates the table for the entity's types minus `T`
         let target = self.find_or_create_archetype_without(location.arch_index(), type_id);
         // Moves the entity's other components to the target, and takes its `T` out of the `T`
-        // column. The target has no new columns, so there is nothing to push
+        // column. The target has no new columns, meaning the closure for `fill` is empty
         let mut removed = None;
         self.move_entity(
             entity,
@@ -496,10 +493,9 @@ impl World {
     /// query `Q`. The item contains the columns that `Q` asks for from that table.
     ///
     /// Each item contains whole columns, such as a `&mut [Position]`, rather than one entity. A
-    /// caller that works on a column at a time uses this method. A caller that works on one entity
-    /// at a time uses [`query_mut`](Self::query_mut) instead. Every table that the iterator visits
-    /// has at least one entity. The iterator is empty where `Q` asks for a type that the world has
-    /// not met.
+    /// caller that works on a column at a time uses this method, and one that works on one entity
+    /// at a time uses [`query_mut`](Self::query_mut). The iterator skips every table that has no
+    /// entities, and is empty where `Q` asks for a type that the world has not met.
     ///
     /// The iterator borrows the world exclusively, meaning the compiler rejects any other use of
     /// the world while the iterator or a column is in use. A caller whose query only reads uses
@@ -550,10 +546,11 @@ impl World {
         let query_mask = self.find_query_mask(&permissions);
         // Visits each table that has entities and stores every type in the query
         self.find_matching_archetypes(query_mask)
-            // SAFETY: `find_columns` requires three guarantees. `&mut self` keeps every other
-            // reference off the world for as long as the iterator lives, and `check_permissions`
-            // passed above. The iterator visits each table once, meaning it builds one slice of
-            // each column, and no other slice of a column that `Q` changes exists
+            // SAFETY: `find_columns` requires three guarantees, which hold as follows:
+            // 1. `&mut self` keeps every other reference off the world while the iterator lives.
+            // 2. `check_permissions` passed above.
+            // 3. The iterator visits each table once, meaning it builds one slice of each column,
+            //    and no other slice of a column that `Q` changes exists
             .filter_map(|archetype| unsafe { Q::find_columns(archetype) })
     }
 
@@ -667,10 +664,12 @@ impl World {
         let permissions = query::check_permissions::<Q>();
         let query_mask = self.find_query_mask(&permissions);
         self.find_matching_archetypes(query_mask)
-            // SAFETY: `find_columns` requires three guarantees. `Q` builds only shared slices, and
-            // `&self` stops any change to the world for as long as the iterator lives.
-            // `check_permissions` passed above. `Q` borrows no column mutably, meaning the third
-            // guarantee holds whatever other shared slices exist
+            // SAFETY: `find_columns` requires three guarantees, which hold as follows:
+            // 1. `Q` builds only shared slices, and `&self` stops any change to the world while the
+            //    iterator lives.
+            // 2. `check_permissions` passed above.
+            // 3. `Q` does not borrow any column mutably, meaning the guarantee holds whatever other
+            //    shared slices exist
             .filter_map(|archetype| unsafe { Q::find_columns(archetype) })
     }
 
@@ -829,7 +828,7 @@ impl World {
             // Stops a component set that lists a type twice, which would give the new table two
             // columns for one type
             assert!(
-                !set_mask.intersects(info.bit()),
+                !set_mask.contains_any(info.bit()),
                 "a component set lists the same component type twice"
             );
             set_mask |= info.bit();
@@ -848,7 +847,7 @@ impl World {
             // other type replaces the component in a column that the source table already has
             let new_infos = set_infos
                 .iter()
-                .filter(|info| !source_mask.intersects(info.bit()));
+                .filter(|info| !source_mask.contains_any(info.bit()));
             // Adds those descriptions, one for each new column in the target table
             infos.extend(new_infos);
             infos
@@ -893,11 +892,11 @@ impl World {
     /// Returns the position in `archetypes` of the table filed under `mask`. Creates that table
     /// where the world has none yet.
     ///
-    /// The method calls `build_infos` only where it has to create the table, so a lookup that finds
-    /// the table copies no column descriptions. `build_infos` receives the world, and returns one
-    /// description for each type in `mask`. The new table builds its mask from those descriptions,
-    /// so they MUST describe exactly the types in `mask`. Otherwise `indices` would file the table
-    /// under a different mask, and the next lookup for `mask` would miss it.
+    /// The method calls `build_infos` only where it has to create the table. A lookup that finds
+    /// the table therefore does not copy any column descriptions. `build_infos` receives the world,
+    /// and returns one description for each type in `mask`. Those descriptions MUST cover exactly
+    /// the types in `mask`, since the new table builds its mask from them. Otherwise `indices`
+    /// would file the table under a different mask, and the next lookup for `mask` would miss it.
     ///
     /// # Panics
     ///
@@ -973,8 +972,9 @@ impl World {
     /// to push the components that the target needs and the source table lacked.
     ///
     /// The method passes `take` and `fill` on to [`Archetype::move_entity`], which sets out what
-    /// each closure MUST do. `take` receives each column that the target has no column for. It also
-    /// updates the slot of the moved entity, and the slot of the entity that fills its old row.
+    /// each closure MUST do. `take` receives each column that the target has no column for. The
+    /// method then updates the slot of the moved entity, and the slot of the entity that fills its
+    /// old row.
     ///
     /// `fill` runs before the method updates the slots. It MUST therefore hand out any component
     /// that it replaces, for the caller to drop once the method returns, as `add_components` does.
@@ -1089,7 +1089,7 @@ impl World {
     /// swap-remove moved into that row. Does nothing where `filled_ent` is `None`, as it is when
     /// the removed row was the last one in its table.
     ///
-    /// The entity stays in the same table, so the method changes only the row in its slot.
+    /// The entity stays in the same table, meaning the method changes only the row in its slot.
     ///
     /// # Examples
     ///
@@ -1171,7 +1171,7 @@ impl Location {
         // Narrows the table's position to a `u32`, and panics where it does not fit
         let arch_index =
             u32::try_from(arch_index).expect("a world should have fewer than 2^32 tables");
-        // Narrows the row to a `u32`, which always fits, since a world has at most 2^32 entities
+        // Narrows the row to a `u32`, and panics where it does not fit
         let row = u32::try_from(row).expect("a table should have fewer than 2^32 rows");
         Self { arch_index, row }
     }

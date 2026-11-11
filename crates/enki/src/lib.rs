@@ -29,7 +29,8 @@
 //! # Examples
 //!
 //! The example follows a villager and a tree through one update of a small game. It gives them
-//! components, runs a movement system two ways, reads every position, then removes and despawns.
+//! components, runs a movement system two ways and reads every position. It then removes the
+//! villager's velocity and despawns the tree.
 //!
 //! ```
 //! use enki::{Component, World};
@@ -78,11 +79,12 @@
 //! let moved = world.get::<Position>(villager).map(|position| (position.0, position.1));
 //! assert_eq!(moved, Some((2.0, 1.0)));
 //!
-//! // Reads every position, through a shared borrow of the world. The tree counts this time
+//! // Reads every position, through a shared borrow of the world. This query also matches the
+//! // tree, which has a position and no velocity
 //! let positions = world.query::<&Position>().count();
 //! assert_eq!(positions, 2);
 //!
-//! // Removes the villager's velocity, which later movement systems then skip
+//! // Removes the villager's velocity, after which movement systems skip the villager
 //! world.remove_component::<Velocity>(villager);
 //!
 //! // Despawns the tree, after which its old handle finds nothing

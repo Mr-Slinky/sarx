@@ -1,14 +1,15 @@
 //! Defines the mask that records a set of component types, with one bit for each type.
 //!
 //! A world gives each component type a position, from 0 upwards, the first time that it meets the
-//! type. For each type in its set, a [`ComponentMask`] sets the bit at that position. A table
-//! stores a mask for the component types that it stores. `World::find_query_mask` builds a mask for
-//! the types that a query asks for. The table then compares the two masks to answer whether it
-//! stores every type in the query. The comparison does not visit any column.
+//! type. For each type in its set, a [`ComponentMask`] sets the bit at that position. Each table
+//! keeps a mask for its types, and `World::find_query_mask` builds a mask for the types that a
+//! query asks for. The table then compares the two masks to answer whether it stores every type in
+//! the query, without visiting any column.
 //!
 //! A mask has room for [`ComponentMask::CAPACITY`] component types. That number is also the limit
-//! on the component types in one world. This module defines every operation on the bits. As a
-//! result, a change to the limit changes this module alone.
+//! on the component types in one world. Every operation on the bits is defined below. A change to
+//! the limit therefore changes this file, along with the doctest on `World::MAX_COMPONENT_TYPES`
+//! and the world tests, which state the number 64.
 //!
 //! The example on [`ComponentMask`] builds a mask for two types, then checks which types it
 //! contains.
@@ -114,7 +115,7 @@ impl ComponentMask {
 
     /// Returns `true` where `self` and `other` share at least one component type, and `false` where
     /// they share none.
-    pub(crate) fn intersects(self, other: Self) -> bool {
+    pub(crate) fn contains_any(self, other: Self) -> bool {
         self.0 & other.0 != 0
     }
 
@@ -381,7 +382,7 @@ mod tests {
         ];
 
         for (name, mask, other, expected) in cases {
-            let result = mask.intersects(other);
+            let result = mask.contains_any(other);
 
             assert_eq!(result, expected, "intersects for {name}");
         }

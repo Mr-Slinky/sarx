@@ -1,35 +1,28 @@
-//! Defines [`Component`], the trait that marks a type as a component, and the vector that stores
-//! the components of one type.
+//! Defines [`Component`] and [`ComponentVec`], the trait that marks a type as a component, and the vector that stores
+//! the components of one type, respectively.
 //!
-//! An archetype is one set of component types. Each archetype has a table, which stores its
-//! entities. The table has one column for each component type. A [`ComponentVec`] is one such
-//! column. An entity takes the same row in every column. Row 5 of every column, for example,
-//! belongs to the same entity.
+//! An archetype is one set of component types, modelled as a table with one row for each entity
+//! and one column for each component type. [`ComponentVec`] represents a column in this
+//! **archetype table**.
 //!
 //! A [`ComponentVec`] stores its components next to each other, in one block of memory. A table
-//! built from these vectors therefore has column-major order. Column-major order means that
-//! neighbouring components in a column are also neighbours in memory. The components of one row lie
+//! built from these vectors therefore has column-major order, meaning that
+//! neighbouring components in a column are also neighbours in memory. Contrastingly, the components of one row lie
 //! in separate blocks, one block per column.
 //!
-//! Where a component type contains a pointer, such as a `String` or a `Vec`, the block stores the
-//! pointer, and the data that it points to lies elsewhere on the heap.
-//!
 //! A table learns its component types at run time, as ADR 0011 sets out. A generic `Vec<T>` needs
-//! its type at compile time, meaning it cannot serve as a column. A [`ComponentVec`] therefore
+//! its type at compile time, meaning it cannot serve as a column. Therefore, a [`ComponentVec`]
 //! stores its components as raw bytes.
 //!
-//! A [`ComponentInfo`] describes those bytes to the vector. It stores the layout of the component
-//! type, which is its size and alignment. It also stores a function that runs the clean-up code for
-//! that type. It stores the identity of the type as well, which the typed methods check. The name
-//! of the type is stored too, and the panic message of those methods reports it.
+//! A [`ComponentInfo`] describes those bytes to [`ComponentVec`]. It stores the memory layout, type name, type identity,
+//! and drop function of its [`Component`]. It also stores the bit that the world gives its
+//! component type. Each table combines the bits of its types into a mask, which the
+//! [`archetype`](crate::archetype) module describes in more detail.
 //!
-//! A [`ComponentInfo`] also stores one bit, which stands for its component type. A table has a
-//! mask, which is a [`ComponentMask`] with one set bit for each component type that the table
-//! stores. The table builds its mask from these bits. A [`ComponentVec`] never reads the bit.
-//!
-//! The compiler cannot check the type of those bytes. As a result, each `unsafe` method has a
-//! Safety section that lists what its caller MUST guarantee. One of those guarantees is that the
-//! bytes belong to the component type that the vector stores.
+//! The compiler cannot check the type of a [`ComponentVec`]'s bytes. As a result,
+//! [`ComponentVec::push`], the one `unsafe` method, takes raw bytes and has a Safety section that
+//! lists what its caller MUST guarantee. One of those guarantees is that the bytes belong to the
+//! component type that the vector stores.
 //!
 //! # Typed and raw access
 //!
@@ -37,10 +30,9 @@
 //! knows the component type at compile time.
 //!
 //! A caller that knows the type uses [`ComponentVec::as_slice`] or [`ComponentVec::as_mut_slice`].
-//! Each method panics where that type differs from the type that the vector stores. Indexing the
-//! returned slice panics where the index is out of range. The slice also borrows the vector,
-//! meaning the compiler rejects a push while the slice is in use. This is the safe way to reach a
-//! component.
+//! Both methods panic when given a type that differs from the one the vector stores. The slice
+//! also borrows the vector, meaning the compiler rejects a push while the slice is in use.
+//! This is the safe way to reach a component.
 //!
 //! A caller that has only a [`ComponentInfo`], such as a table that learns its column types at run
 //! time, cannot name the type that those methods require. That caller uses
@@ -55,68 +47,141 @@
 //! valid when the vector grows its block, even where the block stays at the same address. Using the
 //! pointer after that point is undefined behaviour.
 //!
-//! The vector grows where [`ComponentVec::push_typed`] finds the block full.
-//! [`ComponentVec::move_component`] pushes onto its target, meaning it can grow the target too.
+//! The vector grows where [`ComponentVec::push_typed`] finds the block full, and where
+//! [`ComponentVec::reserve`] needs more room than the block has. [`ComponentVec::move_component`]
+//! pushes onto its target, meaning it can grow the target too.
 //!
 //! Dropping the vector frees its block. Every pointer into that block then stops being valid, and
 //! using one is undefined behaviour.
 //!
-//! [`ComponentVec::move_component`] also changes what the addresses in `self` contain, although it
-//! does not free anything. The address of the old last component now contains a stale copy of that
-//! component. Where a caller drops the component through that address, the component gets dropped
-//! twice, which is undefined behaviour. Where the moved index is not the last index, a pointer to it
-//! now reaches a different component, namely the one that was last.
+//! [`ComponentVec::move_component`] changes what some addresses contain. For example, a vector that
+//! stores four components, `A`, `B`, `C` and `D`, at indices 0 to 3, and moves `B` out from index 1
+//! to some other [`ComponentVec`] target, then copies `D` into index 1, and the length drops to 3.
 //!
-//! [`ComponentVec::swap_remove`] changes the addresses in `self` in the same way. It also drops the
-//! removed component, and the address of the old last component then contains a dropped value.
+//! Two pointers taken before the move would now mislead their caller. A pointer to index 1 used to
+//! reach `B`, and now reaches `D`. A pointer to index 3 still reaches a copy of `D`, but that copy
+//! lies past the end of the vector, and the vector no longer counts it as a component. Dropping `D`
+//! through that pointer drops it twice: once there, and again when the vector drops the `D` at
+//! index 1. A double drop is undefined behaviour.
 //!
-//! A lifetime is the annotation that lets the compiler tie a reference to the value that it
-//! borrows. A raw pointer has no lifetime, meaning the compiler accepts code that keeps one across
-//! a push, a move, a removal or the drop of the vector. A push can grow the block. The caller
-//! therefore MUST guarantee that it does not use any pointer from before a push, a move, a removal
-//! or the drop. To reach a component again, the caller requests a new pointer by index. Components
-//! keep their indices when the vector grows. After a move or a removal from an index other than the
-//! last, the component that was last is stored at that index.
+//! [`ComponentVec::swap_remove`] leaves the same two pointers behind. It drops `B` instead of moving
+//! it, then copies `D` into index 1 in the same way.
+//!
+//! A raw pointer has no lifetime, meaning the compiler accepts code that keeps one across
+//! a push, a reserve, a move, a removal or the drop of the vector. A push or a reserve can grow the
+//! block. The caller therefore MUST guarantee that it does not use any pointer from before a push,
+//! a reserve, a move, a removal or the drop. To reach a component again, the caller requests a new
+//! pointer by index. Components keep their indices when the vector grows. After a move or a removal
+//! from an index other than the last, the component that was last is stored at that index.
 //!
 //! # Examples
 //!
-//! The example moves one `Position` component from one vector to another, as the ECS does when an
-//! entity changes table. Each vector drops its components and frees its block when it goes out of
-//! scope.
+//! Each example below comes from a method in `enki` that uses a [`ComponentVec`], cut down to the
+//! lines that touch the vector.
+//!
+//! ## Creating the columns of a table
+//!
+//! `Archetype::new` receives one [`ComponentInfo`] for each component type in the table, and
+//! creates an empty column from each one. It then sorts the columns by type, reading each type
+//! back through [`ComponentVec::info`].
 //!
 //! ```ignore
-//! // Defines the component type that the two vectors store
-//! #[derive(Debug, PartialEq)]
-//! struct Position {
-//!     x: f32,
-//!     y: f32,
+//! // Creates one empty column for each entry in `infos`
+//! let mut components: Vec<ComponentVec> =
+//!     infos.iter().map(|info| ComponentVec::new(*info)).collect();
+//! // Sorts the columns by `TypeId`, which the binary search for a column requires
+//! components.sort_by_key(|components| components.info().type_id());
+//! ```
+//!
+//! ## Reading and changing one component
+//!
+//! `World::get` and `World::get_mut` know the component type `T` at compile time, and therefore
+//! use the typed methods. Each one borrows the column as a slice of `T`, then indexes the slice
+//! with the row of the entity.
+//!
+//! ```ignore
+//! // Returns the entity's `T`, or `None` where the row lies past the end of the column
+//! components.as_slice::<T>().get(location.row())
+//!
+//! // Returns the same component, for the caller to change
+//! components.as_mut_slice::<T>().get_mut(location.row())
+//! ```
+//!
+//! ## Adding or replacing a component
+//!
+//! `push_or_replace`, in the `set` module, gives an entity a component of type `T`. Where the
+//! entity already has a `T`, the function swaps the new component into its row and returns the
+//! old one. Otherwise it pushes the new component onto the end of the column.
+//!
+//! ```ignore
+//! let bit = column.info().bit();
+//! if existing.contains_any(bit) {
+//!     // Puts `value` in place of the old component, and returns the old one to the caller
+//!     let slot = &mut column.as_mut_slice::<T>()[row];
+//!     return Some(mem::replace(slot, value));
 //! }
+//! // Moves `value` onto the end of the column, which then owns it
+//! column.push_typed(value);
+//! None
+//! ```
 //!
-//! // Creates two empty vectors for `Position` components, with the bit at position 0 for that type
-//! let info = ComponentInfo::of::<Position>(ComponentMask::single(0));
-//! let mut source = ComponentVec::new(info);
-//! let mut target = ComponentVec::new(source.info());
+//! ## Moving an entity to another table
 //!
-//! // Pushes three components, which the vector then owns
-//! let positions = [
-//!     Position { x: 1.0, y: 1.0 },
-//!     Position { x: 2.0, y: 2.0 },
-//!     Position { x: 3.0, y: 3.0 },
-//! ];
-//! for position in positions {
-//!     source.push_typed(position);
+//! `Archetype::move_entity` visits each column in the entity's old table. Where the target table
+//! has a column of the same type, [`ComponentVec::move_component`] moves the component across.
+//! Otherwise the column goes to the closure `take`, which removes the component.
+//!
+//! ```ignore
+//! for components in &mut self.components {
+//!     let type_id = components.info().type_id();
+//!     match target.components_of_mut(type_id) {
+//!         // Moves the component to the end of the target's column for the same type
+//!         Some(target_components) => components.move_component(row, target_components),
+//!         // Lets `take` remove the component, since the target has no column for its type
+//!         None => take(components, row),
+//!     }
 //! }
+//! ```
 //!
-//! // Moves the component at index 0 to `target`, and fills index 0 with the last component
-//! source.move_component(0, &mut target);
+//! The caller of the move decides what `take` does with the component. `World::remove_component`
+//! keeps it as a value, through [`ComponentVec::swap_remove_typed`], and returns it.
+//! `World::add_components` passes [`ComponentVec::swap_remove`] itself, which drops it.
 //!
-//! // Borrows the components as slices of `Position`. The vectors keep ownership of them
-//! let remaining = source.as_slice::<Position>();
-//! let moved = target.as_slice::<Position>();
+//! ```ignore
+//! // Takes the entity's `T` out of the column, and keeps it to return to the caller
+//! |components, row| removed = Some(components.swap_remove_typed::<T>(row))
+//! ```
 //!
-//! assert_eq!(remaining[0], Position { x: 3.0, y: 3.0 });
-//! assert_eq!(remaining[1], Position { x: 2.0, y: 2.0 });
-//! assert_eq!(moved[0], Position { x: 1.0, y: 1.0 });
+//! ## Removing an entity
+//!
+//! `Archetype::remove_entity` calls [`ComponentVec::swap_remove`] on every column. Each call drops
+//! the entity's component, and the last component in the column fills `row`. The entity list then
+//! does the same, meaning the last entity and all of its components end up in `row` together.
+//!
+//! ```ignore
+//! for components in &mut self.components {
+//!     // Drops the entity's component, and fills `row` with the last component in the column
+//!     components.swap_remove(row);
+//! }
+//! // Removes the entity from the list in the same way, filling `row` with the last entity
+//! self.entities.swap_remove(row);
+//! ```
+//!
+//! ## Reaching a column through its raw pointer
+//!
+//! A `&mut T` query receives the table through a shared reference, yet hands out a `&mut T` for
+//! each component. It cannot call [`ComponentVec::as_mut_slice`], which needs a
+//! `&mut ComponentVec`. Instead, its `find_columns` builds the slice from
+//! [`ComponentVec::data`] and [`ComponentVec::len`].
+//!
+//! ```ignore
+//! let components = archetype.components_of(TypeId::of::<T>())?;
+//! let start = components.data().cast::<T>();
+//! let len = components.len();
+//! // SAFETY: `components_of` found the column for `T`, and every index below `len` stores a live
+//! // component. The caller of `find_columns` MUST guarantee that nothing else reaches these
+//! // components while the slice is in use
+//! Some(unsafe { slice::from_raw_parts_mut(start.as_ptr(), len) })
 //! ```
 
 use crate::mask::ComponentMask;
@@ -196,8 +261,8 @@ pub trait Component: Send + Sync + 'static {}
 ///
 /// # Examples
 ///
-/// The [module example](self#examples) pushes components into one vector, moves one into another,
-/// and borrows both as slices. The test
+/// The [module examples](self#examples) show the vector as tables and the world use it: creating
+/// columns, reading, pushing, moving and removing components. The test
 /// `as_mut_slice_with_changed_value_updates_only_that_component` changes one component through
 /// `as_mut_slice`.
 pub(crate) struct ComponentVec {
@@ -214,13 +279,14 @@ impl ComponentVec {
 
     /// Returns an empty vector for the component type that `info` describes.
     ///
-    /// The first call to [`grow`](Self::grow) allocates the block. A push, or a move into this
-    /// vector, leads to that call where the vector has no block yet. A vector for a type of size
-    /// zero starts with a capacity of `usize::MAX`, and never allocates.
+    /// The vector allocates its block on the first push, move into this vector, or call to
+    /// [`reserve`](Self::reserve) that needs room. A vector for a type of size zero starts with a
+    /// capacity of `usize::MAX`, and never allocates.
     ///
-    /// The [module example](self#examples) creates two vectors with this method.
+    /// The [module example](self#creating-the-columns-of-a-table) creates one column for each
+    /// component type in a table with this method.
     pub(crate) fn new(info: ComponentInfo) -> Self {
-        // Points `data` at an aligned address, which stands in until `grow` allocates a block
+        // Points `data` at an aligned address, which stands in until the vector allocates a block
         let alignment = info.layout.align();
         let data = NonNull::new(ptr::without_provenance_mut(alignment))
             .expect("the alignment should be above zero, which `Layout` guarantees");
@@ -247,8 +313,8 @@ impl ComponentVec {
 
     /// Returns the [`ComponentInfo`] that describes the component type in the vector.
     ///
-    /// The [module example](self#examples) passes this `ComponentInfo` to a second vector, which
-    /// then stores the same component type.
+    /// The [module example](self#creating-the-columns-of-a-table) reads the type of each column
+    /// through this method, to sort the columns of a table.
     pub(crate) fn info(&self) -> ComponentInfo {
         self.info
     }
@@ -292,10 +358,10 @@ impl ComponentVec {
     /// pointer stops being valid when the vector grows its block or is dropped. The Pointer validity
     /// section in the module documentation sets out every rule.
     ///
-    /// A caller looks at a component by borrowing it through the pointer. The pointer method `read`
-    /// makes a bitwise copy, and the vector still owns the original. The caller MUST guarantee that
-    /// it never drops such a copy where the type has clean-up code. The vector later drops the
-    /// original as well, which makes that a double drop, and a double drop is undefined behaviour.
+    /// A caller that only looks at a component borrows it through the pointer. Calling `read` on
+    /// the pointer instead makes a bitwise copy, while the vector still owns the original. The
+    /// caller MUST guarantee that it never drops such a copy where the type has clean-up code,
+    /// since the vector later drops the original as well, and a double drop is undefined behaviour.
     ///
     /// # Panics
     ///
@@ -325,8 +391,8 @@ impl ComponentVec {
     ///
     /// After such a panic, nothing drops `value`, and it leaks.
     ///
-    /// The [module example](self#examples) pushes three `Position` components with this method, and
-    /// the [`ComponentVec`] example pushes one `f32`.
+    /// The [module example](self#adding-or-replacing-a-component) pushes a new component onto the
+    /// end of a column with this method.
     #[track_caller]
     pub(crate) fn push_typed<T: 'static>(&mut self, value: T) {
         self.assert_stores::<T>();
@@ -348,7 +414,8 @@ impl ComponentVec {
     ///
     /// Panics where `T` differs from the type that the vector stores.
     ///
-    /// The [module example](self#examples) borrows the components of two vectors with this method.
+    /// The [module example](self#reading-and-changing-one-component) borrows a column with this
+    /// method, to read the component of one entity.
     #[track_caller]
     pub(crate) fn as_slice<T: 'static>(&self) -> &[T] {
         self.assert_stores::<T>();
@@ -390,10 +457,10 @@ impl ComponentVec {
     /// Moves the component at `index` onto the end of `target`, then fills `index` with the last
     /// component in `self`.
     ///
-    /// `self` ends up one component shorter. `target` owns the moved component. The component that
-    /// was last is now stored at `index`. The caller then updates the location that it records for
-    /// the entity that owns that component. Where `index` is the last index, no other component
-    /// moves, and the caller does not update any other entity.
+    /// `self` ends up one component shorter, `target` owns the moved component, and the component
+    /// that was last is now stored at `index`. The caller MUST then update the location that it
+    /// records for the entity that owns that component. Where `index` is the last index, no other
+    /// component moves, and the caller does not update any other entity.
     ///
     /// # Panics
     ///
@@ -404,8 +471,8 @@ impl ComponentVec {
     /// target for a type of size zero panics once it stores `usize::MAX` components. The program
     /// aborts where the allocator cannot supply a larger block for `target`.
     ///
-    /// The [module example](self#examples) moves the component at index 0 with this method, and
-    /// shows the last component filling that index.
+    /// The [module example](self#moving-an-entity-to-another-table) moves each component of an
+    /// entity to its new table with this method.
     pub(crate) fn move_component(&mut self, index: usize, target: &mut ComponentVec) {
         // Panics before anything changes, where `index` lies past the last component. A stale row
         // from a caller would otherwise copy the bytes of a component that is already dropped
@@ -443,9 +510,9 @@ impl ComponentVec {
 
     /// Drops the component at `index`, then fills `index` with the component that was last.
     ///
-    /// `self` ends up one component shorter. The caller then updates the location that it records
-    /// for the entity that owns the component now at `index`. Where `index` is the last index, no
-    /// other component moves, and the caller does not update any other entity.
+    /// `self` ends up one component shorter. The caller MUST then update the location that it
+    /// records for the entity that owns the component now at `index`. Where `index` is the last
+    /// index, no other component moves, and the caller does not update any other entity.
     ///
     /// # Panics
     ///
@@ -740,9 +807,10 @@ impl Drop for ComponentVec {
     /// Drops every component in the vector, then frees the block.
     ///
     /// Where the clean-up code of a component panics, the method stops at that component. The
-    /// components after it never get dropped, and the block never gets freed. This is a memory leak
-    /// rather than undefined behaviour. Accepting the leak is a decision. A panicking clean-up is
-    /// a bug in the component, and an uncaught panic on the main thread ends the program.
+    /// components after it never get dropped, and the block never gets freed. The result is a
+    /// memory leak rather than undefined behaviour. Accepting the leak is a decision, taken because
+    /// a panicking clean-up is a bug in the component, and an uncaught panic on the main thread
+    /// ends the program.
     ///
     /// # Examples
     ///

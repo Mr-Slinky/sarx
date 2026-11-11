@@ -1,5 +1,5 @@
-//! Defines a table in column-major order that stores every entity with one exact set of component
-//! types.
+//! Defines the table that stores every entity with one exact set of component types, in
+//! column-major order.
 //!
 //! An archetype is one set of component types, such as `{Position, Velocity}`. An [`Archetype`] is
 //! the table for one such set, as ADR 0011 sets out. The table has a list of entities, and one
@@ -13,7 +13,8 @@
 //! The caller adds a row with [`Archetype::push_entity`]. The method pushes the entity, then calls a
 //! closure from the caller, which pushes one component onto every column. Once the closure returns,
 //! the method checks that every column again has one component for each entity in the list, and
-//! panics where one does not. The gap between the two steps therefore never outlasts the call.
+//! panics where one does not. Between the two steps, the entity list is one entry longer than each
+//! column, and the check stops that mismatch from outlasting the call.
 //!
 //! # Masks
 //!
@@ -39,8 +40,9 @@
 //!
 //! The caller records a location for each entity, which is its table and its row. A move changes
 //! the location of the moved entity, and of the entity that fills the empty row, where there is
-//! one. The caller MUST update both. A caller that keeps a stale row can later pass an index past
-//! the end of a column to `move_entity`, which then panics before anything changes.
+//! one. The caller MUST update both. A stale row passed to `move_entity` either moves the
+//! components of a different entity, or lies past the end of a column, where the method panics
+//! before anything changes.
 //!
 //! # Examples
 //!
@@ -158,7 +160,7 @@ impl Archetype {
         for info in infos {
             // Stops two types from sharing a bit, which would make queries treat them as one type
             debug_assert!(
-                !mask.intersects(info.bit()),
+                !mask.contains_any(info.bit()),
                 "two component types in one table share a mask bit"
             );
             mask |= info.bit();
@@ -255,8 +257,8 @@ impl Archetype {
     /// and that row to `fill`, which MUST push one component onto every column. A table with no
     /// columns takes a `fill` that does nothing, written `|_, _| {}`.
     ///
-    /// The method calls `fill` once. Its bound, `FnOnce`, therefore lets the closure move the
-    /// components that it captures into the table.
+    /// The method calls `fill` once, which lets its bound be `FnOnce`. That bound in turn allows the
+    /// closure to move the components that it captures into the table.
     ///
     /// # Panics
     ///
@@ -424,8 +426,8 @@ impl Archetype {
         self.entities.get(row).copied()
     }
 
-    /// Moves the entity at `row` to a new row at the end of `target`, **passing each column that
-    /// `target` lacks to `take`**.
+    /// Moves the entity at `row` to a new row at the end of `target`, and passes each column that
+    /// `target` lacks to `take`.
     ///
     /// The method serves both moves between tables. Where the entity gains components, `target`
     /// has every column in this table plus one or more others. Where the entity loses a component,
@@ -458,10 +460,9 @@ impl Archetype {
     ///
     /// The program aborts where any panic occurs once the move has started and before `fill` runs,
     /// such as a panic in the `Drop` implementation of a component that `take` drops. The panic
-    /// message prints
-    /// first. The method moves one column at a time. Such a panic would therefore leave columns of
-    /// different lengths, in this table and in `target`. Ending the program stops any later call
-    /// from using either table in that state.
+    /// message prints first. The method moves one column at a time. Such a panic would therefore
+    /// leave columns of different lengths, in this table and in `target`. Ending the program stops
+    /// any later call from using either table in that state.
     ///
     /// # Examples
     ///

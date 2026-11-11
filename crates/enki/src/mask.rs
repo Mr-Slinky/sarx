@@ -14,6 +14,7 @@
 //! contains.
 
 use std::fmt;
+use std::iter;
 use std::ops::{BitOr, BitOrAssign};
 
 // ========================================================================================== \\
@@ -123,6 +124,27 @@ impl ComponentMask {
     pub(crate) fn without(mut self, other: Self) -> Self {
         self.0 &= !other.0;
         self
+    }
+
+    /// Returns an iterator over the position of each set bit, lowest first.
+    ///
+    /// # Examples
+    ///
+    /// For the mask with bits 0 and 3 set, the iterator yields 0, then 3, then stops. For
+    /// [`EMPTY`](Self::EMPTY), it yields nothing.
+    pub(crate) fn read_positions(self) -> impl Iterator<Item = usize> {
+        let mut bits = self.0;
+        iter::from_fn(move || {
+            if bits == 0 {
+                return None;
+            }
+            // Counts the zeros below the lowest set bit, which is that bit's position
+            let position = bits.trailing_zeros() as usize;
+            // Clears the lowest set bit. Subtracting 1 turns that bit off and every zero below it
+            // on, and `&` with the original then keeps every bit above it
+            bits &= bits - 1;
+            Some(position)
+        })
     }
 }
 

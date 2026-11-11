@@ -117,6 +117,10 @@ pub struct Archetype {
 }
 
 impl Archetype {
+    // ========================================================================================== \\
+    //                                        Constructors                                        \\
+    // ========================================================================================== \\
+
     /// Returns an empty table with one column for each entry in `infos`. The caller can list the
     /// entries in any order.
     ///
@@ -168,11 +172,23 @@ impl Archetype {
         }
     }
 
+    // ========================================================================================== \\
+    //                                          Getters                                           \\
+    // ========================================================================================== \\
+
     /// Returns the number of entities in the table.
     ///
     /// The [module example](self#examples) checks that each table has one entity after a move.
     pub(crate) fn len(&self) -> usize {
         self.entities.len()
+    }
+
+    /// Returns `true` where the table has no entities, and `false` where it has at least one.
+    ///
+    /// A new table returns `true`. Once [`push_entity`](Self::push_entity) adds an entity, it
+    /// returns `false`.
+    pub(crate) fn is_empty(&self) -> bool {
+        self.entities.is_empty()
     }
 
     /// Returns the [`ComponentInfo`] for each component type in the table, sorted by [`TypeId`].
@@ -199,6 +215,24 @@ impl Archetype {
     pub(crate) fn mask(&self) -> ComponentMask {
         self.mask
     }
+
+    /// Returns the entities in row order.
+    ///
+    /// The entity at index `i` in the returned slice owns the component at index `i` in every
+    /// column. The slice borrows the table, meaning the compiler rejects any change to the table
+    /// while the slice is in use.
+    ///
+    /// # Examples
+    ///
+    /// After pushes of `first` and then `second`, `entities` returns `[first, second]`. The test
+    /// `entities_with_varying_row_counts_returns_entities_in_row_order` checks several row counts.
+    pub(crate) fn entities(&self) -> &[Entity] {
+        &self.entities
+    }
+
+    // ========================================================================================== \\
+    //                                        API Methods                                         \\
+    // ========================================================================================== \\
 
     /// Returns `true` where the table stores every component type in `query_mask`, and `false` where
     /// it lacks at least one.
@@ -267,20 +301,6 @@ impl Archetype {
             components.reserve(additional);
         }
         self.entities.reserve(additional);
-    }
-
-    /// Returns the entities in row order.
-    ///
-    /// The entity at index `i` in the returned slice owns the component at index `i` in every
-    /// column. The slice borrows the table, meaning the compiler rejects any change to the table
-    /// while the slice is in use.
-    ///
-    /// # Examples
-    ///
-    /// After pushes of `first` and then `second`, `entities` returns `[first, second]`. The test
-    /// `entities_with_varying_row_counts_returns_entities_in_row_order` checks several row counts.
-    pub(crate) fn entities(&self) -> &[Entity] {
-        &self.entities
     }
 
     /// Returns the column for `type_id`, or `None` where the table has no such column.
@@ -506,6 +526,10 @@ impl Archetype {
         // Returns the entity that now occupies `row`, or `None` where `row` was the last row
         self.entities.get(row).copied()
     }
+
+    // ========================================================================================== \\
+    //                                       Helper Methods                                       \\
+    // ========================================================================================== \\
 
     /// Returns `true` where every column has one component for each entity in the entity list, and
     /// `false` where any column is longer or shorter than the entity list.

@@ -27,7 +27,7 @@
 use crate::archetype::Archetype;
 use crate::component::{Component, ComponentInfo};
 use crate::mask::ComponentMask;
-use crate::world::World;
+use crate::registry::ComponentRegistry;
 use std::any::TypeId;
 use std::mem;
 
@@ -99,29 +99,31 @@ pub trait Bundle: sealed::Sealed + Send + Sync + 'static {
     /// Returns one [`ComponentInfo`] for each type in the bundle, in the order of the tuple fields.
     ///
     /// The method has no `self` parameter. A caller therefore calls it on the type, as in
-    /// `B::infos(world)`. The result depends on the types in the bundle, and on the bits that
-    /// `world` assigns to them.
+    /// `B::infos(registry)`. The result depends on the types in the bundle, and on the bits that
+    /// `registry` assigns to them.
+    ///
+    /// Only `enki` can create a `ComponentRegistry`. As a result, only `enki` can call the method.
     ///
     /// # Arguments
     ///
-    /// * `world`: the world that assigns each type its bit. Where a type has no bit in the world
-    ///   yet, the world gives it the next free bit.
+    /// * `registry`: the registry that assigns each type its bit. Where a type has no bit in the
+    ///   registry yet, the registry gives it the next free bit.
     ///
     /// # Panics
     ///
-    /// Panics where one of the types has no bit in the world yet, and the world already has
+    /// Panics where one of the types has no bit yet, and the registry already has
     /// [`World::MAX_COMPONENT_TYPES`](crate::World::MAX_COMPONENT_TYPES) component types.
     ///
     /// # Examples
     ///
-    /// `add_components` on `World` calls it as `B::infos(self)`, where `B` is the type of the
-    /// bundle and `self` is the `&mut World`. The call borrows the world through `self` for the
-    /// length of the call only, meaning the method can use `self` again once the call returns.
+    /// `add_components` on `World` calls it as `B::infos(&mut self.registry)`, where `B` is the
+    /// type of the bundle. The call borrows the registry alone, meaning the tables of the world
+    /// stay free for the rest of the method.
     ///
     /// The test `infos_with_new_types_in_any_order_returns_infos_in_field_order` calls it for a
-    /// tuple type written out in full, as in `<(Position, Health) as Bundle>::infos(&mut world)`.
+    /// tuple type written out in full, as in `<(Position, Health) as Bundle>::infos(&mut registry)`.
     #[doc(hidden)]
-    fn infos(world: &mut World) -> Vec<ComponentInfo>;
+    fn infos(registry: &mut ComponentRegistry) -> Vec<ComponentInfo>;
 
     /// Represents the components that [`Bundle::push_into`] replaces, with one `Option` for each
     /// field of the bundle.
@@ -274,23 +276,23 @@ fn push_or_replace<T: Component>(
 /// // Implements `Bundle` for every tuple of three types, where each type implements `Component`
 /// impl<A: Component, B: Component, C: Component> Bundle for (A, B, C,) {
 ///     // Returns one `ComponentInfo` per type, in the order of the tuple fields
-///     fn infos(world: &mut World) -> Vec<ComponentInfo> {
+///     fn infos(registry: &mut ComponentRegistry) -> Vec<ComponentInfo> {
 ///         vec![
 ///             {
-///                 // Finds the bit for `A`, and assigns the next free bit where the world has no
-///                 // bit for `A` yet
-///                 let bit = world.find_or_assign_bit(TypeId::of::<A>());
+///                 // Finds the bit for `A`, and assigns the next free bit where the registry has
+///                 // no bit for `A` yet
+///                 let bit = registry.find_or_assign_bit(TypeId::of::<A>());
 ///                 // Builds the `ComponentInfo` for `A`, with that bit
 ///                 ComponentInfo::of::<A>(bit)
 ///             },
 ///             {
 ///                 // Does the same for `B`
-///                 let bit = world.find_or_assign_bit(TypeId::of::<B>());
+///                 let bit = registry.find_or_assign_bit(TypeId::of::<B>());
 ///                 ComponentInfo::of::<B>(bit)
 ///             },
 ///             {
 ///                 // Does the same for `C`
-///                 let bit = world.find_or_assign_bit(TypeId::of::<C>());
+///                 let bit = registry.find_or_assign_bit(TypeId::of::<C>());
 ///                 ComponentInfo::of::<C>(bit)
 ///             }
 ///         ]
@@ -300,7 +302,7 @@ fn push_or_replace<T: Component>(
 ///     type Replaced = (Option<A>, Option<B>, Option<C>,);
 ///
 ///     // Allows the variables `A`, `B` and `C` below to have names in capitals
-///     #[allow(non_snake_case)]
+///     #[expect(non_snake_case)]
 ///     fn push_into(self, table: &mut Archetype, row: usize, existing: ComponentMask) -> Self::Replaced {
 ///         // Moves the three fields out of the tuple, into the variables `A`, `B` and `C`
 ///         let (A, B, C,) = self;
@@ -341,12 +343,12 @@ macro_rules! impl_bundle {
         // `Bundle` for the tuple of those parameters. The comma after each name turns a single
         // name into a tuple of one field
         impl<$($name: Component),+> Bundle for ($($name,)+) {
-            fn infos(world: &mut World) -> Vec<ComponentInfo> {
+            fn infos(registry: &mut ComponentRegistry) -> Vec<ComponentInfo> {
                 // Builds one `ComponentInfo` per type, in the order of the tuple fields
                 vec![$({
-                    // Finds the bit for the type, and assigns the next free bit where the world
-                    // has no bit for the type yet
-                    let bit = world.find_or_assign_bit(TypeId::of::<$name>());
+                    // Finds the bit for the type, and assigns the next free bit where the
+                    // registry has no bit for the type yet
+                    let bit = registry.find_or_assign_bit(TypeId::of::<$name>());
                     // Builds the `ComponentInfo` for the type, with that bit
                     ComponentInfo::of::<$name>(bit)
                 }),+]
@@ -355,7 +357,7 @@ macro_rules! impl_bundle {
             type Replaced = ($(Option<$name>,)+);
 
             // Allows the variables below to take the type parameter names, which are in capitals
-            #[allow(non_snake_case)]
+            #[expect(non_snake_case)]
             fn push_into(
                 self,
                 table: &mut Archetype,
@@ -627,7 +629,7 @@ mod tests {
     #[test]
     fn infos_with_new_types_in_any_order_returns_infos_in_field_order() {
         // Defines the type of `Bundle::infos` for one bundle type, which each case passes
-        type InfosFn = fn(&mut World) -> Vec<ComponentInfo>;
+        type InfosFn = fn(&mut ComponentRegistry) -> Vec<ComponentInfo>;
 
         let cases: [(&str, InfosFn, [TypeId; 3]); 3] = [
             (
@@ -660,9 +662,9 @@ mod tests {
         ];
 
         for (label, infos_of, type_ids) in cases {
-            let mut world = World::new();
+            let mut registry = ComponentRegistry::new();
 
-            let infos = infos_of(&mut world);
+            let infos = infos_of(&mut registry);
 
             let bits = [0, 1, 2].map(ComponentMask::single);
             let expected: Vec<(TypeId, ComponentMask)> = type_ids.into_iter().zip(bits).collect();
@@ -674,12 +676,12 @@ mod tests {
     /// free bit
     #[test]
     fn infos_with_known_and_new_types_reuses_known_bits() {
-        let mut world = World::new();
-        world.find_or_assign_bit(TypeId::of::<Health>());
-        world.find_or_assign_bit(TypeId::of::<Position>());
+        let mut registry = ComponentRegistry::new();
+        registry.find_or_assign_bit(TypeId::of::<Health>());
+        registry.find_or_assign_bit(TypeId::of::<Position>());
 
-        let infos = <(Position, Velocity, Health) as Bundle>::infos(&mut world);
-        let next_bit = world.find_or_assign_bit(TypeId::of::<Marker<0>>());
+        let infos = <(Position, Velocity, Health) as Bundle>::infos(&mut registry);
+        let next_bit = registry.find_or_assign_bit(TypeId::of::<Marker<0>>());
 
         let expected = vec![
             (TypeId::of::<Position>(), ComponentMask::single(1)),
@@ -693,11 +695,11 @@ mod tests {
     /// Checks that a second call for the same bundle returns the same infos, and takes no new bits
     #[test]
     fn infos_with_repeated_call_returns_same_infos() {
-        let mut world = World::new();
-        let first = <(Position, Health) as Bundle>::infos(&mut world);
+        let mut registry = ComponentRegistry::new();
+        let first = <(Position, Health) as Bundle>::infos(&mut registry);
 
-        let second = <(Position, Health) as Bundle>::infos(&mut world);
-        let next_bit = world.find_or_assign_bit(TypeId::of::<Velocity>());
+        let second = <(Position, Health) as Bundle>::infos(&mut registry);
+        let next_bit = registry.find_or_assign_bit(TypeId::of::<Velocity>());
 
         assert_eq!(
             read_types_and_bits(&second),
@@ -711,9 +713,9 @@ mod tests {
     /// leaves the world to reject the bundle
     #[test]
     fn infos_with_repeated_type_returns_same_bit_twice() {
-        let mut world = World::new();
+        let mut registry = ComponentRegistry::new();
 
-        let infos = <(Health, Health) as Bundle>::infos(&mut world);
+        let infos = <(Health, Health) as Bundle>::infos(&mut registry);
 
         let expected = vec![
             (TypeId::of::<Health>(), ComponentMask::single(0)),
@@ -725,9 +727,9 @@ mod tests {
     /// Checks the smallest bundle, of one field
     #[test]
     fn infos_with_one_field_returns_one_info() {
-        let mut world = World::new();
+        let mut registry = ComponentRegistry::new();
 
-        let infos = <(Health,) as Bundle>::infos(&mut world);
+        let infos = <(Health,) as Bundle>::infos(&mut registry);
 
         let expected = vec![(TypeId::of::<Health>(), ComponentMask::single(0))];
         assert_eq!(read_types_and_bits(&infos), expected);
@@ -736,9 +738,9 @@ mod tests {
     /// Checks the largest bundle, of thirty-two fields, with one bit per field in field order
     #[test]
     fn infos_with_32_fields_returns_32_infos_in_field_order() {
-        let mut world = World::new();
+        let mut registry = ComponentRegistry::new();
 
-        let infos = Bundle32::infos(&mut world);
+        let infos = Bundle32::infos(&mut registry);
 
         let type_ids = marker_type_ids!(
              0  1  2  3  4  5  6  7  8  9 10 11 12 13 14 15
@@ -755,12 +757,12 @@ mod tests {
     /// Checks that a new type still gets a bit where only the last bit is free
     #[test]
     fn infos_with_last_free_bit_assigns_bit_63() {
-        let mut world = World::new();
+        let mut registry = ComponentRegistry::new();
         for type_id in &build_64_type_ids()[..63] {
-            world.find_or_assign_bit(*type_id);
+            registry.find_or_assign_bit(*type_id);
         }
 
-        let infos = <(Health,) as Bundle>::infos(&mut world);
+        let infos = <(Health,) as Bundle>::infos(&mut registry);
 
         let expected = vec![(TypeId::of::<Health>(), ComponentMask::single(63))];
         assert_eq!(read_types_and_bits(&infos), expected);
@@ -769,14 +771,14 @@ mod tests {
     /// Checks that a world with every bit taken still describes a bundle of types that it has met
     #[test]
     fn infos_with_full_world_and_known_types_returns_known_bits() {
-        let mut world = World::new();
-        world.find_or_assign_bit(TypeId::of::<Position>());
-        world.find_or_assign_bit(TypeId::of::<Health>());
+        let mut registry = ComponentRegistry::new();
+        registry.find_or_assign_bit(TypeId::of::<Position>());
+        registry.find_or_assign_bit(TypeId::of::<Health>());
         for type_id in &build_64_type_ids()[..62] {
-            world.find_or_assign_bit(*type_id);
+            registry.find_or_assign_bit(*type_id);
         }
 
-        let infos = <(Health, Position) as Bundle>::infos(&mut world);
+        let infos = <(Health, Position) as Bundle>::infos(&mut registry);
 
         let expected = vec![
             (TypeId::of::<Health>(), ComponentMask::single(1)),
@@ -1007,8 +1009,8 @@ mod tests {
     /// Checks the largest bundle, of thirty-two fields, in a table built from its own infos
     #[test]
     fn push_into_with_32_fields_pushes_onto_every_column() {
-        let mut world = World::new();
-        let infos = Bundle32::infos(&mut world);
+        let mut registry = ComponentRegistry::new();
+        let infos = Bundle32::infos(&mut registry);
         let mut table = Archetype::new(&infos);
 
         build_bundle_32().push_into(&mut table, 0, ComponentMask::EMPTY);

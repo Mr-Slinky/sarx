@@ -96,6 +96,7 @@ mod component;
 mod entity;
 mod mask;
 mod query;
+mod registry;
 mod world;
 
 pub use bundle::Bundle;

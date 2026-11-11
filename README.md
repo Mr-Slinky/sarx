@@ -233,6 +233,17 @@ applies here.
 - An ADR always records the current decision. Where a decision changes, the author rewrites its ADR
   in place and updates the date. Git keeps the earlier versions.
 
+### Naming
+
+Every function and method name starts with a verb that says what it does, such as `find_or_create`,
+`read_positions` or `fetch_row`. A predicate starts with `is`, `has` or `can`, as in `has_all`.
+
+Rust's own naming conventions take precedence over this rule wherever the two differ. The
+[Rust API Guidelines](https://rust-lang.github.io/api-guidelines/naming.html) set those conventions
+out. The case that arises most often is a getter. A getter takes the name of what it returns, with
+no `get_` prefix. `Archetype::len`, `Archetype::mask` and `Entity::index` follow it, as `Vec::len`
+does in the standard library.
+
 ### Tests
 
 Unit tests follow the standard Rust layout. Each file keeps its tests in a `#[cfg(test)] mod tests`

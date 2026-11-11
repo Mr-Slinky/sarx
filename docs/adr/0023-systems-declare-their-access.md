@@ -76,8 +76,11 @@ one that `check_permissions` applies inside one query, applied across all the qu
 system together.
 
 The query rules in `enki` stay as they stand. `World::query` and `World::query_mut` remain for code
-that runs outside the scheduler, such as setting up a level, and for tests. The scheduler does not
-exist yet. Until it does, the systems of the hand step take `&mut World` and call `query_mut`.
+that runs outside the scheduler, such as setting up a level, and for tests.
+
+Systems are structure, which other code builds on. The scheduler, resources and commands therefore
+come before the first system of the game. The hand step waits for them, rather than writing its
+systems against `&mut World` and rewriting them once the scheduler exists.
 
 Several points remain open, for the discussions that design each piece:
 

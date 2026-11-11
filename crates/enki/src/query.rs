@@ -27,6 +27,10 @@ use std::marker::PhantomData;
 use std::ptr::NonNull;
 use std::slice;
 
+// ========================================================================================== \\
+//                                          Modules                                           \\
+// ========================================================================================== \\
+
 /// Declares the traits that seal [`Query`] and [`ReadOnlyQuery`].
 ///
 /// The example on [`Query`] passes the query `(&mut Position, &Velocity)`, one of the types that
@@ -51,6 +55,10 @@ mod sealed {
     /// types that implement this trait.
     pub trait ReadOnlySealed {}
 }
+
+// ========================================================================================== \\
+//                                         Public API                                         \\
+// ========================================================================================== \\
 
 /// Represents whether a query reads a component type or changes it.
 ///
@@ -527,7 +535,7 @@ macro_rules! impl_query {
             type Rows<'w> = ($(<$name as Query>::Rows<'w>,)+);
 
             // Allows the variables below to take the type parameter names, which are in capitals
-            #[allow(non_snake_case)]
+            #[expect(non_snake_case)]
             fn build_rows<'w>(columns: Self::Columns<'w>) -> Self::Rows<'w> {
                 // Moves the columns of each field out of the tuple, into a variable with the
                 // name of its type
@@ -535,7 +543,7 @@ macro_rules! impl_query {
                 ($(<$name as Query>::build_rows($name),)+)
             }
 
-            #[allow(non_snake_case)]
+            #[expect(non_snake_case)]
             fn count_rows(rows: &Self::Rows<'_>) -> usize {
                 let ($($name,)+) = rows;
                 let mut count = usize::MAX;
@@ -543,7 +551,7 @@ macro_rules! impl_query {
                 count
             }
 
-            #[allow(non_snake_case)]
+            #[expect(non_snake_case)]
             unsafe fn fetch_row<'w>(rows: &Self::Rows<'w>, row: usize) -> Self::Item<'w> {
                 let ($($name,)+) = rows;
                 // SAFETY: `fetch_row` requires a row below each field's count, read at most once.

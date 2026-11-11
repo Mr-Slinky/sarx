@@ -208,6 +208,10 @@ pub(crate) struct ComponentVec {
 }
 
 impl ComponentVec {
+    // ========================================================================================== \\
+    //                                        Constructors                                        \\
+    // ========================================================================================== \\
+
     /// Returns an empty vector for the component type that `info` describes.
     ///
     /// The first call to [`grow`](Self::grow) allocates the block. A push, or a move into this
@@ -236,6 +240,10 @@ impl ComponentVec {
             capacity,
         }
     }
+
+    // ========================================================================================== \\
+    //                                          Getters                                           \\
+    // ========================================================================================== \\
 
     /// Returns the [`ComponentInfo`] that describes the component type in the vector.
     ///
@@ -273,6 +281,10 @@ impl ComponentVec {
         self.len
     }
 
+    // ========================================================================================== \\
+    //                                        API Methods                                         \\
+    // ========================================================================================== \\
+
     /// Returns a pointer to the start of the component at `index`.
     ///
     /// The method does not check bounds, meaning the pointer can lie past the end of the block.
@@ -298,46 +310,6 @@ impl ComponentVec {
     pub(crate) fn ptr_at(&self, index: usize) -> *mut u8 {
         let offset = index * self.info.layout.size();
         self.data.as_ptr().wrapping_add(offset)
-    }
-
-    /// Copies one component from `value` onto the end of the vector.
-    ///
-    /// The vector grows its block where the block is full. It then owns the component.
-    ///
-    /// # Panics
-    ///
-    /// Panics where the vector is full and a larger block would exceed `isize::MAX` bytes. A vector
-    /// for a type of size zero panics once it stores `usize::MAX` components. The program aborts
-    /// where the allocator cannot supply the larger block.
-    ///
-    /// After such a panic, the vector does not own the component. The third guarantee below still
-    /// binds the caller, meaning nothing drops the original, and the component leaks.
-    ///
-    /// # Safety
-    ///
-    /// The caller MUST guarantee three things:
-    ///
-    /// - `value` points at a live component of the type that the vector stores.
-    /// - `value` points outside the block of this vector, since growing can free the block.
-    /// - Nothing drops the original afterwards, and nothing uses it unless its type is `Copy`.
-    ///
-    /// # Examples
-    ///
-    /// `push_typed` shows a call, along with the SAFETY comment that the call needs. The test
-    /// `push_with_manually_dropped_string_stores_value_for_as_slice` pushes a `String` that
-    /// `ManuallyDrop` keeps from being dropped twice.
-    unsafe fn push(&mut self, value: *const u8) {
-        if self.len == self.capacity {
-            self.grow();
-        }
-
-        let end = self.ptr_at(self.len); // points just past the last component
-        // SAFETY: `copy_nonoverlapping` requires two valid ranges that do not overlap. The caller
-        // MUST guarantee that `value` is valid and lies outside the block, as the Safety section
-        // above sets out. `end` has room for one component, since the check above grows a full
-        // block. For a type of size zero, the copy covers zero bytes and does not touch any memory
-        unsafe { ptr::copy_nonoverlapping(value, end, self.info.layout.size()) }
-        self.len += 1;
     }
 
     /// Moves `value` onto the end of the vector, which then owns it.
@@ -588,6 +560,50 @@ impl ComponentVec {
         // Grows to at least double, which keeps repeated small reserves from copying every time
         let doubled = self.capacity.saturating_mul(2);
         self.increase_capacity(required.max(doubled));
+    }
+
+    // ========================================================================================== \\
+    //                                       Helper Methods                                       \\
+    // ========================================================================================== \\
+
+    /// Copies one component from `value` onto the end of the vector.
+    ///
+    /// The vector grows its block where the block is full. It then owns the component.
+    ///
+    /// # Panics
+    ///
+    /// Panics where the vector is full and a larger block would exceed `isize::MAX` bytes. A vector
+    /// for a type of size zero panics once it stores `usize::MAX` components. The program aborts
+    /// where the allocator cannot supply the larger block.
+    ///
+    /// After such a panic, the vector does not own the component. The third guarantee below still
+    /// binds the caller, meaning nothing drops the original, and the component leaks.
+    ///
+    /// # Safety
+    ///
+    /// The caller MUST guarantee three things:
+    ///
+    /// - `value` points at a live component of the type that the vector stores.
+    /// - `value` points outside the block of this vector, since growing can free the block.
+    /// - Nothing drops the original afterwards, and nothing uses it unless its type is `Copy`.
+    ///
+    /// # Examples
+    ///
+    /// `push_typed` shows a call, along with the SAFETY comment that the call needs. The test
+    /// `push_with_manually_dropped_string_stores_value_for_as_slice` pushes a `String` that
+    /// `ManuallyDrop` keeps from being dropped twice.
+    unsafe fn push(&mut self, value: *const u8) {
+        if self.len == self.capacity {
+            self.grow();
+        }
+
+        let end = self.ptr_at(self.len); // points just past the last component
+        // SAFETY: `copy_nonoverlapping` requires two valid ranges that do not overlap. The caller
+        // MUST guarantee that `value` is valid and lies outside the block, as the Safety section
+        // above sets out. `end` has room for one component, since the check above grows a full
+        // block. For a type of size zero, the copy covers zero bytes and does not touch any memory
+        unsafe { ptr::copy_nonoverlapping(value, end, self.info.layout.size()) }
+        self.len += 1;
     }
 
     /// Doubles the capacity, or sets it to 4 components where the capacity is 0.

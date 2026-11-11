@@ -21,8 +21,9 @@
 //!
 //! # Masks
 //!
-//! The world gives each component type a bit, the first time that it meets the type. The first type
-//! takes bit 0, the second takes bit 1, and the order continues up to the last bit. A mask is a
+//! The world gives each component type a bit, the first time that it meets the type. Its
+//! `ComponentRegistry` keeps the bit of each type. The first type takes bit 0, the second takes
+//! bit 1, and the order continues up to the last bit. A mask is a
 //! [`ComponentMask`] that combines the bits of a set of types. A world has room for as many
 //! component types as a mask has bits, which [`ComponentMask::CAPACITY`] defines.
 //!
@@ -35,8 +36,8 @@
 //! An [`Entity`] is a handle, which stores an index and a version. The index selects one slot in the
 //! world. A slot records where the entity is stored, as a table and a row in that table.
 //!
-//! The world reuses the slot of a despawned entity for a later entity. Before then, it raises the
-//! version in that slot by one. A handle to the despawned entity then keeps its old version, which
+//! The world reuses the slot of a despawned entity for a later entity. Before then, its
+//! allocator, `Entities`, raises the version in that slot by one. A handle to the despawned entity then keeps its old version, which
 //! differs from the version in the slot. The world compares the two versions on every call, and
 //! treats a handle with a different version as one that does not refer to any entity. As a result,
 //! an old handle never reaches the later entity that reuses its slot.
@@ -62,11 +63,14 @@
 
 use crate::archetype::Archetype;
 use crate::component::{Component, ComponentInfo, ComponentVec};
+use crate::entity::Entities;
 use crate::mask::ComponentMask;
 use crate::query::Permission;
+use crate::registry::ComponentRegistry;
 use crate::{query, Bundle, Entity, Query, ReadOnlyQuery};
 use std::any::TypeId;
 use std::collections::HashMap;
+use std::fmt;
 
 // ========================================================================================== \\
 //                                         Public API                                         \\
@@ -138,19 +142,21 @@ pub struct World {
     ///
     /// For example, a new world maps [`ComponentMask::EMPTY`] to [`World::EMPTY`].
     indices: HashMap<ComponentMask, usize>,
-    /// Maps each component type to its bit.
+    /// Stores, for each bit position, the position in `archetypes` of every table that stores the
+    /// component type with that bit.
     ///
-    /// For example, a world that met `Position` first maps `TypeId::of::<Position>()` to the mask
-    /// with bit 0 set.
-    arch_masks: HashMap<TypeId, ComponentMask>,
-    /// Stores one slot for each entity index, at that index.
+    /// Each list grows in the order that the world creates tables, and so stays sorted. For
+    /// example, a world with tables for `{Position}` and `{Position, Health}`, with `Position` at
+    /// bit 0, stores `[1, 2]` at entry 0.
+    tables_by_type: Vec<Vec<usize>>,
+    /// Gives each component type its bit.
     ///
-    /// For example, entry 3 stores the slot for every handle with index 3.
-    slots: Vec<Slot>,
-    /// Stores the index of each slot that `spawn_empty` can reuse.
+    /// For example, a world that met `Position` first gives `Position` the mask with bit 0 set.
+    registry: ComponentRegistry,
+    /// Hands out entity handles, and records where each living entity is stored.
     ///
-    /// For example, once a caller despawns the entity at index 2, the list contains 2.
-    free_slots: Vec<u32>,
+    /// For example, once a caller despawns the entity at index 2, the next spawn reuses index 2.
+    entities: Entities,
 }
 
 impl World {
@@ -192,9 +198,9 @@ impl World {
         Self {
             archetypes,
             indices: archetype_indices,
-            arch_masks: HashMap::new(),
-            slots: Vec::new(),
-            free_slots: Vec::new(),
+            tables_by_type: vec![Vec::new(); ComponentMask::CAPACITY],
+            registry: ComponentRegistry::new(),
+            entities: Entities::new(),
         }
     }
 
@@ -213,36 +219,11 @@ impl World {
         // Places the new entity in the empty table, at the row just past its last entity
         let row = self.archetypes[Self::EMPTY].len();
         let location = Location::new(Self::EMPTY, row);
-
-        // Takes a freed slot where one exists, and adds a new slot otherwise
-        let entity = match self.free_slots.pop() {
-            Some(index) => {
-                // Borrows the freed slot, to change it in place
-                let slot = &mut self.slots[index as usize];
-                // Points the slot at the new entity's row
-                slot.location = location;
-                // Returns a handle at the slot's version, which `despawn` already raised
-                Entity::new(index, slot.version)
-            }
-            None => {
-                // Takes the next index, which equals the number of slots, and panics past `u32::MAX`
-                let index = u32::try_from(self.slots.len()).expect(
-                    "the number of slots should fit in a `u32`, the type of an entity index",
-                );
-                // Adds the new slot at version 0, pointing at the new entity's row
-                self.slots.push(Slot {
-                    version: 0,
-                    location,
-                });
-                // Returns a handle for the new slot, at version 0
-                Entity::new(index, 0)
-            }
-        };
-
+        // Takes a handle, from a freed slot where one exists, with the slot pointing at that row
+        let entity = self.entities.alloc(location);
         // Adds the entity to the end of the empty table, at the row that `location` records. The
         // table has no columns, so there is nothing to push
         self.archetypes[Self::EMPTY].push_entity(entity, |_, _| {});
-        // Returns the handle to the caller
         entity
     }
 
@@ -272,15 +253,8 @@ impl World {
         // Records the new row of the entity that moved, where one did
         self.record_filled_row(filled_opt, location.row());
 
-        let index = entity.index();
-        // Borrows the entity's slot, to change it in place
-        let slot = &mut self.slots[index];
-        // Raises the version, which makes `locate` refuse every copy of the dead handle
-        slot.version += 1;
-        // Frees the slot for `spawn_empty` to reuse, unless its version has reached `u32::MAX`
-        if slot.version != u32::MAX {
-            self.free_slots.push(index as u32);
-        }
+        // Raises the slot's version, which makes `locate` refuse every copy of the dead handle
+        self.entities.free(entity);
         // Reports that the entity existed
         true
     }
@@ -338,12 +312,11 @@ impl World {
     /// ```
     pub fn reserve<B: Bundle>(&mut self, additional: usize) {
         // Describes each type in the bundle, giving a bit to each type that the world has not met
-        let infos = B::infos(self);
+        let infos = B::infos(&mut self.registry);
         let arch_index = self.find_or_create_archetype(Self::EMPTY, &infos);
         self.archetypes[arch_index].reserve(additional);
 
-        let new_slots = additional.saturating_sub(self.free_slots.len());
-        self.slots.reserve(new_slots);
+        self.entities.reserve(additional);
     }
 
     /// Gives `entity` every component in the bundle `components`, in one call.
@@ -376,7 +349,7 @@ impl World {
         };
 
         // Describes each type in the bundle, giving a bit to each type that the world has not met
-        let infos = B::infos(self);
+        let infos = B::infos(&mut self.registry);
         // Finds or creates the table for the entity's types plus the bundle's types
         let target_index = self.find_or_create_archetype(location.arch_index(), &infos);
 
@@ -508,35 +481,6 @@ impl World {
             self.archetypes[location.arch_index()].components_of_mut(TypeId::of::<T>())?;
         // Returns the entity's `T` for changing, from the entity's row in that column
         components.as_mut_slice::<T>().get_mut(location.row())
-    }
-
-    /// Returns the bit for the type that `type_id` identifies. Gives the type the next free bit where
-    /// it has none yet.
-    ///
-    /// # Panics
-    ///
-    /// Panics where the type has no bit yet, and the world already has [`ComponentMask::CAPACITY`]
-    /// component types.
-    ///
-    /// # Examples
-    ///
-    /// In a new world, the first type that the method meets takes bit 0, and the second takes
-    /// bit 1. A later call for the first type returns bit 0 again. The test
-    /// `find_or_assign_bit_with_repeated_type_returns_same_bit` checks the repeat.
-    pub(crate) fn find_or_assign_bit(&mut self, type_id: TypeId) -> ComponentMask {
-        // Counts the bits handed out so far, which is also the position of the next free bit
-        let next_position = self.arch_masks.len();
-        // Returns the type's bit, first giving it the next free bit where it has none yet
-        *self.arch_masks.entry(type_id).or_insert_with(|| {
-            // Panics where every bit is taken, since a mask has no bit left for another type
-            let capacity = ComponentMask::CAPACITY;
-            assert!(
-                next_position < capacity,
-                "a world has at most {capacity} component types"
-            );
-            // Builds a mask with one set bit, at the next free position
-            ComponentMask::single(next_position)
-        })
     }
 
     /// Returns an iterator with one item for each table that stores every component type in the
@@ -793,8 +737,8 @@ impl World {
         // Visits each type in the list, ignoring whether the query reads or changes it
         for (type_id, _) in permissions {
             // Finds the type's bit, and returns `None` where the world has never given it one
-            let bit = self.arch_masks.get(type_id)?;
-            mask |= *bit;
+            let bit = self.registry.find_bit(*type_id)?;
+            mask |= bit;
         }
         Some(mask)
     }
@@ -802,9 +746,15 @@ impl World {
     /// Returns an iterator over the tables that have at least one entity and store every component
     /// type in `query_mask`.
     ///
-    /// The iterator visits each table once at most. It yields nothing where `query_mask` is
-    /// `None`, which [`find_query_mask`](Self::find_query_mask) returns for a query that asks for
-    /// a type with no bit.
+    /// The method reads the list in `tables_by_type` for each type in `query_mask`, and searches
+    /// only the shortest one. Every table that stores all the types also stores the type with the
+    /// shortest list, meaning that list contains every match. The method then keeps each table in
+    /// it that has an entity and stores every type in `query_mask`.
+    ///
+    /// The iterator visits each table once at most, in the order that the world created them. It
+    /// yields nothing where `query_mask` is `None`, which
+    /// [`find_query_mask`](Self::find_query_mask) returns for a query that asks for a type with no
+    /// bit.
     ///
     /// # Examples
     ///
@@ -816,12 +766,20 @@ impl World {
         &self,
         query_mask: Option<ComponentMask>,
     ) -> impl Iterator<Item = &Archetype> {
-        // Filter tables by those who are non-empty and contain matching components
-        self.archetypes.iter().filter(move |archetype| {
-            let has_rows = archetype.len() > 0;
-            let has_types = query_mask.is_some_and(|mask| archetype.has_all(mask));
-            has_rows && has_types
-        })
+        // Reads the list of tables for each type in the query, and keeps the shortest one
+        let shortest = query_mask.and_then(|mask| {
+            mask.read_positions()
+                .map(|position| self.tables_by_type[position].as_slice())
+                .min_by_key(|tables| tables.len())
+        });
+        // Takes no tables where a type in the query has no bit, since no table then stores it
+        let candidates = shortest.unwrap_or_default();
+        // Reads the query mask, which is `Some` whenever `candidates` has a table in it
+        let mask = query_mask.unwrap_or_default();
+        candidates
+            .iter()
+            .map(move |&index| &self.archetypes[index])
+            .filter(move |archetype| !archetype.is_empty() && archetype.has_all(mask))
     }
 
     /// Returns where `entity` is stored, or `None` where the handle does not refer to a living
@@ -836,15 +794,7 @@ impl World {
     /// For the third of three entities given a `Health` in a new world, `locate` returns table 1,
     /// row 2. Once that entity is despawned, `locate` returns `None` for the same handle.
     fn locate(&self, entity: Entity) -> Option<Location> {
-        // Finds the entity's slot, and returns `None` where the index lies past the last slot
-        let slot = self.slots.get(entity.index())?;
-        // Returns `None` where the versions differ, as they do once the entity is despawned
-        if slot.version != entity.version() {
-            return None;
-        }
-
-        // Returns where the living entity is stored
-        Some(slot.location)
+        self.entities.locate(entity)
     }
 
     /// Returns the position in `archetypes` of the table for the types in table `source`, plus the
@@ -912,8 +862,8 @@ impl World {
     /// for `{Position}`. The tests `remove_component_with_existing_target_table_reuses_table` and
     /// `remove_component_with_new_target_table_creates_table` reach it through `remove_component`.
     fn find_or_create_archetype_without(&mut self, source: usize, type_id: TypeId) -> usize {
-        // Finds the bit of the type being removed
-        let bit = self.arch_masks[&type_id];
+        // Finds the bit of the type being removed, which it has, since table `source` stores the type
+        let bit = self.registry.find_bit(type_id).expect("a type that a table stores should have a bit");
         // Builds the target table's mask, which is the source table's mask with that bit cleared
         let mask = self.archetypes[source].mask().without(bit);
 
@@ -992,8 +942,13 @@ impl World {
         let index = self.archetypes.len();
         // Creates the new table, which builds its mask from `infos`
         let archetype = Archetype::new(infos);
+        let mask = archetype.mask();
         // Files the new table under its own mask, for the next lookup to find
-        self.indices.insert(archetype.mask(), index);
+        self.indices.insert(mask, index);
+        // Adds the new table to the list of tables for each type that it stores
+        for position in mask.read_positions() {
+            self.tables_by_type[position].push(index);
+        }
         // Adds the new table at that position
         self.archetypes.push(archetype);
         // Returns the new table's position
@@ -1037,7 +992,7 @@ impl World {
     /// let second = world.spawn_empty();
     ///
     /// // Creates table 1, for `{Health}`, which has no rows yet
-    /// let bit = world.find_or_assign_bit(TypeId::of::<Health>());
+    /// let bit = world.registry.find_or_assign_bit(TypeId::of::<Health>());
     /// let target = world.create_archetype(&[ComponentInfo::of::<Health>(bit)]);
     ///
     /// // Moves the first entity to table 1, and pushes its `Health` onto the new column
@@ -1113,7 +1068,7 @@ impl World {
         // Points the slot of the entity that filled the old row at that row, where one did
         self.record_filled_row(swapped_ent, old_location.row());
         // Points the moved entity's slot at its new table and row
-        self.slots[moved_ent.index()].location = new_location;
+        self.entities.set_location(moved_ent, new_location);
     }
 
     /// Points the slot of `filled_ent` at row `row`, where `filled_ent` is the entity that a
@@ -1131,7 +1086,7 @@ impl World {
     /// and `add_components_with_entity_leaving_first_row_updates_filling_entity` through a move.
     fn record_filled_row(&mut self, filled_ent: Option<Entity>, row: usize) {
         if let Some(filled) = filled_ent {
-            self.slots[filled.index()].location.set_row(row);
+            self.entities.set_row(filled, row);
         }
     }
 }
@@ -1145,31 +1100,27 @@ impl Default for World {
     }
 }
 
+impl fmt::Debug for World {
+    /// Writes the number of entities, tables and component types in the world.
+    ///
+    /// The output leaves out the components themselves, which could run to thousands of values.
+    /// A new world writes `World { entities: 0, tables: 1, component_types: 0, .. }`, where the
+    /// one table is the empty table.
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let entities: usize = self.archetypes.iter().map(Archetype::len).sum();
+        let component_types = self.registry.count_types();
+        formatter
+            .debug_struct("World")
+            .field("entities", &entities)
+            .field("tables", &self.archetypes.len())
+            .field("component_types", &component_types)
+            .finish_non_exhaustive()
+    }
+}
+
 // ========================================================================================== \\
 //                                          Helpers                                           \\
 // ========================================================================================== \\
-
-/// Records the version of one entity index, and where the entity with that version is stored.
-///
-/// For example, a slot with version 1 and the location `Location::new(0, 4)` belongs to the second
-/// entity to use its index. That entity occupies row 4 of the empty table.
-#[derive(Clone, Copy, Debug)]
-struct Slot {
-    /// Stores the version of the entity that occupies the slot. In a free slot, it stores the
-    /// version that the next entity in the slot will take.
-    ///
-    /// For example, once a caller despawns the first entity in a slot, the slot stores version 1.
-    version: u32,
-    /// Records where the entity is stored. In a free slot, the value is out of date until
-    /// `spawn_empty` overwrites it.
-    ///
-    /// The example on [`Location`] shows a value.
-    location: Location,
-}
-
-// Stops the build where the size of a slot differs from 12 bytes. A slot needs 4 bytes for its
-// version, and 4 bytes for each of its two location fields
-const _: () = assert!(size_of::<Slot>() == 12);
 
 /// Records the table and the row where one entity is stored.
 ///
@@ -1178,7 +1129,7 @@ const _: () = assert!(size_of::<Slot>() == 12);
 /// `Location::new(1, 2)` records row 2 of table 1. After `set_row(0)`, `arch_index` still returns
 /// 1, and `row` returns 0. The test `set_row_with_new_row_keeps_table` checks it.
 #[derive(Clone, Copy, Debug)]
-struct Location {
+pub(crate) struct Location {
     /// Stores the position in `World::archetypes` of the table that contains the entity.
     ///
     /// For example, `Location::new(1, 2)` stores 1.
@@ -1232,7 +1183,7 @@ impl Location {
     /// # Panics
     ///
     /// Panics where `row` exceeds `u32::MAX`.
-    fn set_row(&mut self, row: usize) {
+    pub(crate) fn set_row(&mut self, row: usize) {
         *self = Self::new(self.arch_index(), row);
     }
 }
@@ -1452,7 +1403,7 @@ mod tests {
 
     /// Panics where the slots, the tables and `indices` disagree with each other.
     ///
-    /// A slot is live where `free_slots` lacks its index and its version is below `u32::MAX`. The
+    /// A slot is live where the free list lacks its index and its version is below `u32::MAX`. The
     /// helper checks five things:
     ///
     /// - Each live slot points at a table row that holds the slot's own entity.
@@ -1460,30 +1411,31 @@ mod tests {
     ///   with the first check and equal counts, every live slot then owns exactly one row.
     /// - Every column has one component for each row of its table.
     /// - `indices` files each table under the table's own mask, and has one entry for each table.
-    /// - `free_slots` lists each index once, and only indices of slots that are neither live nor
+    /// - The free list contains each index once, and only indices of slots that are neither live nor
     ///   retired.
     fn check_invariants(world: &World) {
         // Collects the freed indices, and panics where one is freed twice or has no slot
         let mut freed = HashSet::new();
-        for &index in &world.free_slots {
+        for &index in world.entities.read_free_list() {
             let index = index as usize;
-            assert!(index < world.slots.len(), "freed index {index} has no slot");
+            assert!(index < world.entities.count_slots(), "freed index {index} has no slot");
             assert!(freed.insert(index), "index {index} freed twice");
         }
 
         // Checks that each live slot points at a row that holds its entity, and counts them
         let mut live_slots = 0;
-        for (index, slot) in world.slots.iter().enumerate() {
-            let retired = slot.version == u32::MAX;
+        for index in 0..world.entities.count_slots() {
+            let (version, location) = world.entities.read_slot(index);
+            let retired = version == u32::MAX;
             let free = freed.contains(&index);
             assert!(!(retired && free), "retired slot {index} in the free slots");
             if retired || free {
                 continue;
             }
             live_slots += 1;
-            let entity = Entity::new(index as u32, slot.version);
-            let table = &world.archetypes[slot.location.arch_index()];
-            let found = table.entities().get(slot.location.row());
+            let entity = Entity::new(index as u32, version);
+            let table = &world.archetypes[location.arch_index()];
+            let found = table.entities().get(location.row());
             assert_eq!(found, Some(&entity), "entity at the row of slot {index}");
         }
 
@@ -1491,11 +1443,11 @@ mod tests {
         for (position, table) in world.archetypes.iter().enumerate() {
             // Checks that each row's entity has a live slot that points back at this row
             for (row, entity) in table.entities().iter().enumerate() {
-                let slot = world.slots[entity.index()];
-                let place = (slot.location.arch_index(), slot.location.row());
+                let (version, location) = world.entities.read_slot(entity.index());
+                let place = (location.arch_index(), location.row());
                 assert!(!freed.contains(&entity.index()), "freed slot of {entity:?}");
                 assert_eq!(
-                    slot.version,
+                    version,
                     entity.version(),
                     "version in slot of {entity:?}"
                 );
@@ -1556,9 +1508,9 @@ mod tests {
                 Some(&World::EMPTY),
                 "table under the empty mask from {label}"
             );
-            assert!(world.arch_masks.is_empty(), "component types from {label}");
-            assert!(world.slots.is_empty(), "slots from {label}");
-            assert!(world.free_slots.is_empty(), "free slots from {label}");
+            assert!(world.registry.count_types() == 0, "component types from {label}");
+            assert!(world.entities.count_slots() == 0, "slots from {label}");
+            assert!(world.entities.read_free_list().is_empty(), "free slots from {label}");
         }
     }
 
@@ -1607,8 +1559,8 @@ mod tests {
         let reborn = world.spawn_empty();
 
         assert_eq!(reborn, Entity::new(0, 1), "handle of the new entity");
-        assert_eq!(world.slots.len(), 1, "slots");
-        assert!(world.free_slots.is_empty(), "free slots");
+        assert_eq!(world.entities.count_slots(), 1, "slots");
+        assert!(world.entities.read_free_list().is_empty(), "free slots");
     }
 
     /// Checks that freed slots come back last freed first, since `free_slots` is a stack
@@ -1651,7 +1603,7 @@ mod tests {
             None,
             "component after despawning"
         );
-        assert_eq!(world.free_slots, [0], "free slots");
+        assert_eq!(world.entities.read_free_list(), [0], "free slots");
     }
 
     /// Checks that a handle to a despawned entity, to an index never spawned, or at the wrong version
@@ -1673,7 +1625,7 @@ mod tests {
             let despawned = world.despawn(handle);
 
             assert!(!despawned, "answer for {label}");
-            assert_eq!(world.free_slots, [0], "free slots for {label}");
+            assert_eq!(world.entities.read_free_list(), [0], "free slots for {label}");
         }
     }
 
@@ -1737,7 +1689,7 @@ mod tests {
     fn despawn_with_version_reaching_max_retires_slot() {
         let mut world = World::new();
         world.spawn_empty();
-        world.slots[0].version = u32::MAX - 1;
+        world.entities.set_version(0, u32::MAX - 1);
         let last_version = Entity::new(0, u32::MAX - 1);
 
         let despawned = world.despawn(last_version);
@@ -1745,7 +1697,7 @@ mod tests {
 
         assert!(despawned, "answer for the entity at the last version");
         assert_eq!(
-            world.slots[0].version,
+            world.entities.read_slot(0).0,
             u32::MAX,
             "version of the retired slot"
         );
@@ -1804,7 +1756,7 @@ mod tests {
             .expect("the entity should be alive");
 
         let location = locate_alive(&world, entity);
-        let bit = world.arch_masks[&TypeId::of::<Position>()];
+        let bit = world.registry.find_bit(TypeId::of::<Position>()).expect("the type should have a bit");
         let mask = world.archetypes[location.arch_index()].mask();
         assert_eq!(world.archetypes.len(), 2, "number of tables");
         assert_eq!(location.arch_index(), 1, "table of the entity");
@@ -2044,7 +1996,7 @@ mod tests {
         let mut world = World::new();
         let entity = world.spawn_empty();
         for type_id in build_64_type_ids() {
-            world.find_or_assign_bit(type_id);
+            world.registry.find_or_assign_bit(type_id);
         }
 
         world
@@ -2057,7 +2009,7 @@ mod tests {
     fn find_or_assign_bit_with_64_types_assigns_every_bit_once() {
         let mut world = World::new();
 
-        let bits = build_64_type_ids().map(|type_id| world.find_or_assign_bit(type_id));
+        let bits = build_64_type_ids().map(|type_id| world.registry.find_or_assign_bit(type_id));
 
         let expected: [ComponentMask; 64] = array::from_fn(ComponentMask::single);
         assert_eq!(bits, expected, "one bit each, in order of first sight");
@@ -2067,15 +2019,15 @@ mod tests {
     #[test]
     fn find_or_assign_bit_with_repeated_type_returns_same_bit() {
         let mut world = World::new();
-        let first = world.find_or_assign_bit(TypeId::of::<Position>());
-        let other = world.find_or_assign_bit(TypeId::of::<Health>());
+        let first = world.registry.find_or_assign_bit(TypeId::of::<Position>());
+        let other = world.registry.find_or_assign_bit(TypeId::of::<Health>());
 
-        let repeat = world.find_or_assign_bit(TypeId::of::<Position>());
+        let repeat = world.registry.find_or_assign_bit(TypeId::of::<Position>());
 
         assert_eq!(repeat, first, "bit for the repeated type");
         let expected = [ComponentMask::single(0), ComponentMask::single(1)];
         assert_eq!([first, other], expected, "bits in order of first sight");
-        assert_eq!(world.arch_masks.len(), 2, "component types");
+        assert_eq!(world.registry.count_types(), 2, "component types");
     }
 
     /// Checks that removing a component hands it back, and keeps the entity's other components
@@ -2093,7 +2045,7 @@ mod tests {
         let removed = world.remove_component::<Health>(entity);
 
         let location = locate_alive(&world, entity);
-        let position_bit = world.arch_masks[&TypeId::of::<Position>()];
+        let position_bit = world.registry.find_bit(TypeId::of::<Position>()).expect("the type should have a bit");
         let mask = world.archetypes[location.arch_index()].mask();
         assert_eq!(removed, Some(Health(100)), "returned component");
         assert_eq!(world.get::<Health>(entity), None, "removed component");
@@ -2161,7 +2113,7 @@ mod tests {
         world.remove_component::<Position>(entity);
 
         let location = locate_alive(&world, entity);
-        let health_bit = world.arch_masks[&TypeId::of::<Health>()];
+        let health_bit = world.registry.find_bit(TypeId::of::<Health>()).expect("the type should have a bit");
         let mask = world.archetypes[location.arch_index()].mask();
         assert_eq!(world.archetypes.len(), 4, "number of tables");
         assert_eq!(mask, health_bit, "mask of the new table");
@@ -2222,7 +2174,7 @@ mod tests {
 
         let removed = world.remove_component::<Velocity>(entity);
 
-        let velocity_bit = world.arch_masks.get(&TypeId::of::<Velocity>());
+        let velocity_bit = world.registry.find_bit(TypeId::of::<Velocity>());
         assert_eq!(removed, None, "removed component");
         assert_eq!(velocity_bit, None, "bit for `Velocity`");
         assert_eq!(
@@ -2519,7 +2471,7 @@ mod tests {
             assert_eq!(added, Err(Health(1)), "answer for {label}");
             assert_eq!(world.archetypes.len(), 1, "number of tables for {label}");
             assert!(
-                world.arch_masks.is_empty(),
+                world.registry.count_types() == 0,
                 "component types for {label}"
             );
         }
@@ -2572,7 +2524,7 @@ mod tests {
             assert_eq!(added, Err((Position(1.0), Health(1))), "answer for {label}");
             assert_eq!(world.archetypes.len(), 1, "number of tables for {label}");
             assert!(
-                world.arch_masks.is_empty(),
+                world.registry.count_types() == 0,
                 "component types for {label}"
             );
         }
@@ -2865,8 +2817,8 @@ mod tests {
 
         world.reserve::<(Position, Health)>(4);
 
-        let position_bit = world.arch_masks[&TypeId::of::<Position>()];
-        let health_bit = world.arch_masks[&TypeId::of::<Health>()];
+        let position_bit = world.registry.find_bit(TypeId::of::<Position>()).expect("the type should have a bit");
+        let health_bit = world.registry.find_bit(TypeId::of::<Health>()).expect("the type should have a bit");
         let table = &world.archetypes[1];
         let table_index = world.indices.get(&(position_bit | health_bit));
         assert_eq!(world.archetypes.len(), 2, "number of tables");
@@ -2878,7 +2830,7 @@ mod tests {
         assert_eq!(table.mask(), position_bit | health_bit, "mask of the table");
         assert_eq!(table_index, Some(&1), "table under its mask");
         assert_eq!(table.len(), 0, "rows in the table");
-        assert!(world.slots.capacity() >= 4, "room in the list of slots");
+        assert!(world.entities.slot_capacity() >= 4, "room in the list of slots");
     }
 
     /// Checks that `reserve` leaves the list of slots at its capacity, where the freed slots can
@@ -2889,18 +2841,18 @@ mod tests {
         // Spawns entities until the list of slots is full, meaning that any more room in the list
         // would need a larger block
         let mut entities = vec![world.spawn_empty()];
-        while world.slots.len() < world.slots.capacity() {
+        while world.entities.count_slots() < world.entities.slot_capacity() {
             entities.push(world.spawn_empty());
         }
         for &entity in &entities {
             world.despawn(entity);
         }
-        let capacity = world.slots.capacity();
+        let capacity = world.entities.slot_capacity();
 
         world.reserve::<(Health,)>(entities.len());
 
         assert_eq!(
-            world.slots.capacity(),
+            world.entities.slot_capacity(),
             capacity,
             "room in the list of slots"
         );
@@ -2983,13 +2935,13 @@ mod tests {
         let mut world = World::new();
         let type_ids = build_64_type_ids();
         for type_id in type_ids {
-            world.find_or_assign_bit(type_id);
+            world.registry.find_or_assign_bit(type_id);
         }
 
-        let last = world.find_or_assign_bit(type_ids[63]);
+        let last = world.registry.find_or_assign_bit(type_ids[63]);
 
         assert_eq!(last, ComponentMask::single(63), "bit of the last type");
-        assert_eq!(world.arch_masks.len(), 64, "component types");
+        assert_eq!(world.registry.count_types(), 64, "component types");
     }
 
     /// Checks that `find_or_assign_bit` panics on a 65th type, since a mask has room for 64 bits
@@ -2998,10 +2950,10 @@ mod tests {
     fn find_or_assign_bit_with_65th_type_panics() {
         let mut world = World::new();
         for type_id in build_64_type_ids() {
-            world.find_or_assign_bit(type_id);
+            world.registry.find_or_assign_bit(type_id);
         }
 
-        world.find_or_assign_bit(TypeId::of::<Health>());
+        world.registry.find_or_assign_bit(TypeId::of::<Health>());
     }
 
     /// Checks that `get` returns `None` for a type that the world has never met
@@ -3423,7 +3375,7 @@ mod tests {
     fn query_mut_with_component_at_bit_63_visits_entity() {
         let mut world = World::new();
         for type_id in &build_64_type_ids()[..63] {
-            world.find_or_assign_bit(*type_id);
+            world.registry.find_or_assign_bit(*type_id);
         }
         let entity = world.spawn_empty();
         world
@@ -3438,7 +3390,7 @@ mod tests {
             })
             .collect();
 
-        let health_bit = world.arch_masks.get(&TypeId::of::<Health>()).copied();
+        let health_bit = world.registry.find_bit(TypeId::of::<Health>());
         assert_eq!(
             health_bit,
             Some(ComponentMask::single(63)),
@@ -3759,7 +3711,7 @@ mod tests {
         // Frees a new slot, then sets it one version short of `u32::MAX`
         let doomed = world.spawn_empty();
         world.despawn(doomed);
-        world.slots[doomed.index()].version = u32::MAX - 1;
+        world.entities.set_version(doomed.index(), u32::MAX - 1);
         check_invariants(&world);
         // Fills the slot with the last entity that it can serve, then despawns that entity, which
         // retires the slot
@@ -3792,7 +3744,7 @@ mod tests {
             "version of the last entity in its slot"
         );
         assert_eq!(after, Entity::new(4, 0), "handle after the retired slot");
-        assert_eq!(world.free_slots, [1], "free slots");
+        assert_eq!(world.entities.read_free_list(), [1], "free slots");
         assert_eq!(
             world.get::<Health>(first),
             None,

@@ -21,7 +21,7 @@ The entries are grouped by crate.
 ### Edge cache for table moves
 
 **Today**: an entity moves to another table each time that it gains or loses a component. To find
-the target table, `World` looks up the component type in `component_bits`, which returns its bit.
+the target table, `World` looks up the component type in `arch_masks`, which returns its bit.
 `World` then builds the target mask, and looks it up in `indices`, which returns the table.
 
 Both maps use the default hasher of `HashMap`, SipHash. SipHash resists keys that an attacker
@@ -40,3 +40,22 @@ rate, the two lookups per move take a negligible share of a step.
 
 **When to revisit**: once a timing of a simulation step shows that table moves take a measurable
 share of it.
+
+### More than 64 component types
+
+**Today**: a `ComponentMask` stores one bit for each component type, in a `u64`. A world therefore
+has room for 64 component types. `World::find_or_assign_bit` panics when it meets a 65th type. The
+test `find_or_assign_bit_with_65th_type_panics` checks the panic.
+
+Under ADR 0011, each state of an entity is a marker component, such as `Hungry`. Each marker type
+takes a bit. Physics, AI, rendering and the states of villagers will together come close to 64.
+
+**The change**: `ComponentMask` would store a `u128`, or an array such as `[u64; 2]`. Every
+operation on the bits lives in `mask.rs`, meaning the code change stays inside that file.
+`World::MAX_COMPONENT_TYPES` is defined as `ComponentMask::CAPACITY`, and changes along with it. The
+tests and the doc example that count 64 types, in `mask.rs` and `world.rs`, would change their
+counts.
+
+**Why it waits**: the game has a handful of component types so far, far below 64.
+
+**When to revisit**: once the game has about 40 component types.

@@ -150,6 +150,7 @@ use std::{mem, ptr, slice};
 /// ```
 /// use enki::{Component, World};
 ///
+/// #[derive(Debug)]
 /// struct Health(u32);
 ///
 /// // Marks `Health` as a component
@@ -157,7 +158,7 @@ use std::{mem, ptr, slice};
 ///
 /// let mut world = World::new();
 /// let player = world.spawn_empty();
-/// world.add_component(player, Health(100));
+/// world.add_component(player, Health(100)).expect("the player should be alive");
 ///
 /// let health = world.get::<Health>(player).map(|health| health.0);
 /// assert_eq!(health, Some(100));
@@ -514,6 +515,49 @@ impl ComponentVec {
             // meaning the vector never reaches that component again
             unsafe { drop_component(self.ptr_at(last_idx)) };
         }
+    }
+
+    /// Moves the component at `index` out of the vector and returns it, then fills `index` with the
+    /// component that was last.
+    ///
+    /// The method works as [`swap_remove`](Self::swap_remove) does, apart from the end. Where
+    /// `swap_remove` drops the component, this method hands it to the caller, which then owns it.
+    ///
+    /// # Panics
+    ///
+    /// Panics where `T` differs from the type that the vector stores, or where `index` is not below
+    /// the length. Both checks run before anything changes.
+    ///
+    /// # Examples
+    ///
+    /// For a vector of `"Ada"`, `"Bo"` and `"Cy"`, `swap_remove_typed::<String>(0)` returns `"Ada"`
+    /// and moves `"Cy"` into index 0, which leaves `["Cy", "Bo"]`.
+    #[track_caller]
+    pub(crate) fn swap_remove_typed<T: 'static>(&mut self, index: usize) -> T {
+        self.assert_stores::<T>();
+        // Panics before anything changes, where `index` lies past the last component
+        assert!(index < self.len, "the index must be below the length");
+
+        let last_idx = self.len - 1;
+        // Swaps the removed component with the last one, where the two differ
+        if index != last_idx {
+            let size = self.info.layout.size();
+            // SAFETY: `swap_nonoverlapping` requires two valid ranges that do not overlap. `index`
+            // and `last_idx` are different indices below the length, meaning each range lies
+            // inside the block, apart from the other. For a type of size zero, each range covers
+            // zero bytes
+            unsafe { ptr::swap_nonoverlapping(self.ptr_at(index), self.ptr_at(last_idx), size) };
+        }
+        // Shortens the vector by one, which puts the removed component, now at `last_idx`, out of
+        // reach
+        self.len = last_idx;
+
+        // SAFETY: `read` requires an aligned pointer to a live `T`, and makes a bitwise copy.
+        // `assert_stores` confirms the type. The address at `last_idx` stores the live component
+        // from `index`, and is aligned like the address at every other index. The length now
+        // excludes `last_idx`, meaning the vector never reaches or drops the original, and the
+        // copy is the only owner
+        unsafe { self.ptr_at(last_idx).cast::<T>().read() }
     }
 
     /// Makes room for at least `additional` more components.
@@ -1319,6 +1363,44 @@ mod tests {
         assert_eq!(DROPS.load(Ordering::Relaxed), 3);
     }
 
+    /// Checks that a panic in the clean-up code of one component stops the drop at that component,
+    /// and leaks every component after it
+    #[test]
+    #[cfg_attr(miri, ignore)]
+    fn drop_with_panicking_drop_leaks_later_components() {
+        // Defines a component whose clean-up code counts the drop, then panics where `panics` is set
+        struct Fragile {
+            panics: bool,
+            drops: Arc<AtomicUsize>,
+        }
+
+        impl Drop for Fragile {
+            fn drop(&mut self) {
+                self.drops.fetch_add(1, Ordering::Relaxed);
+                assert!(!self.panics, "the clean-up code of the component panicked");
+            }
+        }
+
+        let drops = Arc::new(AtomicUsize::new(0));
+        let mut components =
+            ComponentVec::new(ComponentInfo::of::<Fragile>(ComponentMask::single(0)));
+        for panics in [false, true, false, false] {
+            components.push_typed(Fragile {
+                panics,
+                drops: Arc::clone(&drops),
+            });
+        }
+
+        let result = panic::catch_unwind(AssertUnwindSafe(|| drop(components)));
+        let drops_after_panic = drops.load(Ordering::Relaxed);
+        // Counts the owners of the counter, which include each leaked component
+        let owners_after_panic = Arc::strong_count(&drops);
+
+        assert!(result.is_err(), "drop should pass the panic on");
+        assert_eq!(drops_after_panic, 2, "drops up to the panicking component");
+        assert_eq!(owners_after_panic, 3, "owners of the counter, two leaked");
+    }
+
     /// Checks that a type of size zero moves by count alone, and is cleaned up once per
     /// component
     #[test]
@@ -1354,6 +1436,46 @@ mod tests {
         assert_eq!(target_len, 1, "components in the target");
         assert_eq!(drops_after_move, 0, "drops caused by the move");
         assert_eq!(drops_after_vectors, 3, "drops after both vectors are gone");
+    }
+
+    /// Checks that a type with a large alignment stays aligned at every index of the target, after
+    /// a move into a full target that has to grow
+    #[test]
+    fn move_component_with_large_alignment_keeps_every_component_aligned() {
+        #[repr(align(64))]
+        struct Aligned(u8);
+
+        let mut source = ComponentVec::new(ComponentInfo::of::<Aligned>(ComponentMask::single(0)));
+        for value in 0..3_u8 {
+            source.push_typed(Aligned(value));
+        }
+        let mut target = ComponentVec::new(source.info());
+        for value in 10..14_u8 {
+            target.push_typed(Aligned(value));
+        }
+
+        // Moves the middle component into the full target, which makes the target grow from 4 to 8
+        source.move_component(1, &mut target);
+
+        let remainders: Vec<usize> = (0..target.len())
+            .map(|index| target.ptr_at(index).addr() % 64)
+            .collect();
+        let source_values: Vec<u8> = source
+            .as_slice::<Aligned>()
+            .iter()
+            .map(|component| component.0)
+            .collect();
+        let target_values: Vec<u8> = target
+            .as_slice::<Aligned>()
+            .iter()
+            .map(|component| component.0)
+            .collect();
+        assert_eq!(
+            remainders, [0; 5],
+            "remainder of each target address divided by 64"
+        );
+        assert_eq!(source_values, [0, 2], "values left in the source");
+        assert_eq!(target_values, [10, 11, 12, 13, 1], "values in the target");
     }
 
     /// Checks that a vector for a type of size zero stops at its limit, rather than allocating

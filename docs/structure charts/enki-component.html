@@ -166,6 +166,11 @@ footer { border-top: 1px solid var(--rule); padding-top: 16px; color: var(--mute
   the values that pass between them on each call. The file has eighteen functions and methods, and one closure.
   Thirteen charts cover sixteen of them. The three newest methods, <code>ComponentVec::swap_remove</code>,
   <code>ComponentInfo::type_id</code> and <code>ComponentInfo::bit</code>, have no chart yet.</p>
+  <p class="lede"><strong>The charts describe <code>component.rs</code> at commit 60a3306, and the code has moved on
+  since.</strong> <code>ComponentInfo::of</code> now takes a <code>ComponentMask</code> in place of a
+  <code>u64</code>. <code>increase_capacity</code> now calls <code>alloc</code> and <code>realloc</code>, and
+  <code>grow</code> calls <code>increase_capacity</code>. Four methods added since then have no chart:
+  <code>reserve</code>, <code>increase_capacity</code>, <code>data</code> and <code>len</code>.</p>
   <div class="meta"><span>Drawn from the working tree at commit 60a3306</span><span>Charts last modified 2026-11-01</span><span>16 modules &middot; 13 charts</span></div>
 </header>
 

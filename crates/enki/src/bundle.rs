@@ -13,7 +13,9 @@
 //! let player = world.spawn_empty();
 //!
 //! // Gives the player a `Position`, a `Velocity` and a `Health`
-//! world.add_components(player, (Position(0.0, 0.0), Velocity(1.0, 0.0), Health(100)));
+//! world
+//!     .add_components(player, (Position(0.0, 0.0), Velocity(1.0, 0.0), Health(100)))
+//!     .expect("the player should be alive");
 //! ```
 //!
 //! A bundle of one component takes a comma after the component, as in `(Health(100),)`. Rust parses
@@ -781,18 +783,6 @@ mod tests {
             (TypeId::of::<Position>(), ComponentMask::single(0)),
         ];
         assert_eq!(read_types_and_bits(&infos), expected);
-    }
-
-    /// Checks that a 65th component type panics, since a mask has room for 64 bits
-    #[test]
-    #[should_panic]
-    fn infos_with_65th_component_type_panics() {
-        let mut world = World::new();
-        for type_id in build_64_type_ids() {
-            world.find_or_assign_bit(type_id);
-        }
-
-        <(Health,) as Bundle>::infos(&mut world);
     }
 
     /// Checks that a row at the end of the column, including row 0 of an empty column, takes a push

@@ -34,8 +34,11 @@
 //! ```
 //! use enki::{Component, World};
 //!
+//! #[derive(Debug)]
 //! struct Position(f32, f32);
+//! #[derive(Debug)]
 //! struct Velocity(f32, f32);
+//! #[derive(Debug)]
 //! struct Health(u32);
 //!
 //! // Marks the three types as components
@@ -49,8 +52,10 @@
 //! let tree = world.spawn_empty();
 //!
 //! // Gives the villager three components in one call, and the tree one component
-//! world.add_components(villager, (Position(0.0, 0.0), Velocity(1.0, 0.5), Health(100)));
-//! world.add_component(tree, Position(4.0, 4.0));
+//! world
+//!     .add_components(villager, (Position(0.0, 0.0), Velocity(1.0, 0.5), Health(100)))
+//!     .expect("the villager should be alive");
+//! world.add_component(tree, Position(4.0, 4.0)).expect("the tree should be alive");
 //!
 //! // Reads one component of one entity
 //! let health = world.get::<Health>(villager).map(|health| health.0);

@@ -28,9 +28,10 @@
 //! # Moves between tables
 //!
 //! An entity moves to another table when it gains or loses a component. The caller handles both
-//! cases with [`Archetype::move_entity_dropping`]. Where the target lacks a column for one of the
-//! entity's components, the method drops that component. The last row in the old table then fills
-//! the empty row, which keeps each column in one unbroken run.
+//! cases with [`Archetype::move_entity`]. Where the target lacks a column for one of the entity's
+//! components, the method passes that column to a closure from the caller, which drops the
+//! component or keeps it as a value. The last row in the old table then fills the empty row, which
+//! keeps each column in one unbroken run.
 //!
 //! Where the target has a column that the old table lacks, the caller passes a closure that pushes
 //! one component onto each such column, as with `push_entity`. The method checks the target once
@@ -39,7 +40,7 @@
 //! The caller records a location for each entity, which is its table and its row. A move changes
 //! the location of the moved entity, and of the entity that fills the empty row, where there is
 //! one. The caller MUST update both. A caller that keeps a stale row can later pass an index past
-//! the end of a column to `move_entity_dropping`, which then panics before anything changes.
+//! the end of a column to `move_entity`, which then panics before anything changes.
 //!
 //! # Examples
 //!
@@ -70,7 +71,7 @@
 //!
 //! // Moves row 0 to the target table, gives the moved entity its new `Health`, and fills row 0
 //! // with the last row
-//! let filled = source.move_entity_dropping(0, &mut target, |table, _row| {
+//! let filled = source.move_entity(0, &mut target, ComponentVec::swap_remove, |table, _row| {
 //!     let healths = table
 //!         .components_of_mut(health.type_id())
 //!         .expect("the table should store `Health`");
@@ -103,6 +104,8 @@ pub struct Archetype {
     ///
     /// The [module example](self#examples) fills the `Position` column and the `Health` column.
     components: Vec<ComponentVec>,
+    /// Stores the `TypeId` of each column, in the same order as `components`.
+    type_ids: Vec<TypeId>,
     /// Stores the entity that owns each row, in row order.
     ///
     /// The [module example](self#examples) adds two entities to this list.
@@ -143,6 +146,10 @@ impl Archetype {
             infos.iter().map(|info| ComponentVec::new(*info)).collect();
         // Sorts the columns by `TypeId`, which the binary search in `find_index_of` requires
         components.sort_by_key(|components| components.info().type_id());
+        let type_ids = components
+            .iter()
+            .map(|components| components.info().type_id())
+            .collect();
         let mut mask = ComponentMask::EMPTY;
         for info in infos {
             // Stops two types from sharing a bit, which would make queries treat them as one type
@@ -155,6 +162,7 @@ impl Archetype {
 
         Self {
             components,
+            type_ids,
             entities: Vec::new(),
             mask,
         }
@@ -396,14 +404,20 @@ impl Archetype {
         self.entities.get(row).copied()
     }
 
-    /// Moves the entity at `row` to a new row at the end of `target`, **dropping each component that
-    /// `target` has no column for**.
+    /// Moves the entity at `row` to a new row at the end of `target`, **passing each column that
+    /// `target` lacks to `take`**.
     ///
     /// The method serves both moves between tables. Where the entity gains components, `target`
     /// has every column in this table plus one or more others. Where the entity loses a component,
-    /// `target` lacks that one column, and the method drops the component.
+    /// `target` lacks that one column.
     ///
-    /// Once every component is moved or dropped, the method passes `target` and the entity's new
+    /// The method calls `take` once for each column that `target` lacks, with that column and
+    /// `row`. The closure MUST remove the component at `row` from the column, with the last
+    /// component filling the gap. [`ComponentVec::swap_remove`] drops the component, and a closure
+    /// that calls [`ComponentVec::swap_remove_typed`] keeps it as a value instead. A move that adds
+    /// columns never calls `take`.
+    ///
+    /// Once every component is moved or taken, the method passes `target` and the entity's new
     /// row to `fill`. The closure MUST push one component onto each column that `target` has and
     /// this table lacks. A move that adds no columns takes a `fill` that does nothing, written
     /// `|_, _| {}`.
@@ -423,7 +437,8 @@ impl Archetype {
     /// # Aborts
     ///
     /// The program aborts where any panic occurs once the move has started and before `fill` runs,
-    /// such as a panic in the `Drop` implementation of a dropped component. The panic message prints
+    /// such as a panic in the `Drop` implementation of a component that `take` drops. The panic
+    /// message prints
     /// first. The method moves one column at a time. Such a panic would therefore leave columns of
     /// different lengths, in this table and in `target`. Ending the program stops any later call
     /// from using either table in that state.
@@ -432,10 +447,11 @@ impl Archetype {
     ///
     /// The [module example](self#examples) moves an entity to a table that also stores `Health`,
     /// with a `fill` that pushes its new `Health`.
-    pub(crate) fn move_entity_dropping(
+    pub(crate) fn move_entity(
         &mut self,
         row: usize,
         target: &mut Archetype,
+        mut take: impl FnMut(&mut ComponentVec, usize),
         fill: impl FnOnce(&mut Archetype, usize),
     ) -> Option<Entity> {
         // Panics before anything changes, where `row` lies past the last entity
@@ -462,19 +478,20 @@ impl Archetype {
         for components in &mut self.components {
             // Finds the component type that the column stores
             let type_id = components.info().type_id();
-            // Moves the entity's component where the target stores its type, and drops it otherwise
+            // Moves the entity's component where the target stores its type, and hands the column to
+            // `take` otherwise
             match target.components_of_mut(type_id) {
                 // Moves the component to the end of the target's column for the same type
                 Some(target_components) => components.move_component(row, target_components),
-                // Drops the component, since the target has no column for its type
-                None => components.swap_remove(row),
+                // Lets `take` remove the component, since the target has no column for its type
+                None => take(components, row),
             }
         }
         // Moves the entity itself from this list to the end of the target list, filling `row` with
         // the last entity in this list
         let entity = self.entities.swap_remove(row);
         target.entities.push(entity);
-        // Disarms the guard, since every component of the entity is now moved or dropped
+        // Disarms the guard, since every component of the entity is now moved or taken
         mem::forget(guard);
 
         let new_row = target.entities.len() - 1;
@@ -514,9 +531,7 @@ impl Archetype {
     /// `TypeId` of `Health` sorts before the one for `Position`, and `Some(1)` otherwise. It
     /// returns `None` for `Velocity`, which the table lacks.
     fn find_index_of(&self, type_id: TypeId) -> Option<usize> {
-        self.components
-            .binary_search_by_key(&type_id, |components| components.info().type_id())
-            .ok()
+        self.type_ids.binary_search(&type_id).ok()
     }
 }
 
@@ -848,7 +863,7 @@ mod tests {
 
     /// Checks that the last row fills the empty row, in the entity list and in the column
     #[test]
-    fn move_entity_dropping_with_middle_row_fills_gap_with_last_row() {
+    fn move_entity_with_middle_row_fills_gap_with_last_row() {
         let position = ComponentInfo::of::<Position>(ComponentMask::single(0));
         let mut source = Archetype::new(&[position]);
         let mut target = Archetype::new(&[position]);
@@ -863,7 +878,7 @@ mod tests {
             push_row(&mut source, entity, Position(x));
         }
 
-        let filled = source.move_entity_dropping(1, &mut target, |_, _| {});
+        let filled = source.move_entity(1, &mut target, ComponentVec::swap_remove, |_, _| {});
 
         assert_eq!(filled, Some(fourth), "entity that fills the row");
         assert_eq!(source.entities, [first, fourth, third], "source entities");
@@ -882,7 +897,7 @@ mod tests {
 
     /// Checks that moving the last row does not change any other row, and therefore returns `None`
     #[test]
-    fn move_entity_dropping_with_last_row_returns_none() {
+    fn move_entity_with_last_row_returns_none() {
         let cases = [1_u32, 2, 5];
 
         for count in cases {
@@ -894,7 +909,12 @@ mod tests {
             }
             let last = count - 1;
 
-            let filled = source.move_entity_dropping(last as usize, &mut target, |_, _| {});
+            let filled = source.move_entity(
+                last as usize,
+                &mut target,
+                ComponentVec::swap_remove,
+                |_, _| {},
+            );
 
             let remaining = last as usize;
             assert_eq!(filled, None, "entity that fills the row, {count} rows");
@@ -914,7 +934,7 @@ mod tests {
 
     /// Checks that a moved entity joins the end of the target, after the rows already there
     #[test]
-    fn move_entity_dropping_with_occupied_target_adds_row_at_end() {
+    fn move_entity_with_occupied_target_adds_row_at_end() {
         let position = ComponentInfo::of::<Position>(ComponentMask::single(0));
         let mut source = Archetype::new(&[position]);
         let mut target = Archetype::new(&[position]);
@@ -923,7 +943,7 @@ mod tests {
         push_row(&mut source, moved, Position(1.0));
         push_row(&mut target, resident, Position(2.0));
 
-        source.move_entity_dropping(0, &mut target, |_, _| {});
+        source.move_entity(0, &mut target, ComponentVec::swap_remove, |_, _| {});
 
         assert_eq!(target.entities, [resident, moved], "target entities");
         assert_eq!(
@@ -935,7 +955,7 @@ mod tests {
 
     /// Checks that a move into a full target grows its column, and keeps its rows in order
     #[test]
-    fn move_entity_dropping_with_full_target_keeps_rows_in_order() {
+    fn move_entity_with_full_target_keeps_rows_in_order() {
         let health = ComponentInfo::of::<Health>(ComponentMask::single(0));
         let mut source = Archetype::new(&[health]);
         let mut target = Archetype::new(&[health]);
@@ -946,7 +966,7 @@ mod tests {
         let moved = Entity::new(4, 0);
         push_row(&mut source, moved, Health(4));
 
-        source.move_entity_dropping(0, &mut target, |_, _| {});
+        source.move_entity(0, &mut target, ComponentVec::swap_remove, |_, _| {});
 
         let moved_row = target.len() - 1;
         assert_eq!(target.entities[moved_row], moved, "last target entity");
@@ -959,7 +979,7 @@ mod tests {
 
     /// Checks that repeated moves report each filling entity, and empty the source
     #[test]
-    fn move_entity_dropping_with_repeated_moves_empties_source() {
+    fn move_entity_with_repeated_moves_empties_source() {
         let health = ComponentInfo::of::<Health>(ComponentMask::single(0));
         let mut source = Archetype::new(&[health]);
         let mut target = Archetype::new(&[health]);
@@ -971,9 +991,9 @@ mod tests {
         push_row(&mut source, third, Health(3));
 
         let filled = [
-            source.move_entity_dropping(0, &mut target, |_, _| {}),
-            source.move_entity_dropping(0, &mut target, |_, _| {}),
-            source.move_entity_dropping(0, &mut target, |_, _| {}),
+            source.move_entity(0, &mut target, ComponentVec::swap_remove, |_, _| {}),
+            source.move_entity(0, &mut target, ComponentVec::swap_remove, |_, _| {}),
+            source.move_entity(0, &mut target, ComponentVec::swap_remove, |_, _| {}),
         ];
 
         assert_eq!(
@@ -992,7 +1012,7 @@ mod tests {
 
     /// Checks that a whole row moves together, as the entity gains a component in a larger table
     #[test]
-    fn move_entity_dropping_with_several_columns_keeps_rows_together() {
+    fn move_entity_with_several_columns_keeps_rows_together() {
         let position = ComponentInfo::of::<Position>(ComponentMask::single(0));
         let name = ComponentInfo::of::<String>(ComponentMask::single(1));
         let health = ComponentInfo::of::<Health>(ComponentMask::single(2));
@@ -1008,7 +1028,7 @@ mod tests {
             push_pair_row(&mut source, entity, Position(x), String::from(label));
         }
 
-        let filled = source.move_entity_dropping(0, &mut target, |table, _| {
+        let filled = source.move_entity(0, &mut target, ComponentVec::swap_remove, |table, _| {
             push_component(table, Health(100))
         });
 
@@ -1036,7 +1056,7 @@ mod tests {
 
     /// Checks that a table with no columns still moves its entities
     #[test]
-    fn move_entity_dropping_with_no_columns_moves_only_entity() {
+    fn move_entity_with_no_columns_moves_only_entity() {
         let mut source = Archetype::new(&[]);
         let mut target = Archetype::new(&[]);
         let first = Entity::new(0, 0);
@@ -1045,7 +1065,7 @@ mod tests {
         source.push_entity(first, |_, _| {});
         source.push_entity(second, |_, _| {});
 
-        let filled = source.move_entity_dropping(0, &mut target, |_, _| {});
+        let filled = source.move_entity(0, &mut target, ComponentVec::swap_remove, |_, _| {});
 
         assert_eq!(filled, Some(second), "entity that fills the row");
         assert_eq!(source.entities, [second], "source entities");
@@ -1054,7 +1074,7 @@ mod tests {
 
     /// Checks that a column of a zero-sized type moves by count alone
     #[test]
-    fn move_entity_dropping_with_zero_size_type_moves_count() {
+    fn move_entity_with_zero_size_type_moves_count() {
         struct Tag;
 
         let tag = ComponentInfo::of::<Tag>(ComponentMask::single(0));
@@ -1063,7 +1083,7 @@ mod tests {
         push_row(&mut source, Entity::new(0, 0), Tag);
         push_row(&mut source, Entity::new(1, 0), Tag);
 
-        source.move_entity_dropping(0, &mut target, |_, _| {});
+        source.move_entity(0, &mut target, ComponentVec::swap_remove, |_, _| {});
 
         assert_eq!(read_column::<Tag>(&source).len(), 1, "source column length");
         assert_eq!(read_column::<Tag>(&target).len(), 1, "target column length");
@@ -1071,7 +1091,7 @@ mod tests {
 
     /// Checks that a move passes ownership on, meaning two tables never clean up the same component
     #[test]
-    fn move_entity_dropping_with_drop_counters_drops_each_component_once() {
+    fn move_entity_with_drop_counters_drops_each_component_once() {
         let drops = Arc::new(AtomicUsize::new(0));
         let counter = ComponentInfo::of::<DropCounter>(ComponentMask::single(0));
         let mut source = Archetype::new(&[counter]);
@@ -1083,7 +1103,7 @@ mod tests {
             push_row(&mut source, Entity::new(index, 0), value);
         }
 
-        source.move_entity_dropping(0, &mut target, |_, _| {});
+        source.move_entity(0, &mut target, ComponentVec::swap_remove, |_, _| {});
         let drops_after_move = drops.load(Ordering::Relaxed);
 
         drop(source);
@@ -1097,25 +1117,58 @@ mod tests {
     /// Checks that every build catches a row past the end of the columns
     #[test]
     #[should_panic]
-    fn move_entity_dropping_with_out_of_range_row_panics() {
+    fn move_entity_with_out_of_range_row_panics() {
         let position = ComponentInfo::of::<Position>(ComponentMask::single(0));
         let mut source = Archetype::new(&[position]);
         let mut target = Archetype::new(&[position]);
         push_row(&mut source, Entity::new(0, 0), Position(1.0));
 
-        source.move_entity_dropping(1, &mut target, |_, _| {});
+        source.move_entity(1, &mut target, ComponentVec::swap_remove, |_, _| {});
     }
 
-    /// Checks that an entity list shorter than its columns panics in every build
+    /// Checks that a debug build catches an entity list shorter than its columns, before anything
+    /// changes
     #[test]
+    #[cfg(debug_assertions)]
     #[should_panic]
-    fn move_entity_dropping_with_short_entity_list_panics() {
+    fn move_entity_with_short_entity_list_panics() {
         let position = ComponentInfo::of::<Position>(ComponentMask::single(0));
         let mut source = Archetype::new(&[position]);
         let mut target = Archetype::new(&[position]);
         push_component(&mut source, Position(1.0));
+        push_component(&mut source, Position(2.0));
+        // Adds one entity for the two components, which `push_entity` would refuse
+        source.entities.push(Entity::new(0, 0));
 
-        source.move_entity_dropping(0, &mut target, |_, _| {});
+        source.move_entity(0, &mut target, ComponentVec::swap_remove, |_, _| {});
+    }
+
+    /// Checks that every build catches a `fill` that leaves a column without a component for the
+    /// new row
+    #[test]
+    #[should_panic]
+    fn push_entity_with_fill_missing_column_panics() {
+        let position = ComponentInfo::of::<Position>(ComponentMask::single(0));
+        let health = ComponentInfo::of::<Health>(ComponentMask::single(1));
+        let mut table = Archetype::new(&[position, health]);
+
+        table.push_entity(Entity::new(0, 0), |table, _| {
+            push_component(table, Position(1.0));
+        });
+    }
+
+    /// Checks that every build catches a `fill` that leaves a new target column without a
+    /// component for the moved entity
+    #[test]
+    #[should_panic]
+    fn move_entity_with_fill_missing_new_column_panics() {
+        let position = ComponentInfo::of::<Position>(ComponentMask::single(0));
+        let health = ComponentInfo::of::<Health>(ComponentMask::single(1));
+        let mut source = Archetype::new(&[position]);
+        let mut target = Archetype::new(&[position, health]);
+        push_row(&mut source, Entity::new(0, 0), Position(1.0));
+
+        source.move_entity(0, &mut target, ComponentVec::swap_remove, |_, _| {});
     }
 
     /// Checks that dropping a table runs the clean-up code once for each component it stores
@@ -1560,7 +1613,7 @@ mod tests {
     /// Checks that a move into a table without a column for one component drops that component,
     /// and moves the rest of the row
     #[test]
-    fn move_entity_dropping_with_target_lacking_column_drops_that_component() {
+    fn move_entity_with_target_lacking_column_drops_that_component() {
         let drops = Arc::new(AtomicUsize::new(0));
         let position = ComponentInfo::of::<Position>(ComponentMask::single(0));
         let counter = ComponentInfo::of::<DropCounter>(ComponentMask::single(1));
@@ -1576,7 +1629,7 @@ mod tests {
             push_pair_row(&mut source, entity, Position(x), value);
         }
 
-        let filled = source.move_entity_dropping(0, &mut target, |_, _| {});
+        let filled = source.move_entity(0, &mut target, ComponentVec::swap_remove, |_, _| {});
         let drops_after_move = drops.load(Ordering::Relaxed);
         let counters_left = source
             .components_of(counter.type_id())
@@ -1600,7 +1653,7 @@ mod tests {
 
     /// Checks that a move into a table with no columns drops every component of the entity
     #[test]
-    fn move_entity_dropping_with_columnless_target_drops_every_component() {
+    fn move_entity_with_columnless_target_drops_every_component() {
         let drops = Arc::new(AtomicUsize::new(0));
         let counter = ComponentInfo::of::<DropCounter>(ComponentMask::single(0));
         let mut source = Archetype::new(&[counter]);
@@ -1611,7 +1664,7 @@ mod tests {
         };
         push_row(&mut source, moved, value);
 
-        let filled = source.move_entity_dropping(0, &mut target, |_, _| {});
+        let filled = source.move_entity(0, &mut target, ComponentVec::swap_remove, |_, _| {});
         let drops_after_move = drops.load(Ordering::Relaxed);
 
         assert_eq!(filled, None, "entity that fills the row");
@@ -1630,7 +1683,7 @@ mod tests {
     #[test]
     #[cfg(debug_assertions)]
     #[should_panic]
-    fn move_entity_dropping_with_short_source_column_panics() {
+    fn move_entity_with_short_source_column_panics() {
         let position = ComponentInfo::of::<Position>(ComponentMask::single(0));
         let mut source = Archetype::new(&[position]);
         let mut target = Archetype::new(&[position]);
@@ -1639,7 +1692,7 @@ mod tests {
         // Adds an entity without its component, which `push_entity` would refuse
         source.entities.push(Entity::new(1, 0));
 
-        source.move_entity_dropping(0, &mut target, |_, _| {});
+        source.move_entity(0, &mut target, ComponentVec::swap_remove, |_, _| {});
     }
 
     /// Checks that a debug build catches a target column shorter than the target entity list,
@@ -1647,7 +1700,7 @@ mod tests {
     #[test]
     #[cfg(debug_assertions)]
     #[should_panic]
-    fn move_entity_dropping_with_short_target_column_panics() {
+    fn move_entity_with_short_target_column_panics() {
         let position = ComponentInfo::of::<Position>(ComponentMask::single(0));
         let mut source = Archetype::new(&[position]);
         let mut target = Archetype::new(&[position]);
@@ -1656,6 +1709,6 @@ mod tests {
         // Adds an entity to the target without its component, which `push_entity` would refuse
         target.entities.push(Entity::new(1, 0));
 
-        source.move_entity_dropping(0, &mut target, |_, _| {});
+        source.move_entity(0, &mut target, ComponentVec::swap_remove, |_, _| {});
     }
 }

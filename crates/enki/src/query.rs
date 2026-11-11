@@ -23,7 +23,9 @@
 use crate::Component;
 use crate::archetype::Archetype;
 use std::any::TypeId;
-use std::{iter, slice};
+use std::marker::PhantomData;
+use std::ptr::NonNull;
+use std::slice;
 
 /// Declares the traits that seal [`Query`] and [`ReadOnlyQuery`].
 ///
@@ -78,8 +80,9 @@ pub enum Permission {
 /// The world runs a query in three steps. It first calls [`Query::add_permissions`] to collect the
 /// component types that the query asks for. It then calls [`Query::find_columns`] to borrow the
 /// matching columns of each table. Finally, it calls [`Query::split_rows`] to split those columns
-/// into one item per entity. `World::query_archetype_mut` and `World::query_archetype` stop after
-/// the second step, and return the columns.
+/// into one item per entity, which reads each row through [`Query::fetch_row`].
+/// `World::query_archetype_mut` and `World::query_archetype` stop after the second step, and
+/// return the columns.
 ///
 /// # Lifetimes
 ///
@@ -90,9 +93,12 @@ pub enum Permission {
 /// # Visibility
 ///
 /// Code outside the crate can name the trait as a bound, and can pass any query type that the
-/// crate implements it for. Code outside the crate cannot implement the trait. `Query` requires the
-/// trait `Sealed`, which a private module in `query.rs` declares. Code outside the crate cannot
-/// write a path to `Sealed`, and therefore cannot implement it.
+/// crate implements it for. The attribute `#[doc(hidden)]` hides the three methods from the public
+/// documentation, since only code inside the crate needs them.
+///
+/// Code outside the crate cannot implement the trait. `Query` requires the trait `Sealed`, which a
+/// private module in `query.rs` declares. Code outside the crate cannot write a path to `Sealed`,
+/// and therefore cannot implement it.
 ///
 /// # Safety
 ///
@@ -155,6 +161,7 @@ pub unsafe trait Query: sealed::Sealed {
     ///
     /// The test `add_permissions_with_each_query_shape_pushes_entries_in_order` lists the entries
     /// that single types, tuples and tuples inside tuples push.
+    #[doc(hidden)]
     fn add_permissions(permissions: &mut Vec<(TypeId, Permission)>);
 
     /// Returns the columns in `archetype` that the query asks for, or `None` where the table lacks
@@ -183,17 +190,115 @@ pub unsafe trait Query: sealed::Sealed {
     ///
     /// The test `find_columns_with_read_query_returns_column_in_row_order` builds a table with
     /// three rows, and checks that `&Position` returns the `Position` column in row order.
+    #[doc(hidden)]
     unsafe fn find_columns<'w>(archetype: &'w Archetype) -> Option<Self::Columns<'w>>;
+
+    /// Represents the columns of one table in the form that [`Query::fetch_row`] reads one row
+    /// from.
+    ///
+    /// `&T` keeps its `&'w [T]`. `&mut T` keeps a [`RowsMut`], which points at the first component
+    /// of the column and records the row count. A tuple keeps the rows of each field.
+    ///
+    /// The test `split_rows_with_pair_zips_items_by_row` builds the rows of
+    /// `(&Position, &Velocity)` through [`Query::split_rows`].
+    #[doc(hidden)]
+    type Rows<'w>;
+
+    /// Returns `columns` in the form that [`Query::fetch_row`] reads one row from.
+    ///
+    /// The rows borrow the table for the lifetime `'w`, as the columns did.
+    ///
+    /// The test `split_rows_with_write_query_changes_reach_table` turns the columns of
+    /// `(&mut Position, &Velocity)` into rows through [`Query::split_rows`].
+    #[doc(hidden)]
+    fn build_rows<'w>(columns: Self::Columns<'w>) -> Self::Rows<'w>;
+
+    /// Returns the number of rows that [`Query::fetch_row`] can read from `rows`.
+    ///
+    /// A tuple returns the smallest count among its fields. Every column of a table has one
+    /// component per entity, meaning the counts are equal in practice.
+    ///
+    /// The test `split_rows_with_empty_table_yields_no_items` counts zero rows for three queries.
+    #[doc(hidden)]
+    fn count_rows(rows: &Self::Rows<'_>) -> usize;
+
+    /// Returns the item for the entity at `row`.
+    ///
+    /// # Safety
+    ///
+    /// The caller MUST guarantee two things:
+    ///
+    /// - `row` is below [`Query::count_rows`] for `rows`.
+    /// - The caller reads each row at most once from one `Rows` value. A second read of a row would
+    ///   hand out a second `&mut T` to a component that the first one already reaches, which is
+    ///   undefined behaviour.
+    ///
+    /// # Examples
+    ///
+    /// For the rows of a `Position` column that holds `Position(1.0)` and `Position(2.0)`, row 1
+    /// returns `&Position(2.0)`. The test `split_rows_with_read_query_yields_items_in_row_order`
+    /// reads every row in order.
+    #[doc(hidden)]
+    unsafe fn fetch_row<'w>(rows: &Self::Rows<'w>, row: usize) -> Self::Item<'w>;
 
     /// Returns an iterator over the rows in `columns`, with one item for each entity in the table.
     ///
     /// The items come in row order. The item for each entity borrows from the columns for the
     /// lifetime `'w`.
     ///
+    /// The iterator counts the rows once, then reads row 0, row 1 and so on through
+    /// [`Query::fetch_row`]. A tuple therefore checks one row counter per item, however many fields
+    /// it has.
+    ///
     /// The test `split_rows_with_read_query_yields_items_in_row_order` splits a `Position` column
     /// of three rows, and checks that the items come in row order.
-    fn split_rows<'w>(columns: Self::Columns<'w>) -> impl Iterator<Item = Self::Item<'w>>;
+    #[doc(hidden)]
+    fn split_rows<'w>(columns: Self::Columns<'w>) -> impl Iterator<Item = Self::Item<'w>> {
+        let rows = Self::build_rows(columns);
+        let count = Self::count_rows(&rows);
+        // SAFETY: `fetch_row` requires a row below `count_rows`, read at most once. The range
+        // yields each row below `count` once, and the closure owns `rows`, meaning nothing else
+        // reads from it
+        (0..count).map(move |row| unsafe { Self::fetch_row(&rows, row) })
+    }
 }
+
+/// Points at the column of one table that a `&mut T` query changes, one row at a time.
+///
+/// [`Query::fetch_row`] for `&mut T` builds each `&mut T` from `start`, the pointer to the first
+/// component. Each row then reaches its component without a fresh borrow of the whole column. A
+/// fresh `&mut` borrow of the whole column, made once per row, would end the borrows of the rows
+/// already handed out.
+///
+/// # Lifetimes
+///
+/// The lifetime `'w` is the borrow of the column that [`Query::build_rows`] receives as a
+/// `&'w mut [T]`. `start` is a raw pointer, which carries no lifetime. The field `borrow` keeps
+/// `'w` attached, as though the struct still contained the `&'w mut [T]`. The compiler therefore
+/// treats the column as borrowed for as long as the struct or any item built from it is in use.
+///
+/// # Visibility
+///
+/// The type is `pub`, since it is the `Rows` type of `&mut T`, which is a public type. The
+/// `query` module is private, meaning code outside the crate cannot write a path to it.
+///
+/// The test `split_rows_with_write_query_changes_reach_table` changes components through one.
+#[doc(hidden)]
+pub struct RowsMut<'w, T> {
+    /// Points at the component in row 0.
+    start: NonNull<T>,
+    /// Records the number of rows in the column.
+    len: usize,
+    /// Ties the struct to the borrow of the column, as the Lifetimes section sets out.
+    borrow: PhantomData<&'w mut [T]>,
+}
+
+// SAFETY: `RowsMut` stands in for a `&'w mut [T]`, which a thread can send to another where `T` is
+// `Send`. A raw pointer is never `Send` on its own, so the impl restores what the slice allowed
+unsafe impl<T: Send> Send for RowsMut<'_, T> {}
+
+// SAFETY: as for `Send`, a `&'w mut [T]` can be shared between threads where `T` is `Sync`
+unsafe impl<T: Sync> Sync for RowsMut<'_, T> {}
 
 impl<T: Component> sealed::Sealed for &T {}
 
@@ -212,8 +317,23 @@ unsafe impl<T: Component> Query for &T {
         Some(components.as_slice::<T>())
     }
 
-    fn split_rows<'w>(columns: Self::Columns<'w>) -> impl Iterator<Item = Self::Item<'w>> {
-        columns.iter()
+    type Rows<'w> = &'w [T];
+
+    fn build_rows<'w>(columns: Self::Columns<'w>) -> Self::Rows<'w> {
+        columns
+    }
+
+    fn count_rows(rows: &Self::Rows<'_>) -> usize {
+        rows.len()
+    }
+
+    unsafe fn fetch_row<'w>(rows: &Self::Rows<'w>, row: usize) -> Self::Item<'w> {
+        // Reaches the slice behind the reference, which keeps the item tied to `'w` rather than to
+        // the short borrow of `rows`
+        let column: &'w [T] = rows;
+        // SAFETY: `get_unchecked` requires an index below the length of the slice. The caller
+        // guarantees that `row` is below `count_rows`, which is that length
+        unsafe { column.get_unchecked(row) }
     }
 }
 
@@ -257,8 +377,27 @@ unsafe impl<T: Component> Query for &mut T {
         Some(unsafe { slice::from_raw_parts_mut(start.as_ptr(), len) })
     }
 
-    fn split_rows<'w>(columns: Self::Columns<'w>) -> impl Iterator<Item = Self::Item<'w>> {
-        columns.iter_mut()
+    type Rows<'w> = RowsMut<'w, T>;
+
+    fn build_rows<'w>(columns: Self::Columns<'w>) -> Self::Rows<'w> {
+        let len = columns.len();
+        RowsMut {
+            start: NonNull::from(columns).cast::<T>(),
+            len,
+            borrow: PhantomData,
+        }
+    }
+
+    fn count_rows(rows: &Self::Rows<'_>) -> usize {
+        rows.len
+    }
+
+    unsafe fn fetch_row<'w>(rows: &Self::Rows<'w>, row: usize) -> Self::Item<'w> {
+        // SAFETY: `add` requires the result to stay within the column, and the caller guarantees
+        // that `row` is below `len`. `start` came from the `&'w mut [T]` that `build_rows`
+        // consumed, meaning it may write to every component for `'w`, and each one is live. The
+        // caller reads each row once, meaning no other `&mut` reaches the component at `row`
+        unsafe { &mut *rows.start.as_ptr().add(row) }
     }
 }
 
@@ -357,10 +496,10 @@ unsafe impl<T: Component> ReadOnlyQuery for &T {}
 ///
 /// # Rows
 ///
-/// `split_rows` turns the columns of each field into an iterator over that field's rows. It then
-/// returns an iterator that advances every field's iterator once for each item. The iterator stops
-/// at the first field that runs out. Every column in one table has one component per entity, so
-/// all the fields run out together.
+/// `build_rows` turns the columns of each field into that field's rows. `count_rows` returns the
+/// smallest row count among the fields. Every column in one table has one component per entity, so
+/// the counts are equal in practice. `fetch_row` reads one row from every field, and puts the
+/// results together into the item for that row.
 macro_rules! impl_query {
     ($($name:ident),+) => {
         impl<$($name: Query),+> sealed::Sealed for ($($name,)+) {}
@@ -385,16 +524,33 @@ macro_rules! impl_query {
                 Some(($(unsafe { <$name as Query>::find_columns(archetype) }?,)+))
             }
 
+            type Rows<'w> = ($(<$name as Query>::Rows<'w>,)+);
+
             // Allows the variables below to take the type parameter names, which are in capitals
             #[allow(non_snake_case)]
-            fn split_rows<'w>(columns: Self::Columns<'w>) -> impl Iterator<Item = Self::Item<'w>> {
+            fn build_rows<'w>(columns: Self::Columns<'w>) -> Self::Rows<'w> {
                 // Moves the columns of each field out of the tuple, into a variable with the
                 // name of its type
                 let ($($name,)+) = columns;
-                // Replaces each variable with an iterator over that field's rows
-                let ($(mut $name,)+) = ($(<$name as Query>::split_rows($name),)+);
-                // Builds each item from the next row of every field, and stops once a field runs out
-                iter::from_fn(move || Some(($($name.next()?,)+)))
+                ($(<$name as Query>::build_rows($name),)+)
+            }
+
+            #[allow(non_snake_case)]
+            fn count_rows(rows: &Self::Rows<'_>) -> usize {
+                let ($($name,)+) = rows;
+                let mut count = usize::MAX;
+                $(count = count.min(<$name as Query>::count_rows($name));)+
+                count
+            }
+
+            #[allow(non_snake_case)]
+            unsafe fn fetch_row<'w>(rows: &Self::Rows<'w>, row: usize) -> Self::Item<'w> {
+                let ($($name,)+) = rows;
+                // SAFETY: `fetch_row` requires a row below each field's count, read at most once.
+                // `count_rows` for the tuple is the smallest count of any field, and the caller
+                // keeps `row` below it. The caller reads each row of the tuple once, meaning it
+                // reads each row of each field once
+                ($(unsafe { <$name as Query>::fetch_row($name, row) },)+)
             }
         }
 
@@ -467,16 +623,24 @@ impl_query!(
 );
 
 /// Checks that the query type `Q` changes each component type only where it asks for that type
-/// once.
+/// once, then returns the permissions that it checked.
 ///
 /// A caller MUST run this check before it calls [`Query::find_columns`], as the Safety section of
-/// that method sets out.
+/// that method sets out. The returned list contains the entries that [`Query::add_permissions`]
+/// pushes for `Q`, in the same order. The world builds the query mask from that list, rather than
+/// building a second one.
 ///
 /// # Panics
 ///
 /// Panics where `Q` asks for one component type twice, and changes it through at least one of the
 /// two. `(&mut Position, &Position)` panics, for example, whereas `(&Position, &Position)` passes.
-pub(crate) fn check_permissions<Q: Query>() {
+///
+/// # Examples
+///
+/// `(&mut Position, &Velocity)` returns `[(Position, Write), (Velocity, Read)]`, each paired with
+/// the `TypeId` of its type. The test `check_permissions_with_valid_queries_does_not_panic` runs
+/// the check for nine queries that pass.
+pub(crate) fn check_permissions<Q: Query>() -> Vec<(TypeId, Permission)> {
     let mut permissions = Vec::new();
     Q::add_permissions(&mut permissions);
     for (index, &(type_id, permission)) in permissions.iter().enumerate() {
@@ -490,6 +654,7 @@ pub(crate) fn check_permissions<Q: Query>() {
             }
         }
     }
+    permissions
 }
 
 // ========================================================================================== \\
@@ -743,49 +908,23 @@ mod tests {
 
     /// Checks that every query asking for each changed type once passes, including repeated reads
     #[test]
-    fn check_permissions_with_valid_queries_returns() {
-        // Lists each query that should pass, with the check for that query
-        let cases: [(&str, fn()); 9] = [
-            ("&Position", check_permissions::<&Position>),
-            ("&mut Position", check_permissions::<&mut Position>),
-            (
-                "(&Position, &Velocity)",
-                check_permissions::<(&Position, &Velocity)>,
-            ),
-            (
-                "(&mut Position, &mut Velocity)",
-                check_permissions::<(&mut Position, &mut Velocity)>,
-            ),
-            (
-                "(&Position, &Position)",
-                check_permissions::<(&Position, &Position)>,
-            ),
-            (
-                "((&Position, &Velocity), &Position)",
-                check_permissions::<((&Position, &Velocity), &Position)>,
-            ),
-            (
-                "((&mut Position, &Velocity), &mut Tag)",
-                check_permissions::<((&mut Position, &Velocity), &mut Tag)>,
-            ),
-            (
-                "(&mut Tag, (&Position, &mut Name))",
-                check_permissions::<(&mut Tag, (&Position, &mut Name))>,
-            ),
-            (
-                "(&mut Position, &Velocity, &mut Tag)",
-                check_permissions::<(&mut Position, &Velocity, &mut Tag)>,
-            ),
+    fn check_permissions_with_valid_queries_does_not_panic() {
+        // Lists the check for each query that should pass
+        let cases: [fn() -> _; 9] = [
+            check_permissions::<&Position>,
+            check_permissions::<&mut Position>,
+            check_permissions::<(&Position, &Velocity)>,
+            check_permissions::<(&mut Position, &mut Velocity)>,
+            check_permissions::<(&Position, &Position)>,
+            check_permissions::<((&Position, &Velocity), &Position)>,
+            check_permissions::<((&mut Position, &Velocity), &mut Tag)>,
+            check_permissions::<(&mut Tag, (&Position, &mut Name))>,
+            check_permissions::<(&mut Position, &Velocity, &mut Tag)>,
         ];
 
-        let mut passed = Vec::new();
-        for (label, check) in cases {
+        for check in cases {
             check();
-            passed.push(label);
         }
-
-        let labels: Vec<&str> = cases.iter().map(|(label, _)| *label).collect();
-        assert_eq!(passed, labels, "queries that passed");
     }
 
     /// Checks that a query that changes a type and then reads it panics

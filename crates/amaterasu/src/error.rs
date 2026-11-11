@@ -42,8 +42,8 @@ pub enum RendererError {
     ///
     /// The renderer returns it in two cases:
     ///
-    /// - The GPU offers no pixel format or no present mode for the surface. A present mode sets
-    ///   when each finished frame appears in the window.
+    /// - The GPU does not offer a pixel format or a present mode for the surface. A present mode
+    ///   sets when each finished frame appears in the window.
     /// - A new surface lacks the pixel format that the pipeline was built for.
     UnsupportedSurface,
     /// The GPU cannot anti-alias in the surface's pixel format.
@@ -52,7 +52,13 @@ pub enum RendererError {
     /// for each pixel. In the surface's pixel format, this GPU cannot take the number of samples
     /// that the renderer asks for.
     UnsupportedSampleCount,
+    /// The connection to the GPU has died, for example after a driver reset.
+    ///
+    /// From then on, `Renderer::render` returns this error on every call made while a surface
+    /// exists, since nothing made from the dead connection works again.
     DeviceLost,
+    /// wgpu rejected a call as invalid while handing out the texture for a frame. This points to a
+    /// bug in the renderer.
     Validation,
 }
 

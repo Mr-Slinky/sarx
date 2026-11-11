@@ -3,11 +3,11 @@
 //! The drawing runs on the GPU. The renderer reaches the GPU through wgpu, a Rust library for
 //! graphics.
 //!
-//! A caller creates a [`Renderer`] for its window. It then calls [`Renderer::render`] each time the
+//! A caller creates a [`Renderer`] for its window, then calls [`Renderer::render`] each time the
 //! window needs redrawing.
 //!
-//! Setting up the GPU for the window can fail. [`Renderer::new`], [`Renderer::resume`] and
-//! [`Renderer::render`] then return a [`RendererError`].
+//! [`Renderer::new`], [`Renderer::resume`] and [`Renderer::render`] return a [`RendererError`]
+//! where the GPU cannot be set up for the window, or cannot keep drawing to it.
 //!
 //! # Examples
 //!

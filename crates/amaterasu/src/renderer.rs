@@ -34,9 +34,10 @@ use crate::mesh::Mesh;
 
 /// A window that a [`Renderer`] can draw into.
 ///
-/// A type is a `RenderWindow` once it meets three bounds. It provides the display and window handles
-/// that wgpu needs to create a surface. It implements `Debug`. It also owns all of its data, as
-/// `'static` requires, since the renderer keeps the window for as long as the renderer exists.
+/// A type is a `RenderWindow` once it meets three bounds: it provides the display and window
+/// handles that wgpu needs to create a surface, it implements `Debug`, and it is `'static`. The
+/// last bound means that the type does not contain a borrowed reference that could expire. The
+/// renderer needs that, since it keeps the window for as long as the renderer exists.
 ///
 /// Every type that meets the three bounds implements `RenderWindow` automatically. A winit `Window`
 /// is one such type.
@@ -61,9 +62,9 @@ impl<W> RenderWindow for W where W: DisplayAndWindowHandle + Debug + 'static {}
 /// `render` each time the window needs redrawing. It also passes each new window size to `resize`.
 ///
 /// Two more methods serve a platform that can take the window away from a running app, such as a
-/// phone. The caller calls `suspend` when the app loses its window. It calls `resume` when the app
-/// gets a window back. winit never takes the window away on Windows, meaning these two methods run
-/// only on another platform.
+/// phone. The caller calls `suspend` when the app loses its window, and `resume` when it gets a
+/// window back. winit never takes the window away on Windows, meaning a winit app there never
+/// calls them.
 ///
 /// # Examples
 ///
@@ -107,8 +108,8 @@ impl Renderer {
 
     /// Creates a renderer that draws into `window`, at `width` by `height` pixels.
     ///
-    /// Setting up takes three steps. `new` first connects to a GPU that can draw to the window. It
-    /// then copies the triangle into GPU memory. Last, it builds the pipeline, which is the set of
+    /// `new` first connects to a GPU that can draw to the window. It then copies the triangle into
+    /// GPU memory and compiles the shader. Last, it builds the pipeline, which is the set of
     /// settings that the GPU follows to draw the triangle.
     ///
     /// # Errors
@@ -118,7 +119,7 @@ impl Renderer {
     /// - wgpu cannot create a surface for the window.
     /// - No GPU can draw to that surface.
     /// - The GPU refuses to open a device.
-    /// - The GPU offers no pixel format or no present mode for the surface.
+    /// - The GPU does not offer a pixel format or a present mode for the surface.
     /// - The GPU cannot anti-alias in the surface's pixel format. Anti-aliasing smooths the jagged
     ///   edges of a shape.
     ///
@@ -229,18 +230,19 @@ impl Renderer {
     ///
     /// Each frame shows an orange triangle over a dark blue background.
     ///
-    /// Some calls skip the frame. While the app is suspended, no surface exists. As a result,
-    /// `render` returns at once.
+    /// Some calls skip the frame. While the app is suspended, no surface exists, and `render`
+    /// returns at once.
     ///
-    /// Each frame is drawn into a texture, which is an image in GPU memory. The surface hands out
-    /// one texture for each frame. Where the surface has no texture ready, `render` skips the
-    /// frame. Where wgpu reports the surface lost, `render` creates a new surface for the same
-    /// window, then skips the frame.
+    /// Otherwise, each frame is drawn into a texture, which is an image in GPU memory that the
+    /// surface hands out for that frame. Where no texture comes back, `render` skips the frame.
+    /// Before skipping, it reconfigures an outdated surface and replaces a lost one with a new
+    /// surface for the same window.
     ///
     /// # Errors
     ///
     /// Returns `RendererError::DeviceLost` once the connection to the GPU has died. Every later
-    /// call returns it too, since nothing made from the dead connection works again.
+    /// call returns it too, since nothing made from the dead connection works again. A call made
+    /// while the app is suspended is the exception, and returns `Ok(())` as before.
     ///
     /// Returns `RendererError::Validation` where wgpu rejects a call as invalid while handing out
     /// the frame's texture. That points to a bug in the renderer.
@@ -259,7 +261,8 @@ impl Renderer {
     /// ```ignore
     /// // Draws one frame and shows it in the window
     /// if let Err(error) = renderer.render() {
-    ///     // Ends the program, since the renderer could not replace its lost surface
+    ///     // Ends the program, since each error points to a dead connection, a lost surface that
+    ///     // could not be replaced, or a bug
     ///     eprintln!("Error: {error}");
     ///     event_loop.exit();
     /// }
@@ -270,8 +273,8 @@ impl Renderer {
             return Ok(());
         };
         // Returns an error once the connection to the GPU has died. The check comes before the
-        // surface's texture is requested, since a dead connection also reports the surface lost,
-        // and `recreate` would then build a new surface on that dead connection
+        // texture request, since a dead connection also reports the surface lost. Without it,
+        // `recreate` would build a new surface on the dead connection
         if self.gpu.device_lost.load(Ordering::Relaxed) {
             return Err(RendererError::DeviceLost);
         }
@@ -290,8 +293,8 @@ impl Renderer {
             // Returns an error rather than skipping the frame, since a skip would hide the bug
             CurrentSurfaceTexture::Validation => return Err(RendererError::Validation),
         };
-        // Creates a view of the whole texture, since a render pass draws into a texture through a
-        // view
+        // Creates a view of the frame's texture, which the pass resolves the multisampled texture
+        // into
         let view = frame.texture.create_view(&TextureViewDescriptor::default());
 
         // Creates the command encoder, which records this frame's commands for the GPU to run
@@ -365,12 +368,12 @@ struct GpuContext {
     /// The queue that sends recorded commands to the GPU.
     queue: Queue,
     /// The pixel format of the first surface. A pixel format sets how each pixel's colour is laid
-    /// out in memory. `create_pipeline` builds the pipeline for this format. Every later surface
-    /// therefore takes the same format.
+    /// out in memory. `create_pipeline` builds the pipeline for this format, and every later
+    /// surface therefore takes it too.
     format: TextureFormat,
     /// Stores `true` once the connection to the GPU has died, for example after a driver reset.
-    /// wgpu sets it from the device-lost callback, which can run on another thread. The `Arc`
-    /// shares the flag between this struct and that callback.
+    /// The device-lost callback sets it, and wgpu can run that callback on another thread. The
+    /// `Arc` shares the flag between this struct and that callback.
     device_lost: Arc<AtomicBool>,
 }
 
@@ -396,7 +399,7 @@ impl GpuContext {
     /// - wgpu cannot create a surface for the window.
     /// - No GPU can draw to that surface.
     /// - The GPU refuses to open a device.
-    /// - The GPU offers no pixel format or no present mode for the surface.
+    /// - The GPU does not offer a pixel format or a present mode for the surface.
     /// - The GPU cannot anti-alias in the surface's pixel format.
     ///
     /// # Examples
@@ -411,7 +414,7 @@ impl GpuContext {
     where
         W: RenderWindow,
     {
-        // Makes a second owner of the window, boxed, for the instance to keep as its display handle
+        // Boxes a second `Arc` to the window, which the instance keeps as its display handle
         let display = Box::new(Arc::clone(&window));
         // Creates the wgpu instance, and gives it that display handle
         let instance = Instance::new(InstanceDescriptor::new_with_display_handle(display));
@@ -433,12 +436,12 @@ impl GpuContext {
         };
         let (device, queue) = adapter.request_device(&device_descriptor).await?;
 
-        // Creates a flag to record a lost device, and gives the callback its own handle to it.
-        // `move` hands that handle to the callback, which owns it from then on, as `'static`
-        // requires
+        // Creates a flag to record a lost device, and gives the callback its own handle to it
         let device_lost = Arc::new(AtomicBool::new(false));
         let callback_flag = Arc::clone(&device_lost);
-        // Sets the flag when the device dies. `Relaxed` suffices, since no other data depends on it
+        // Sets the flag when the device dies. `move` hands the handle to the callback, which owns
+        // it from then on, as `'static` requires. `Relaxed` suffices, since no other data depends
+        // on the flag
         device.set_device_lost_callback(move |_reason, _message| {
             callback_flag.store(true, Ordering::Relaxed);
         });
@@ -447,13 +450,13 @@ impl GpuContext {
         let mut config = surface
             .get_default_config(&adapter, width, height)
             .ok_or(RendererError::UnsupportedSurface)?;
-        // Lists every pixel format that the GPU can draw to the surface in
+        // Prefers the first sRGB format that the GPU can draw to the surface in, and falls back to
+        // the default format. An sRGB format makes the GPU convert each colour that the shader
+        // writes into the sRGB encoding that screens display. The pipeline and every later surface
+        // take the chosen format
         let caps = surface.get_capabilities(&adapter);
-        // Finds the first sRGB format in that list, or `None` where the list has none
         let srgb_format = caps.formats.iter().copied().find(|format| format.is_srgb());
-        // Uses the sRGB format, and keeps the default format where the list has none
         config.format = srgb_format.unwrap_or(config.format);
-        // Records the chosen format, which the pipeline and every later surface take
         let format = config.format;
 
         // Checks that the GPU can anti-alias in the surface's pixel format
@@ -719,8 +722,9 @@ impl GpuContext {
     // ====================================================================================== \\
     /// Creates a `SurfaceContext` for `window`, at `width` by `height` pixels.
     ///
-    /// It creates the surface first. It then configures the surface in the pixel format that the
-    /// pipeline was built for. Last, it creates a multisampled texture to match the surface.
+    /// It creates the surface, checks that the surface supports the pixel format that the pipeline
+    /// was built for, and configures it in that format. Last, it creates a multisampled texture to
+    /// match the surface.
     ///
     /// # Errors
     ///
@@ -796,9 +800,10 @@ impl SurfaceContext {
         device: &Device,
         mut config: SurfaceConfiguration,
     ) -> Self {
-        // Raises a width and/or height of zero to 1 pixel (since `configure` panics on a size of zero)
+        // Raises a width or height of zero to 1 pixel, since `configure` panics on a size of zero
         config.width = config.width.max(1);
         config.height = config.height.max(1);
+        // Syncs each frame to the screen's refresh, which caps the frame rate at the refresh rate
         config.present_mode = PresentMode::AutoVsync;
         // Configures the surface at that size, in the configuration's pixel format
         surface.configure(device, &config);
@@ -869,7 +874,6 @@ impl SurfaceContext {
     /// let msaa_view = Self::create_msaa_view(device, &config);
     /// ```
     fn create_msaa_view(device: &Device, config: &SurfaceConfiguration) -> TextureView {
-        // Sizes the texture to match the surface, one layer deep
         let size = Extent3d {
             width: config.width,
             height: config.height,
@@ -887,7 +891,6 @@ impl SurfaceContext {
             usage: TextureUsages::RENDER_ATTACHMENT,
             view_formats: &[],
         };
-        // Creates the texture on the device
         let texture = device.create_texture(&descriptor);
         // Returns a view of the whole texture, which the render pass draws through
         texture.create_view(&TextureViewDescriptor::default())

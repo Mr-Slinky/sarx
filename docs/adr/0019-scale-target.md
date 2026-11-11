@@ -1,6 +1,6 @@
 ---
 status: accepted
-date: 2026-11-10
+date: 2026-11-11
 decision-makers: Kheagen Haskins
 ---
 
@@ -67,11 +67,11 @@ Sarx sets three limits:
   systems that run every step, such as movement, needs and animation, all update villagers.
 - At most 15,000 villagers appear on screen at once, as during a large battle or with the whole city
   in view. This number sets what the renderer draws in one frame.
-- A world contains at most 100,000 entities, villagers included. Most of the rest are static, such
+- A world contains at most 500,000 entities, villagers included. Most of the rest are static, such
   as trees and rocks. A query visits only the tables that store every component type that it asks
   for. A static entity therefore takes memory, but the systems that update villagers never visit it.
 
-The limit of 100,000 entities is the figure for planning memory. It is also the figure for planning
+The limit of 500,000 entities is the figure for planning memory. It is also the figure for planning
 the systems that cover the whole world, such as a spatial index. The limit of 50,000 villagers is
 the one that every design must meet.
 
@@ -103,8 +103,8 @@ arrow that can hit a villager is an entity. The trail behind the arrow is a part
 ### Confirmation
 
 Nothing in the code embodies this decision yet. Once villagers exist, a benchmark must confirm it.
-The benchmark must spawn 50,000 villagers with their real components, and 50,000 static entities. A
-step of the simulation must then finish within 16.7 ms on a mid-level laptop.
+The benchmark must spawn 50,000 villagers with their real components, and 450,000 static entities.
+A step of the simulation must then finish within 16.7 ms on a mid-level laptop.
 
 A reader also checks that no type for a particle effect implements `Component`.
 

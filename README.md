@@ -86,6 +86,11 @@ The features below describe the game that the author is working towards. Each on
   - Cosy mode allows only the actions that keep the civilisation going. It does not allow new
     buildings or population growth.
 
+The systems that these features would need are listed in
+[docs/planned-systems.md](docs/planned-systems.md), together with how each one would use the tables
+of the ECS. The developer and every agent read that list before planning a feature or designing a
+part of the ECS, and add the systems of each new feature to it.
+
 ## Design Decisions
 
 The author writes down each decision about a library or about the design. Each one goes in a short
@@ -115,7 +120,7 @@ The format of an ADR is set out further down, under Conventions.
 | [0016](docs/adr/0016-hand-written-gltf-reader.md)                    | Hand-written glTF reader        | The author writes the glTF reader, and `serde_json` turns its JSON text into Rust structs           |
 | [0017](docs/adr/0017-glam-for-vector-maths.md)                       | glam for vector maths           | Vectors, matrices and quaternions come from glam, and the author builds each matrix that Sarx uses  |
 | [0018](docs/adr/0018-bytemuck-for-gpu-bytes.md)                      | bytemuck for GPU bytes          | Each type that the GPU reads derives `Pod`, and bytemuck casts it to bytes without copying it       |
-| [0019](docs/adr/0019-scale-target.md)                                | Scale target                    | Sarx holds up to 50,000 villagers and 100,000 entities on a mid-level laptop                        |
+| [0019](docs/adr/0019-scale-target.md)                                | Scale target                    | Sarx holds up to 50,000 villagers and 500,000 entities on a mid-level laptop                        |
 | [0020](docs/adr/0020-change-detection.md)                            | Change detection                | `enki` does not track changes, and a system reports sparse changes as events                        |
 | [0021](docs/adr/0021-telekinetic-hand.md)                            | Telekinetic hand                | The hand lifts by telekinesis, hovers above every object, and pushes objects only when it strikes   |
 | [0022](docs/adr/0022-rigid-creature-that-places-its-feet.md)         | A creature that places its feet | The hairless creature is built from rigid parts, and code places each foot along a planned route    |

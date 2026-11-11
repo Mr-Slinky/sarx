@@ -1,6 +1,6 @@
 ---
 status: accepted
-date: 2026-10-27
+date: 2026-11-11
 decision-makers: Kheagen Haskins
 ---
 
@@ -26,11 +26,22 @@ ADR 0003 also keeps Sarx within the GPU limits that a mid-level laptop meets.
 Black & White 2 is the game that Sarx follows for the creature and the hand. It drew realistic
 people and animals with few triangles. As a result, their hands and faces looked blocky.
 
+Players judge a game against other games in the same style. A realistic third-person game stands
+beside Red Dead Redemption 2, Assassin's Creed and Grand Theft Auto. Large studios built each of
+those over many years. A stylised game stands beside Astro Bot, Crash Bandicoot and Spyro instead.
+Those games win players over with timing, feedback and playful mechanics, rather than with
+realistic detail.
+
+Sarx meets that comparison directly. During a battle, the player can possess a character and
+control it in third person, as the Planned Features in the README set out.
+
 What does Sarx look like, and how does it build its characters?
 
 ## Decision Drivers
 
 - The mechanics decide whether Sarx is a good game. The look serves them.
+- The look decides which games players compare Sarx to. A single developer must be able to match
+  the best of those games.
 - Sarx runs within the GPU limits that a mid-level laptop meets, as ADR 0003 sets out.
 - Models come from code, from Blender scripts and from AI generators. The look therefore has to suit
   simple geometry. It also has to suit the uneven triangles that a generator produces.
@@ -46,7 +57,9 @@ What does Sarx look like, and how does it build its characters?
 ## Decision Outcome
 
 Chosen option: "Stylised, with characters built from rigid parts", because the look is made of
-simple, clean shapes, and every source of models that Sarx has produces shapes of that kind.
+simple, clean shapes, and every source of models that Sarx has produces shapes of that kind. The
+look also places Sarx beside Astro Bot and Crash Bandicoot, whose strengths a single developer can
+match.
 
 Sarx looks stylised, in the manner of Astro Bot, Universim and Minecraft. It uses bright colours,
 clean shapes and simple forms. Its proportions and surfaces are simplified rather than realistic.
@@ -57,6 +70,9 @@ body, two hands and two feet are each a small mesh of their own. No joints conne
 Animating a villager moves and rotates whole parts. Each part therefore needs only its own
 transform. A transform is the matrix that places the part in the world. Nothing bends, and no vertex
 blends between bones.
+
+Combat follows the same look, and is comic rather than grounded. A blow can knock the head off a
+villager, or tear away a limb, and the part flies off across the land.
 
 The creature and the hand follow the same look. How the developer builds and animates them is a
 separate decision.
@@ -72,6 +88,9 @@ separate decision.
   models from an AI generator.
 - Good, because simple models and plain surfaces keep the GPU work within what a mid-level laptop
   can do.
+- Good, because a villager loses a part in combat by letting go of it. The part becomes an object of
+  its own, which the physics engine of ADR 0010 then throws. A rigid part has no seam to hide where
+  it joined the body. Knocking off a head therefore does not need extra modelling or extra animation.
 - Bad, because a figure built from parts is a hierarchy. The position of a hand depends on the
   position of the body. The position of the body depends in turn on the position of the villager.
   ADR 0011 settles how the ECS stores components, and a hierarchy needs a design of its own within
@@ -98,6 +117,8 @@ Astro Bot builds its characters this way.
   shapes.
 - Good, because animating rigid parts needs one transform per part. That is little work, even for
   thousands of villagers.
+- Good, because it places Sarx beside Astro Bot and Crash Bandicoot. Comic, playful combat suits
+  those games, and the parts of a figure can fly apart in a fight.
 - Bad, because the parts form a hierarchy, which the ECS has to store.
 
 ### Low-Poly Realism
@@ -121,3 +142,6 @@ The world aims at realistic models, materials and lighting.
   fall short of that skill.
 - Bad, because realistic lighting and detailed models need more GPU power than a mid-level laptop
   has.
+- Bad, because a realistic third-person game stands beside the best-funded games ever made.
+  Possession puts Sarx in third person during battle, where combat animation would face that
+  comparison.

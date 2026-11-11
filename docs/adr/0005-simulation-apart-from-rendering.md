@@ -56,9 +56,9 @@ The cap matters on a slow device. Such a device takes longer to compute a step t
 that the step covers. With the cap, it runs the game in slow motion. Without the cap, it would fall
 further behind on every frame, until the backlog of steps froze the game.
 
-The simulation lives in the `zurvan` crate, which does not depend on any graphics code. Today the
-crate contains only the `add` function that `cargo new` generates. The first fixed-step simulation
-arrives with the TODO item "Move the triangle from a fixed-step simulation with a minimal ECS".
+The simulation lives in the `zurvan` crate, which depends on `enki` and does not depend on any
+graphics code. The first fixed-step simulation arrives with the TODO item "Draw the god's hand and
+move it with the cursor across a flat ground plane".
 
 Two questions remain open. This decision leaves both to a later discussion.
 

@@ -67,7 +67,8 @@ clip, positions and scales included.
 Each new kind of animation then adds code on top of the reader. The form of what the reader returns
 stays the same.
 
-One point remains open. The developer must decide which crate contains the reader.
+The reader lives in a crate of its own, `hermes`. `zurvan` must not depend on `hermes`, since the
+reader is graphics code.
 
 ### Consequences
 

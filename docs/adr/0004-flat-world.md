@@ -64,8 +64,8 @@ each point of the grid. The grid lies flat. Each height lifts the ground at its 
 
 ### Confirmation
 
-Nothing in the code embodies this decision yet. `amaterasu` draws a single triangle. `zurvan`
-contains only the `add` function that `cargo new` generates.
+Nothing in the code embodies this decision yet. Neither `amaterasu` nor `zurvan` contains any
+terrain.
 
 The foundation work in the README ends with lit heightmap terrain on screen. Once that step is done,
 a reader can confirm the decision. They check that the terrain stores one height for each point of a

@@ -12,19 +12,48 @@ graphics library.
 During a level, the player does three things. They guide a civilisation on a flat world, they train
 a creature, and they compete with rival factions for the land.
 
-Three older games shape the design. Black & White 2 supplies the creature, the god's hand and the
+Several games shape the design. Black & White 2 supplies the creature, the god's hand and the
 choice between good and evil. Universim and Spore supply a civilisation that advances on its own.
+Astro Bot supplies the look, along with the comic tone of combat.
 
 The project also has a second purpose. The author builds every layer below the gameplay by hand, to
 learn how each one works. Those layers run from the renderer to the entity system.
+
+## Why Sarx
+
+The author played Black & White 2 as a child, then returned to it as an adult. The second time
+round, the game felt as though it had been made for an adult all along. Its hand and its creature
+gave it a character of its own. In the author's view, no god game since has matched that character,
+and none has rebuilt the creature.
+
+Sarx sets out to be the successor that Black & White 2 never had. Three parts of the game carry
+that aim, and the author means each one to stand out from every game before it:
+
+- the god's hand, which is the centre of the game and the first part that the author builds
+- the creature
+- combat
+
+Each of the three has an entry under Planned Features.
+
+The look serves the same aim. Players judge a game against other games in the same style. A
+stylised game stands beside Astro Bot and Crash Bandicoot, whereas a realistic one stands beside Red
+Dead Redemption 2. Sarx therefore looks stylised, as ADR 0012 records.
 
 ## Planned Features
 
 The features below describe the game that the author is working towards. Each one is still a plan.
 
+- The player acts on the world through the **god's hand**, the centre of the game. The hand lifts
+  villagers and objects by telekinesis, as in Destroy All Humans, and moves between poses as it does
+  so. It hovers above whatever lies beneath it, and can also strike. It can flick a villager far across the land, or slap the
+  creature.
 - The player trains a **creature**, teaching it by rewarding and punishing it, as in Black & White 2.
   Over time, the creature's behaviour leans towards good or evil. The author means its AI to go well
   beyond what Black & White 2 offered.
+
+  The creature is built from rigid parts, and never has fur or hair.
+- **Combat** is comic and playful, as in Astro Bot and Crash Bandicoot. A blow can knock the head
+  off a villager or tear away a limb, and the part flies off on its own.
 - The player's **civilisation** improves itself. Villages advance on their own, as they do in
   Universim and Spore. Each village moves through new technologies and stages without the player
   directing every step.
@@ -86,6 +115,12 @@ The format of an ADR is set out further down, under Conventions.
 | [0014](docs/adr/0014-hand-poses-as-target-keyframes.md)              | Hand poses as target keyframes  | Each hand pose is a one-keyframe glTF animation, and each bone turns towards it by slerp            |
 | [0015](docs/adr/0015-opt-in-component-trait.md)                      | Opt-in component trait          | Each component type must implement `Component` by hand, and the compiler rejects every other type   |
 | [0016](docs/adr/0016-hand-written-gltf-reader.md)                    | Hand-written glTF reader        | The author writes the glTF reader, and `serde_json` turns its JSON text into Rust structs           |
+| [0017](docs/adr/0017-glam-for-vector-maths.md)                       | glam for vector maths           | Vectors, matrices and quaternions come from glam, and the author builds each matrix that Sarx uses  |
+| [0018](docs/adr/0018-bytemuck-for-gpu-bytes.md)                      | bytemuck for GPU bytes          | Each type that the GPU reads derives `Pod`, and bytemuck casts it to bytes without copying it       |
+| [0019](docs/adr/0019-scale-target.md)                                | Scale target                    | Sarx holds up to 50,000 villagers and 100,000 entities on a mid-level laptop                        |
+| [0020](docs/adr/0020-change-detection.md)                            | Change detection                | `enki` does not track changes, and a system reports sparse changes as events                        |
+| [0021](docs/adr/0021-telekinetic-hand.md)                            | Telekinetic hand                | The hand lifts by telekinesis, hovers above every object, and pushes objects only when it strikes   |
+| [0022](docs/adr/0022-rigid-creature-that-places-its-feet.md)         | A creature that places its feet | The hairless creature is built from rigid parts, and code places each foot along a planned route    |
 
 ## Workspace
 
@@ -320,40 +355,33 @@ Improvements that come up along the way, and that no step below needs yet, go in
 - [x] Draw a triangle
 - [x] Rebuild the surface when the app suspends and resumes
 - [x] Recreate the surface when wgpu reports it lost
-- [ ] Move the triangle from a fixed-step simulation with a minimal ECS
-- [ ] Render a 3D cube with a camera and a depth buffer
 - [ ] Draw the god's hand and move it with the cursor across a flat ground plane
 - [ ] Render lit heightmap terrain with a mouse and keyboard camera
 
-Today, each vertex has one attribute, its position. A later step gives a vertex a second attribute,
-such as a colour for the cube or a normal for the lit terrain. Two changes wait for that step:
+The hand step builds four layers at once. Each one is structure that later steps extend.
 
-- `Mesh` then stores a `Vertex` struct in place of `[f32; 3]`. That struct takes `#[repr(C)]`, for
-  the following reason.
+1. The game reads the mesh of the hand from `assets/hand-model.glb`, with the reader that ADR 0016
+   sets out. For this step, the reader must return the vertex positions, the vertex normals and the
+   indices. The skeleton and the poses wait for the hand to animate.
+2. `amaterasu` must draw the mesh in 3D. That needs five additions:
+   - a `Vertex` struct, with a position and a normal
+   - an index buffer, since a glTF mesh lists each triangle as three indices into its vertices
+   - a camera, which gives the shader the matrices that turn world positions into screen positions
+   - a depth buffer, which lets the nearer surface hide the one behind it
+   - a directional light, which shades each triangle by the angle between its normal and the light
+3. `zurvan` must advance the world in fixed steps, as ADR 0005 sets out. Two components, `Position`
+   and `Velocity`, give the hand its place and its movement.
+4. The hand moves across a flat plane at height zero, since the terrain does not exist yet. To place
+   the hand on that plane, the game follows a ray. A ray is a line from the camera, through the
+   cursor, into the world. The hand moves towards the point where the ray meets the plane.
 
-  The vertex buffer layout states a fixed byte offset for each attribute. Rust, however, lays out a
-  plain struct in an order of its own choosing. `#[repr(C)]` keeps the fields in the order written,
-  at offsets that can be worked out by hand.
-- `Mesh` turns its vertices into bytes before they reach the GPU. The author weighs the `bytemuck`
-  crate as the way to do that. It offers two things:
-  - At compile time, its derive macro rejects any vertex type that has padding.
-  - Its `cast_slice` function returns a `&[u8]` over the same memory as the vertex slice, without
-    copying the vertices.
+The hand appears in its rest pose. Bending its fingers needs skinning, which the hand item under
+Later Work covers.
 
-The hand comes before the terrain. Until the terrain exists, the hand moves across a flat plane at
-height zero instead.
+The camera and the ray take their maths from glam, under ADR 0017. `Vertex` and the camera uniforms
+turn into bytes through bytemuck, under ADR 0018.
 
-To place the hand on that plane, the game follows a ray. A ray is a line from the camera, through the
-cursor, into the world. The hand goes to the point where the ray meets the plane.
-
-Two questions wait for the hand step:
-
-- The author decides how the mesh for the hand reaches the game. The game can build the mesh in code
-  from simple shapes. Alternatively, it can load the mesh from a glTF file, a common format for 3D
-  models. Loading glTF raises a choice between a library, the `gltf` crate, and a parser written by
-  hand.
-- Under ADR 0012, each villager is built from rigid parts. The author decides whether the hand is
-  built the same way.
+The glTF reader goes in a crate of its own, `hermes`, as ADR 0016 sets out.
 
 ### Later Work
 
@@ -365,10 +393,12 @@ The items below come after the foundation. What the foundation teaches decides t
     instance, rather than one per vertex? What does the instance range in `draw` control?
 - [ ] ECS: extend the minimal version into the full one
 - [ ] Simulation: villagers, needs, the central AI planner
-- [ ] The hand: picking points on the terrain, grabbing and throwing, gestures
+- [ ] The hand: skinning, poses, picking points on the terrain, grabbing and throwing, gestures
 - [ ] Animation: villagers that move their rigid parts, with distant villagers updating less often;
   keyframes and procedural animation for the creature and the hand
   - A figure built from parts forms a hierarchy, in which the position of each part depends on the
     position of its parent. Before the ECS stores such a figure, the author settles how archetype
     storage keeps that hierarchy.
 - [ ] Tools: debug overlay, timing, GPU capture
+- [ ] The creature: its shape, legs that place each foot, and routes along roads and between
+  buildings, as ADR 0022 sets out. The creature comes late, after the hand and the villagers.

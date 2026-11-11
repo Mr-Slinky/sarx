@@ -95,6 +95,10 @@ raw bytes that one column of a table stores. Its tests build one for plain types
 check on which types are components therefore happens where a caller adds a component, in `World`
 and `Bundle`.
 
+The `Bundle` trait also spells out `Send + Sync + 'static`, as supertraits of its own. A bundle is a
+tuple of components, and every component already meets the bound. The supertraits state the same
+bound for the tuple as a whole.
+
 A derive macro would generate the `impl` line for each type. It remains open as a later addition.
 Rust requires such a macro to be defined in a crate of its own, called a proc-macro crate. A
 proc-macro crate generates code at compile time. Almost every derive macro is written with two
@@ -115,8 +119,8 @@ macro.
   `String`. Rust's orphan rule lets a crate implement a trait for a type only where the crate
   defines the trait or the type. The game must wrap such a value in a struct of its own, such as
   `struct Name(String);`.
-- Bad, because `ComponentInfo::of` still spells out the bound. A change to the bound must reach it
-  as well as `Component`.
+- Bad, because `ComponentInfo::of` and the `Bundle` trait still spell out the bound. A change to the
+  bound must reach both, as well as `Component`.
 
 ### Confirmation
 
@@ -125,7 +129,8 @@ A reader confirms this decision in `enki` with three checks:
 - `component.rs` defines `Component` with `Send + Sync + 'static` as its supertraits, and with no
   blanket implementation.
 - `World::add_component` and the tuple implementations of `Bundle` take `T: Component`.
-  `ComponentInfo::of` is the one other place that spells out the bound for a component type.
+  `ComponentInfo::of` and the supertraits of `Bundle` are the two other places that spell out the
+  bound.
 - A call to `add_component` with a tuple fails to compile.
 
 ## Pros and Cons of the Options

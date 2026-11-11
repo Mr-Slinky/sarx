@@ -41,8 +41,7 @@ How does the ECS lay out its components in memory?
 
 - The systems that run on every step read several components of each entity together. They should
   read memory in order.
-- Entities gain and lose components while the game runs. The central AI assigning a task is one
-  example.
+- Entities gain and lose components while the game runs, as when the central AI assigns a task.
 - Some systems work on a whole column at once. Such a system uses slice operations, or SIMD
   instructions, which process several values in one CPU instruction.
 - The ECS is structure that other code builds on. Its first version follows the design that Sarx

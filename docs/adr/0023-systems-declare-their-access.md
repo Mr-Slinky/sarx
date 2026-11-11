@@ -28,8 +28,8 @@ can implement it.
 Each query also lists the type that it asks for in each field, paired with a `Permission` of `Read`
 or `Write`. These lists are the read set and the write set of the query.
 
-None of this says what a system is, or how a system receives its data. Every system will be written
-to that shape, and resources, commands and events will follow it too.
+None of this says what a system is, or how a system receives its data. The answer fixes the shape
+of every system, and resources, commands and events will follow the same shape.
 
 ADR 0019 sets the scale target at 50,000 villagers. A step of 16.7 ms then has room for about a
 dozen full passes over every villager on one core. The shape of a system decides how much of a
@@ -58,14 +58,14 @@ every kind of parallelism that the other options use, and adds systems running s
 
 Parallelism can come from two places:
 
-- **Within one system.** The system splits the rows of its tables across the cores. ADR 0011 already
-  allows this.
-- **Between systems.** Two systems run on different cores at the same time.
+- Within one system, the system splits the rows of its tables across the cores, as ADR 0011 already
+  allows.
+- Between systems, two systems run on different cores at the same time.
 
-Each system declares the queries that it uses. The scheduler reads the `Permission` list of each
-query. Two systems conflict where one of them writes a component type that the other reads or
-writes. The scheduler runs two systems at the same time only where they do not conflict. A system
-can still split its own work across the cores.
+Each system declares the queries that it uses, and the scheduler reads the `Permission` list of each
+one. Two systems conflict where one of them writes a component type that the other reads or writes.
+The scheduler runs two systems at the same time only where they do not conflict. A system can still
+split its own work across the cores.
 
 A system does not receive `&mut World`. It changes the structure of the world through commands.
 Spawning, despawning, adding a component and removing one are all changes to that structure. The
@@ -79,8 +79,9 @@ The query rules in `enki` stay as they stand. `World::query` and `World::query_m
 that runs outside the scheduler, such as setting up a level, and for tests.
 
 Systems are structure, which other code builds on. The scheduler, resources and commands therefore
-come before the first system of the game. The hand step waits for them, rather than writing its
-systems against `&mut World` and rewriting them once the scheduler exists.
+come before the first system of the game. The hand step, the TODO item that draws the god's hand,
+waits for them. Its systems must be written under the scheduler from the start, rather than against
+`&mut World` first and rewritten once the scheduler exists.
 
 Several points remain open, for the discussions that design each piece:
 
@@ -91,10 +92,12 @@ Several points remain open, for the discussions that design each piece:
 
 ### A Separate World for the Renderer
 
-The simulation keeps one world. Splitting it by entity, or by component, would cost more than it
-gains, as the pros and cons below set out.
+The simulation keeps one world. Splitting it by entity would break the handles of entities that
+cross the split, and splitting it by component would leave each villager in several worlds, as the
+pros and cons below set out.
 
-The boundary between simulation and rendering in ADR 0005 is different. The renderer could keep a
+The boundary between simulation and rendering is another matter, since ADR 0005 already draws it.
+The renderer could keep a
 world of its own, copied from the simulation after each step. The simulation would then run its
 next step while the renderer draws the last one. That remains open as a later addition.
 

@@ -19,8 +19,8 @@ The limits reach the window as well. The surface of the window supplies the imag
 is drawn into, and that image is a texture. The limit on texture size therefore caps the size of the
 window too.
 
-The choice of platform and GPU decides two things. It decides the limits that the renderer asks for.
-It also decides the toolchain that a developer installs.
+The choice of platform and GPU decides the limits that the renderer asks for, and the toolchain that
+a developer installs.
 
 The two candidates are a Windows desktop and a phone.
 

@@ -11,9 +11,9 @@ decision-makers: Kheagen Haskins
 Sarx aims to simulate an order of magnitude more villagers than other games of its kind. Universim,
 one such game, slows down badly as its population grows.
 
-Many later decisions are trade-offs. Change detection in the ECS is one example. A design that suits
-5,000 villagers can fail at 500,000. Without a target, each such decision would rest on its own
-guess at the scale.
+Many later decisions are trade-offs, such as change detection in the ECS. A design that suits 5,000
+villagers can fail at 500,000. Without a target, each such decision would rest on its own guess at
+the scale.
 
 Scale matters most for memory. A system that updates every villager reads the components of each
 villager once per step. The amount that it reads is the number of villagers times the size of the
@@ -21,9 +21,9 @@ components that it reads.
 
 The time that a pass takes depends on where those bytes are stored. A CPU keeps recently used data
 in caches, which are small memories on the chip. On a mid-level laptop, the L2 cache has room for
-about 1 to 2 MB for each core. The L3 cache, which all the cores share, has room for about 8 to
-24 MB. Data that does not fit in the caches comes from main memory. One thread reads main memory at
-roughly 10 to 20 GB per second.
+about 1 to 2 MB for each core, and the L3 cache, which all the cores share, for about 8 to 24 MB.
+Data that does not fit in the caches comes from main memory. One thread reads main memory at roughly
+10 to 20 GB per second.
 
 No villager exists yet. As an estimate, a villager takes about 200 bytes of components: a position
 and velocity, health and needs, AI state, and the pose of its rigid parts. The table below uses that
@@ -76,11 +76,11 @@ the systems that cover the whole world, such as a spatial index. The limit of 50
 the one that every design must meet.
 
 Particle effects, such as rain, smoke and sparks, must stay outside the ECS. Each one lasts only a
-second or two. Many thousands of them exist at once. None of them affects the game. As an entity,
-each one would need a table operation when it spawns, and another when it despawns. The renderer
-must store them instead, in an array of its own or on the GPU. The simulation must start an effect
-by sending an event, such as "a storm starts here". This follows ADR 0005, which keeps the
-simulation apart from the renderer.
+second or two, many thousands exist at once, and none of them affects the game. As an entity, each
+one would need a table operation when it spawns, and another when it despawns. The renderer must
+store them instead, in an array of its own or on the GPU. The simulation must start an effect by
+sending an event, such as "a storm starts here". This follows ADR 0005, which keeps the simulation
+apart from the renderer.
 
 The test that separates an entity from a particle effect is whether the thing affects the game. An
 arrow that can hit a villager is an entity. The trail behind the arrow is a particle effect.
@@ -88,8 +88,8 @@ arrow that can hit a villager is an entity. The trail behind the arrow is a part
 ### Consequences
 
 - Good, because every later trade-off has one target to weigh against.
-- Good, because a step that updates 50,000 villagers finishes with time to spare. Sarx can give that time to
-  each villager, as a richer AI, more needs and more animation.
+- Good, because a step that updates 50,000 villagers finishes with time to spare. Sarx can give that
+  time to each villager, as a richer AI, more needs and more animation.
 - Good, because a storm or a battle leaves the entity count unchanged, however many particle effects
   it shows.
 - Bad, because the components of 50,000 villagers are already too large to stay in the caches for a

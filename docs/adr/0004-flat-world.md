@@ -14,9 +14,8 @@ the world with the god's hand, and competes with rival factions for territory.
 Every one of these activities takes place on the terrain. The terrain is the ground that villagers
 walk on and that buildings stand on.
 
-The shape of the world decides three things about the terrain. It decides how the game stores the
-terrain, and how the renderer draws it. It also decides how the hand finds the point on the ground
-below the cursor.
+The shape of the world decides how the game stores the terrain, how the renderer draws it, and how
+the hand finds the point on the ground below the cursor.
 
 Sarx draws on three older games. It takes the creature and the god's hand from Black & White 2. It
 takes a civilisation that advances on its own from Universim and Spore. Both Universim and Spore set

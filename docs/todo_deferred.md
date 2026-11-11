@@ -21,8 +21,9 @@ The entries are grouped by crate.
 ### Edge cache for table moves
 
 **Today**: an entity moves to another table each time that it gains or loses a component. To find
-the target table, `World` looks up the component type in `arch_masks`, which returns its bit.
-`World` then builds the target mask, and looks it up in `indices`, which returns the table.
+the target table, `World` asks its `ComponentRegistry` for the bit of the component type, which the
+registry looks up in its `bits` map. `World` then builds the target mask, and looks it up in
+`indices`, which returns the table.
 
 Both maps use the default hasher of `HashMap`, SipHash. SipHash resists keys that an attacker
 crafts to collide. A game has no such attacker, and SipHash is slower than a simpler hasher for keys
@@ -44,8 +45,8 @@ share of it.
 ### More than 64 component types
 
 **Today**: a `ComponentMask` stores one bit for each component type, in a `u64`. A world therefore
-has room for 64 component types. `World::find_or_assign_bit` panics when it meets a 65th type. The
-test `find_or_assign_bit_with_65th_type_panics` checks the panic.
+has room for 64 component types. `ComponentRegistry::find_or_assign_bit` panics when it meets a
+65th type. The test `find_or_assign_bit_with_65th_type_panics` checks the panic.
 
 Under ADR 0011, each state of an entity is a marker component, such as `Hungry`. Each marker type
 takes a bit. Physics, AI, rendering and the states of villagers will together come close to 64.

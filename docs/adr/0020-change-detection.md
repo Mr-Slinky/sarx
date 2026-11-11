@@ -16,16 +16,16 @@ Each system measures change from its own last run. The renderer last ran one fra
 system might have last run ten steps ago. One `Health` component can therefore count as changed for
 one system and unchanged for another.
 
-`enki` cannot detect changes today. A `&mut T` query hands each system a plain `&mut T`. A write
-through a `&mut T` is a plain store to memory. No code in `enki` runs when the system writes. As a
-result, the world never learns which components the system changed.
+`enki` cannot detect changes today. A `&mut T` query hands each system a plain `&mut T`, and a write
+through it is a plain store to memory, during which no code in `enki` runs. As a result, the world
+never learns which components the system changed.
 
 A record of changes must therefore come from one of three places:
 
-- At each write, the query would hand out a wrapper, such as `Mut<'w, T>`, in place of `&'w mut T`.
-  The wrapper would implement `DerefMut`, the trait whose method runs whenever code takes a
-  `&mut T` through the wrapper, as every write does. That method would stamp the current step
-  number beside the component.
+- At each write, a wrapper would record the change. The query would hand out the wrapper, such as
+  `Mut<'w, T>`, in place of `&'w mut T`. The wrapper would implement `DerefMut`, a trait with one
+  method. Rust calls that method every time that code writes through the wrapper, and the method
+  would stamp the current step number beside the component.
 - At each loan, the world would stamp a whole column with the current step number when it lends
   the column for writing. The world could not tell which rows were written, or whether any were.
 - At the writer, the system that changes a component knows which components it changed. That

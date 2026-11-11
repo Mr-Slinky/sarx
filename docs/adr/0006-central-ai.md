@@ -14,7 +14,7 @@ does what.
 
 The simulation advances in fixed steps, at the same rate on every device. Sarx also runs in full on
 a mid-level laptop. The work of the AI in each step therefore has to finish within the time between
-steps on that laptop. This stays true however many villagers the world contains.
+steps on that laptop, however many villagers the world contains.
 
 The creature has an AI of its own, which the player trains through reward and punishment. That AI is
 a separate planned feature. This record covers the villagers alone.
@@ -57,10 +57,10 @@ Three points remain open. The developer settles them once the planner is built:
   villagers on each job to what the village needs.
 - Good, because the code that runs for each villager in each step carries out one task. As a result,
   that code stays small.
-- Bad, because villagers given the same task behave alike. Any variety between them has to be built
-  into the task itself. One villager working more slowly than another is an example of such variety.
-- Bad, because a villager responds to a change around it only as far as its task allows. An enemy
-  approaching is one such change. The villager responds in full only once its planner decides again.
+- Bad, because villagers given the same task behave alike. Any variety between them, such as one
+  villager working more slowly than another, has to be built into the task itself.
+- Bad, because a villager responds to a change around it, such as an approaching enemy, only as far
+  as its task allows. The villager responds in full only once its planner decides again.
 
 ### Confirmation
 

@@ -1,23 +1,19 @@
 # CLAUDE.md
 
-This file guides AI agents that work in this repository. It builds on the README, which an agent
-reads at the start of every session.
+This file guides AI agents in this repository, adding the instructions that apply to agents alone.
+It builds on the README, which an agent reads at the start of every session.
 
-The README describes what Sarx is and how to build it. It also sets out the conventions that every
-developer follows. Agents count as developers there, and follow those conventions too.
-
-The README also has a Design Decisions section, which lists every decision record. Each decision is
-stated in its own record alone.
-
-This file adds the instructions that apply to agents alone.
+The README describes what Sarx is and how to build it, and sets out the conventions that every
+developer follows, agents included. Its Design Decisions section lists every decision record, and
+each decision is stated only in its own record.
 
 A global CLAUDE.md applies here as well. It applies in full, apart from the parts that concern only
-Java, Maven or Log4j2. Some of its Maven practices have a Cargo counterpart. Where one does, an agent
-follows the Cargo counterpart.
+Java, Maven or Log4j2. Where one of its Maven practices has a Cargo counterpart, an agent follows
+the counterpart.
 
 The global file and a more local file can disagree. Where they do, the more local file wins, in the
 way that a more specific CSS rule overrides a general one. This file and the README are both more
-local than the global file. Therefore, they take precedence over it. For example, the test
+local than the global file, and therefore take precedence over it. For example, the test
 conventions in the README take the place of the JUnit mechanics in the global file.
 
 ---
@@ -44,9 +40,9 @@ everything under `docs/local/`, so the diary exists on the developer's machine a
 
 ## The Two Goals
 
-Sarx has the two goals that the README sets out at its opening. The first goal is the game itself.
-The second is learning, through the layers that the developer builds by hand. The developer gives
-the two goals equal weight.
+Sarx has two goals, which the README sets out at its opening and the developer weighs equally. The
+first is the game itself, and the second is learning through the layers that the developer builds
+by hand.
 
 Through the hand-built layers, the developer means to understand the whole graphics pipeline, along
 with the architecture of a game engine.
@@ -68,9 +64,9 @@ Three rules for agents follow from the second goal.
     The ECS is the structure that most of the game builds on. Its first version follows the design
     that Sarx keeps. Later work extends that design rather than replacing it.
   - **Content can be thrown away.** Content is a small piece that exists only to demonstrate
-    something, such as a test shader or a hard-coded triangle. Content is quick to delete. Whether
-    it survives makes no difference to what the developer learns. The architecture built around it
-    stays either way.
+    something, such as a test shader or a hard-coded triangle. Content is quick to delete, and
+    whether it survives does not change what the developer learns, since the architecture built
+    around it stays either way.
 
   Where the agent is unsure which kind a piece is, it asks the developer.
 
@@ -177,8 +173,8 @@ such a decision, and a later change can reverse it without breaking any other co
 is one example. Where the agent is unsure which kind a decision is, it asks the developer.
 
 Once a discussion that needs an ADR closes, the agent writes the ADR in the format that the README
-sets out. The agent then adds a row for it to the table in the
-Design Decisions section of the README. The developer reviews the ADR and the row, as with any other
+sets out. The agent then adds a row for it to the table in the Design Decisions section of the
+README. The developer reviews the ADR and the row, as with any other
 change that an agent makes.
 
 Before proposing or reviewing work, the agent reads the ADRs that the work touches. A proposal that
@@ -205,9 +201,9 @@ from training are often out of date. Before writing or reviewing wgpu code, the 
 
 When moving from one version to another, the agent also reads `CHANGELOG.md` in the wgpu repository.
 
-winit, the window library, has the same problem. It also changes its API in its breaking releases.
-For a crate below version 1.0, Cargo treats a change in the second number as a breaking release. A
-move from 0.29 to 0.30 is one such change. The agent therefore checks winit in the same way as wgpu.
+winit, the window library, also changes its API in its breaking releases. For a crate below version
+1.0, Cargo treats a change in the second number as a breaking release, as in a move from 0.29 to
+0.30. The agent therefore checks winit in the same way as wgpu.
 
 ---
 

@@ -17,9 +17,9 @@ village, and through each rival faction.
 
 A level also sets rules. Each rule limits what those actors may do.
 
-A player can switch on cosy mode. In cosy mode, no faction attacks the player, and the player
-attacks no one. Cosy mode is the clearest of the rules that a level sets. A hostile action, a trade or any approach to a possible ally switches
-cosy mode off.
+A player can switch on cosy mode, the clearest of the rules that a level sets. In cosy mode, no
+faction attacks the player, and the player does not attack anyone. A hostile action, a trade or any
+approach to a possible ally switches cosy mode off.
 
 A rule of this kind applies to the player and the AI at once. It also touches several kinds of
 change to the world.
@@ -80,8 +80,8 @@ Several points remain open. The developer settles them once the simulation has c
 
 ### Confirmation
 
-Nothing in the code embodies this decision yet. `zurvan` is the crate for the simulation, and it
-contains only the function that `cargo new` generates.
+Nothing in the code embodies this decision yet. `zurvan`, the crate for the simulation, does not yet
+change the world.
 
 Once the simulation changes the world, a reviewer confirms three points:
 

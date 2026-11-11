@@ -16,8 +16,8 @@ across the terrain. A thrown object then has to fall under gravity. It comes to 
 ground or against other objects.
 
 Sarx represents the objects in its world through its own entity component system (ECS), as ADR 0009
-records. Each object is an entity. Its data is stored in components. Systems update those components
-on every step of the simulation.
+records. Each object is an entity, its data is stored in components, and systems update those
+components on every step of the simulation.
 
 Sarx builds every layer below the gameplay by hand, to teach how each one works. Its conventions
 keep game engines such as Bevy out. They weigh any other library against three questions: whether it

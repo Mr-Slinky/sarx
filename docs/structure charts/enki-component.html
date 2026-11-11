@@ -162,15 +162,17 @@ footer { border-top: 1px solid var(--rule); padding-top: 16px; color: var(--mute
   <p class="lede">This page shows how the functions in <code>component.rs</code> call one another. The file defines
   two types. <code>ComponentVec</code> is one column in an archetype table. <code>ComponentInfo</code> describes the
   component type in that column. The page shows the calls with structure charts, a kind of diagram from Yourdon and
-  Constantine&rsquo;s book <em>Structured Design</em>. A structure chart shows which modules call which. It also shows
-  the values that pass between them on each call. The file has eighteen functions and methods, and one closure.
-  Thirteen charts cover sixteen of them. The three newest methods, <code>ComponentVec::swap_remove</code>,
-  <code>ComponentInfo::type_id</code> and <code>ComponentInfo::bit</code>, have no chart yet.</p>
+  Constantine&rsquo;s book <em>Structured Design</em>. A structure chart shows which modules call which, and the
+  values that pass between them on each call. The file has twenty-three functions and methods, and one closure.
+  Thirteen charts cover sixteen of them, the closure included. The eight without a chart are
+  <code>ComponentVec::len</code>, <code>ComponentVec::swap_remove</code>, <code>ComponentVec::swap_remove_typed</code>,
+  <code>ComponentVec::reserve</code>, <code>ComponentVec::increase_capacity</code>,
+  <code>ComponentVec::assert_non_zero</code>, <code>ComponentInfo::type_id</code> and <code>ComponentInfo::bit</code>.</p>
   <p class="lede"><strong>The charts describe <code>component.rs</code> at commit 60a3306, and the code has moved on
   since.</strong> <code>ComponentInfo::of</code> now takes a <code>ComponentMask</code> in place of a
-  <code>u64</code>. <code>increase_capacity</code> now calls <code>alloc</code> and <code>realloc</code>, and
-  <code>grow</code> calls <code>increase_capacity</code>. Four methods added since then have no chart:
-  <code>reserve</code>, <code>increase_capacity</code>, <code>data</code> and <code>len</code>.</p>
+  <code>u64</code>. <code>grow</code> now calls <code>increase_capacity</code>, which calls <code>alloc</code> and
+  <code>realloc</code>, and the closure that the charts place in <code>grow</code> now lives in
+  <code>increase_capacity</code>.</p>
   <div class="meta"><span>Drawn from the working tree at commit 60a3306</span><span>Charts last modified 2026-11-01</span><span>16 modules &middot; 13 charts</span></div>
 </header>
 

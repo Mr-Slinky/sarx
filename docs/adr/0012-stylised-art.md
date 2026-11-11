@@ -32,14 +32,14 @@ those over many years. A stylised game stands beside Astro Bot, Crash Bandicoot 
 Those games win players over with timing, feedback and playful mechanics, rather than with
 realistic detail.
 
-Sarx meets that comparison directly. During a battle, the player can possess a character and
-control it in third person, as the Planned Features in the README set out.
+That comparison applies to Sarx directly, because during a battle the player can possess a
+character and control it in third person, as the Planned Features in the README set out.
 
 What does Sarx look like, and how does it build its characters?
 
 ## Decision Drivers
 
-- The mechanics decide whether Sarx is a good game. The look serves them.
+- The mechanics decide whether Sarx is a good game, and the look is chosen to suit them.
 - The look decides which games players compare Sarx to. A single developer must be able to match
   the best of those games.
 - Sarx runs within the GPU limits that a mid-level laptop meets, as ADR 0003 sets out.

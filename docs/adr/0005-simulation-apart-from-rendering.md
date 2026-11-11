@@ -15,13 +15,13 @@ of the ECS update their components. The physics engine also moves objects and re
 
 The second is the renderer. It draws the world as it stands into the window, one frame at a time.
 
-A screen shows a new frame at its refresh rate. A laptop screen commonly refreshes at 60 Hz. A gaming
-monitor on a desktop refreshes at 144 Hz or more. A slower GPU also takes longer to draw each frame.
-On any machine, the time from one frame to the next varies.
+A screen shows a new frame at its refresh rate. A laptop screen commonly refreshes at 60 Hz, and a
+gaming monitor on a desktop at 144 Hz or more. A slower GPU also takes longer to draw each frame. On
+any machine, the time from one frame to the next varies.
 
 The game loop is the code that ties the two kinds of work together. It decides how many simulation
-steps run for each frame. It also decides how much game time each step covers. Those two choices
-decide whether the same game plays out the same way on every device.
+steps run for each frame, and how much game time each step covers. Those two choices decide whether
+the same game plays out the same way on every device.
 
 How does the simulation advance in time, relative to the frames that the renderer draws?
 
@@ -44,9 +44,10 @@ How does the simulation advance in time, relative to the frames that the rendere
 Chosen option: "Fixed steps, apart from rendering", because it is the only option of the three in
 which every device runs the same steps at the same rate.
 
-The simulation advances in fixed steps. Each step covers the same length of game time. The steps run
-at the same rate on every device. The renderer draws the latest state as often as the screen allows.
-As a result, a laptop with a 60 Hz screen plays the same game as a desktop with a 144 Hz monitor.
+The simulation advances in fixed steps, each covering the same length of game time, and the steps
+run at the same rate on every device. The renderer, meanwhile, draws the latest state as often as
+the screen allows. As a result, a laptop with a 60 Hz screen plays the same game as a desktop with a
+144 Hz monitor.
 
 The loop keeps a running total of the real time that has passed. It adds at most 250 ms to that
 total in any one frame, and discards any time beyond that. At the proposed rate of 60 steps per

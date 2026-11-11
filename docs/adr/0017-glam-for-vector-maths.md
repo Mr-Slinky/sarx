@@ -30,8 +30,8 @@ Where does Sarx get its vector and matrix maths?
 
 ## Decision Drivers
 
-- The README sets three questions for every library. They ask whether it brings its own
-  architecture, what it hides, and how much work it does.
+- The README asks of every library whether it brings its own architecture, what it hides, and how
+  much work it does.
 - Under the second goal in the README, the developer means to understand the graphics pipeline. The
   lesson of the camera lies in which matrices it builds, and in the order that the shader applies
   them.

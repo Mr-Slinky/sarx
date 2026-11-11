@@ -8,9 +8,9 @@ decision-makers: Kheagen Haskins
 
 ## Context and Problem Statement
 
-The god's hand is the centre of Sarx. The player acts on the world through it. The hand picks up
-villagers and objects, carries them and throws them. It also strikes things. It can flick a villager
-far across the land, or slap the creature.
+The god's hand is the centre of Sarx, and the player acts on the world through it. The hand picks up
+villagers and objects, carries them and throws them. It also strikes things, flicking a villager far
+across the land or slapping the creature.
 
 The hand moves between poses, such as open, fist and pointing. ADR 0014 stores each pose as a fixed
 target, which the bones of the hand turn towards. A pose keeps the same shape whatever the hand
@@ -20,9 +20,9 @@ Objects in the world vary widely in shape and size. A villager, a rock, a tree a
 meet the same hand.
 
 Every change that the hand makes to the world arrives as a request. One gate checks each request
-against the rules of the level, as ADR 0007 sets out. ADR 0010 moves objects under forces and
-resolves their collisions. A thrown object falls under gravity, and comes to rest against the
-ground.
+against the rules of the level, as ADR 0007 sets out. The physics engine of ADR 0010 moves objects
+under forces and resolves their collisions. A thrown object falls under gravity, and comes to rest
+against the ground.
 
 How does the hand act on the objects in the world?
 
@@ -101,7 +101,7 @@ Five points remain open. The developer settles each one once the hand acts on th
 ### Confirmation
 
 Nothing in the code embodies this decision yet. Once the hand acts on the world, a reader confirms
-it with three checks:
+it with four checks:
 
 - A held object moves towards a point beneath the hand. No code attaches it to a bone of the hand.
 - Outside a strike, a contact raises the hand and leaves the object where it stands.

@@ -18,8 +18,8 @@ The hand step brings two more kinds of data. A vertex becomes a `Vertex` struct,
 a normal. The camera also sends its matrices to the shader in a uniform buffer, which is a small GPU
 buffer that every vertex can read.
 
-Copying field by field grows with every new field. A direct cast is the other way. It treats the
-memory of a struct as bytes, without copying it.
+Copying field by field needs more code with every new field. A direct cast avoids that code, by
+treating the memory of a struct as bytes without copying it.
 
 A direct cast is safe only for some types. Where a struct has padding, the compiler leaves gaps
 between its fields, and those gaps hold uninitialised memory. Reading uninitialised memory as `u8`
@@ -29,8 +29,8 @@ How does Sarx turn vertices and uniforms into bytes?
 
 ## Decision Drivers
 
-- The README sets three questions for every library. They ask whether it brings its own
-  architecture, what it hides, and how much work it does.
+- The README asks of every library whether it brings its own architecture, what it hides, and how
+  much work it does.
 - A cast of a type with padding is undefined behaviour, and undefined behaviour can pass every test.
   The check for padding must therefore happen at compile time.
 - Under ADR 0013, the tests for `unsafe` code also run under Miri. Each `unsafe` cast that Sarx

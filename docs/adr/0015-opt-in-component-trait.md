@@ -99,11 +99,10 @@ The `ComponentSet` trait also spells out `Send + Sync + 'static`, as supertraits
 component set is a tuple of components, and every component already meets the bound. The supertraits
 state the same bound for the tuple as a whole.
 
-A derive macro would generate the `impl` line for each type. It remains open as a later addition.
-Rust requires such a macro to be defined in a crate of its own, called a proc-macro crate. A
-proc-macro crate generates code at compile time. Almost every derive macro is written with two
-libraries, `syn` and `quote`. The developer must discuss those libraries before Sarx takes on the
-macro.
+A derive macro would generate the `impl` line for each type, and remains open as a later addition.
+Rust requires such a macro to be defined in a crate of its own, called a proc-macro crate, which
+generates code at compile time. Almost every derive macro is written with two libraries, `syn` and
+`quote`. The developer must discuss those libraries before Sarx takes on the macro.
 
 ### Consequences
 

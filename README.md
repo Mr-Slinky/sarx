@@ -16,8 +16,8 @@ Several games shape the design. Black & White 2 supplies the creature, the god's
 choice between good and evil. Universim and Spore supply a civilisation that advances on its own.
 Astro Bot supplies the look, along with the comic tone of combat.
 
-The project also has a second purpose. The author builds every layer below the gameplay by hand, to
-learn how each one works. Those layers run from the renderer to the entity system.
+The project also has a second purpose. The author builds every layer below the gameplay by hand,
+from the renderer to the entity system, to learn how each one works.
 
 ## Why Sarx
 
@@ -26,8 +26,8 @@ round, the game felt as though it had been made for an adult all along. Its hand
 gave it a character of its own. In the author's view, no god game since has matched that character,
 and none has rebuilt the creature.
 
-Sarx sets out to be the successor that Black & White 2 never had. Three parts of the game carry
-that aim, and the author means each one to stand out from every game before it:
+Sarx sets out to be the successor that Black & White 2 never had. Three parts of the game serve
+that aim most directly, and the author means each one to stand out from every game before it:
 
 - the god's hand, which is the centre of the game and the first part that the author builds
 - the creature
@@ -45,8 +45,8 @@ The features below describe the game that the author is working towards. Each on
 
 - The player acts on the world through the **god's hand**, the centre of the game. The hand lifts
   villagers and objects by telekinesis, as in Destroy All Humans, and moves between poses as it does
-  so. It hovers above whatever lies beneath it, and can also strike. It can flick a villager far across the land, or slap the
-  creature.
+  so. It hovers above whatever lies beneath it, and can also strike. It can flick a villager far
+  across the land, or slap the creature.
 - The player trains a **creature**, teaching it by rewarding and punishing it, as in Black & White 2.
   Over time, the creature's behaviour leans towards good or evil. The author means its AI to go well
   beyond what Black & White 2 offered.
@@ -54,26 +54,24 @@ The features below describe the game that the author is working towards. Each on
   The creature is built from rigid parts, and never has fur or hair.
 - **Combat** is comic and playful, as in Astro Bot and Crash Bandicoot. A blow can knock the head
   off a villager or tear away a limb, and the part flies off on its own.
-- The player's **civilisation** improves itself. Villages advance on their own, as they do in
-  Universim and Spore. Each village moves through new technologies and stages without the player
-  directing every step.
+- The player's **civilisation** advances on its own, as in Universim and Spore. Each village moves
+  through new technologies and stages without the player directing every step.
 - **Rival factions** compete with the player for the same world. A faction can become an ally as
   well as an enemy.
-- A level ends in **victory** for a player once their faction is the last one standing. There are
-  two ways to reach that point. The player can ally with every other faction, or conquer them all.
+- A level ends in **victory** for a player once their faction is the last one standing, either by
+  allying with every other faction or by conquering them all.
 
   The factions are meant to respond to the path that the player takes. They might ally with one
   another against a conqueror. They might also turn hostile over whom the player has allied with.
   Either way, each path grows harder the further the player takes it.
-- A player starts a **level** in one of two ways. They can configure a level, choosing
-  settings such as the number of factions and the kind of landscape. Alternatively, they can pick a
-  pre-made level.
+- A player starts a **level** either by configuring one, with settings such as the number of
+  factions and the kind of landscape, or by picking a pre-made level.
 - During a battle, the player can take direct control of a single character, through
-  **possession**. Rise &
-  Fall: Civilizations at War works the same way, letting the player command a hero such as Alexander
-  the Great. The creature is the first character that the player can possess, and very likely the
-  only one. Possessing villagers or soldiers remains an option for later.
-- The player casts **miracles and spells**. Their magic draws on both Universim and Black & White 2.
+  **possession**. Rise & Fall: Civilizations at War works the same way, letting the player command a
+  hero such as Alexander the Great. The creature is the first character that the player can
+  possess, and very likely the only one. Possessing villagers or soldiers remains an option for
+  later.
+- The player casts **miracles and spells**. The magic draws on both Universim and Black & White 2.
 - The world offers **cosy play**, gentle activities such as farming and fishing. A player can spend a
   whole session on these, tending the world.
 - A player can switch on **cosy mode**. In cosy mode, no faction attacks the player, and the player
@@ -125,19 +123,20 @@ The format of an ADR is set out further down, under Conventions.
 
 ## Workspace
 
-The code is split into several crates. Together, the crates form one Cargo workspace.
+The code is split into several crates, which together form one Cargo workspace.
 
 Each crate has its own folder under `crates/`. The root `Cargo.toml` lists `crates/*` as the
 workspace's members, a pattern that matches every folder there. As a result, a crate that a
 developer creates under `crates/` with `cargo new` joins the workspace with no further setup.
 
-The workspace contains four crates today:
+The workspace contains five crates:
 
 | Crate       | Purpose                                                         |
 |-------------|-----------------------------------------------------------------|
 | `enki`      | The entity component system                                     |
 | `zurvan`    | The game simulation, which does not depend on any graphics code |
 | `amaterasu` | The wgpu renderer                                               |
+| `hermes`    | The glTF reader, which reads meshes from binary glTF files      |
 | `atum`      | The program that opens the window and runs the game             |
 
 The author adds crates as the project needs them.
@@ -159,14 +158,13 @@ any pantheon.
 
 ## Building
 
-Rustup sets up the Rust toolchain by itself. The `rust-toolchain.toml` file at the root selects the
-stable toolchain. It also asks for two components: rustfmt, which formats code, and clippy, which
-lints it. Rustup should install all three the first time that Cargo runs inside the repository.
+The `rust-toolchain.toml` file at the root selects the stable toolchain, along with two components:
+rustfmt, which formats code, and clippy, which lints it. Rustup installs the toolchain and both
+components the first time that Cargo runs inside the repository.
 
-A Windows machine also needs a set of tools from Microsoft. On a standard Windows install, the
-default host for rustup is MSVC. Rustup therefore picks the MSVC toolchain, which links with
-Microsoft's tools. Before its first build, a Windows machine needs the Visual Studio Build Tools,
-with the "Desktop development with C++" workload.
+On a standard Windows install, rustup picks the MSVC toolchain, which links programs with
+Microsoft's tools. Before its first build, a Windows machine therefore needs the Visual Studio Build
+Tools, with the "Desktop development with C++" workload.
 
 A developer runs every command below from the repository root.
 
@@ -189,21 +187,19 @@ Everyone who works on the project follows the conventions below.
 
 ### Libraries
 
-The author takes on each library as a deliberate choice.
-
-Before adding a library, the author discusses it and weighs its pros and cons. An ADR then records
-the outcome. The next section sets out how an ADR is written.
+Before adding a library, the author discusses it and weighs its pros and cons, and an ADR then
+records the outcome. The next section sets out how an ADR is written.
 
 Game engines, such as Bevy, stay out. An engine does the very work that the project exists to teach.
 
 For every other library, three questions decide whether it comes in:
 
-- **Does it bring its own architecture?** Some libraries are a set of separate functions. A library
-  of that kind leaves the design of the game as it is. glam, a library of vector and matrix maths, is
-  one example. The way that glam computes a dot product has no bearing on the game.
+- **Does it bring its own architecture?** Some libraries are a set of separate functions, which
+  leave the design of the game as it is. glam, a library of vector and matrix maths, is one example,
+  since the way that it computes a dot product has no bearing on the game.
 
-  A library that brings its own architecture is different. It commits Sarx to the design that its
-  own authors chose, as an ECS library would.
+  A library that brings its own architecture, as an ECS library would, commits Sarx to the design
+  that its own authors chose.
 - **What does it hide?** Every library hides some part of the work. Where that part is one that the
   author wants to learn and control, the library stays out. An ECS library, for example, hides the
   ECS.
@@ -216,8 +212,8 @@ For every other library, three questions decide whether it comes in:
 
 ### Decision Records
 
-Every ADR uses the same format, [MADR](https://adr.github.io/madr/) version 4. The points below set out how that format
-applies here.
+Every ADR uses the same format, [MADR](https://adr.github.io/madr/) version 4. The points below
+set out how that format applies here.
 
 - Each ADR is a file of its own in `docs/adr/`. The files are numbered in order, such as
   `0001-window-library.md`.
@@ -283,13 +279,14 @@ is the stable changelog. Each commit on `main` describes one finished piece of w
 or the decision records.
 
 A commit on `main` contains the finished files from `dev`, without the history behind them. Each
-commit on `main` therefore reads as an independent piece of work, rather than as a merge from `dev`.
+commit on `main` therefore appears in its history as an independent piece of work, rather than as a
+merge from `dev`.
 
 #### Bringing main up to date
 
 GitHub accepts a change to `main` only through a pull request. The pull request also has to pass two
-checks, `cargo test` and `cargo miri test`. The workflow in `.github/workflows/enki.yml` runs both
-checks on every pull request into `main`.
+checks on `enki`, `cargo test` and `cargo miri test`. The workflow in `.github/workflows/enki.yml`
+runs both checks on every pull request into `main`, and on every push to it.
 
 A developer brings `main` up to date in five steps, starting from a clean working tree.
 
@@ -325,16 +322,16 @@ A developer brings `main` up to date in five steps, starting from a clean workin
    | Brings in one piece of work       | **Squash and merge** | One commit, which shows Verified       |
    | Brings in several pieces of work  | **Rebase and merge** | One commit per piece of work, unsigned |
 
-   An update with several pieces of work needs one commit for each piece on `main`. A squash merge
-   would combine them into one, meaning only a rebase merge keeps them apart.
-
    A squash merge combines the commits on the branch into one commit. GitHub signs that commit with
    its own key, and the commit therefore shows a Verified badge. The developer gives the squash commit
    a message in the Conventional Commits format.
 
    A rebase merge writes a new copy of each commit onto `main`, keeping the commits apart. GitHub
-   does not sign those copies, meaning the commits on `main` show no Verified badge, although the
-   commits on the branch were signed.
+   does not sign those copies. As a result, the commits on `main` do not show a Verified badge, even
+   though the commits on the branch were signed.
+
+   An update with several pieces of work therefore needs a rebase merge, since a squash merge would
+   combine them into one commit.
 5. The developer returns to `dev`, deletes the branch, and moves the local `main` to match GitHub:
 
    ```bash
@@ -387,8 +384,8 @@ The hand step builds four layers at once. Each one is structure that later steps
    the hand on that plane, the game follows a ray. A ray is a line from the camera, through the
    cursor, into the world. The hand moves towards the point where the ray meets the plane.
 
-The hand appears in its rest pose. Bending its fingers needs skinning, which the hand item under
-Later Work covers.
+The hand appears in its rest pose. Bending its fingers needs skinning, in which each vertex moves
+with the bones of the skeleton. The hand item under Later Work covers it.
 
 The camera and the ray take their maths from glam, under ADR 0017. `Vertex` and the camera uniforms
 turn into bytes through bytemuck, under ADR 0018.

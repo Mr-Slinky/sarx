@@ -3,7 +3,8 @@
 //!
 //! A caller writes a query as a type. `&T` reads the `T` of each entity, and `&mut T` changes it. A
 //! tuple such as `(&mut Position, &Velocity, &Health)` asks for every type in it at once, and can
-//! contain up to thirty-two queries.
+//! contain up to twelve queries. A tuple can also contain another tuple, such as
+//! `((&Position, &Velocity), &Health)`, which lets one query ask for more than twelve types.
 //!
 //! The caller passes the query type to `World::query_mut`, which returns one item for each entity
 //! that has every type in the query. A query that only reads implements [`ReadOnlyQuery`]. The
@@ -82,7 +83,7 @@ pub enum Permission {
 /// Describes the component types that a query asks for, and how the world hands them out.
 ///
 /// A query type is `&T` for a component that the caller reads, or `&mut T` for one that it changes.
-/// A tuple of one to thirty-two query types, such as `(A, B, C)`, is also a query, and asks for
+/// A tuple of one to twelve query types, such as `(A, B, C)`, is also a query, and asks for
 /// every type that its fields ask for.
 ///
 /// The world runs a query in three steps. It first calls [`Query::add_permissions`] to collect the
@@ -495,7 +496,7 @@ unsafe impl<T: Component> ReadOnlyQuery for &T {}
 ///
 /// The call `impl_query!(A, B, C)` implements [`Query`] for `(A, B, C)`, where each of `A`, `B`
 /// and `C` is a query, such as `&Position` or `&mut Velocity`. The file calls the macro once for
-/// each size of tuple, from one field to thirty-two. The pattern, and the reuse of each type
+/// each size of tuple, from one field to twelve. The pattern, and the reuse of each type
 /// parameter name as a variable name, work as in `impl_component_set!` in `set.rs`, whose
 /// documentation explains both.
 ///
@@ -570,7 +571,7 @@ macro_rules! impl_query {
     };
 }
 
-// Implements `Query` for every tuple of one to thirty-two queries
+// Implements `Query` for every tuple of one to twelve queries
 impl_query!(A);
 impl_query!(A, B);
 impl_query!(A, B, C);
@@ -583,52 +584,6 @@ impl_query!(A, B, C, D, E, F, G, H, I);
 impl_query!(A, B, C, D, E, F, G, H, I, J);
 impl_query!(A, B, C, D, E, F, G, H, I, J, K);
 impl_query!(A, B, C, D, E, F, G, H, I, J, K, L);
-impl_query!(A, B, C, D, E, F, G, H, I, J, K, L, M);
-impl_query!(A, B, C, D, E, F, G, H, I, J, K, L, M, N);
-impl_query!(A, B, C, D, E, F, G, H, I, J, K, L, M, N, O);
-impl_query!(A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P);
-impl_query!(A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q);
-impl_query!(A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R);
-impl_query!(A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S);
-impl_query!(A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T);
-impl_query!(
-    A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T, U
-);
-impl_query!(
-    A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T, U, V
-);
-impl_query!(
-    A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T, U, V, W
-);
-impl_query!(
-    A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T, U, V, W, X
-);
-impl_query!(
-    A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T, U, V, W, X, Y
-);
-impl_query!(
-    A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T, U, V, W, X, Y, Z
-);
-impl_query!(
-    A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T, U, V, W, X, Y, Z, AA
-);
-impl_query!(
-    A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T, U, V, W, X, Y, Z, AA, AB
-);
-impl_query!(
-    A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T, U, V, W, X, Y, Z, AA, AB, AC
-);
-impl_query!(
-    A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T, U, V, W, X, Y, Z, AA, AB, AC, AD
-);
-impl_query!(
-    A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T, U, V, W, X, Y, Z, AA, AB, AC, AD,
-    AE
-);
-impl_query!(
-    A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T, U, V, W, X, Y, Z, AA, AB, AC, AD,
-    AE, AF
-);
 
 /// Checks that the query type `Q` changes each component type only where it asks for that type
 /// once, then returns the permissions that it checked.
@@ -707,28 +662,8 @@ mod tests {
     }
 
     /// Defines the query type with the most fields that `impl_query!` implements `Query` for. It
-    /// reads `Position` in the first thirty-one fields, and changes `Velocity` in the last.
-    type Query32 = (
-        &'static Position,
-        &'static Position,
-        &'static Position,
-        &'static Position,
-        &'static Position,
-        &'static Position,
-        &'static Position,
-        &'static Position,
-        &'static Position,
-        &'static Position,
-        &'static Position,
-        &'static Position,
-        &'static Position,
-        &'static Position,
-        &'static Position,
-        &'static Position,
-        &'static Position,
-        &'static Position,
-        &'static Position,
-        &'static Position,
+    /// reads `Position` in the first eleven fields, and changes `Velocity` in the last.
+    type Query12 = (
         &'static Position,
         &'static Position,
         &'static Position,
@@ -881,15 +816,15 @@ mod tests {
         }
     }
 
-    /// Checks the largest tuple, of thirty-two fields, with one entry per field in field order
+    /// Checks the largest tuple, of twelve fields, with one entry per field in field order
     #[test]
-    fn add_permissions_with_32_fields_pushes_32_entries_in_order() {
+    fn add_permissions_with_12_fields_pushes_12_entries_in_order() {
         let position = TypeId::of::<Position>();
         let velocity = TypeId::of::<Velocity>();
 
-        let found = collect_permissions::<Query32>();
+        let found = collect_permissions::<Query12>();
 
-        let mut expected = vec![(position, Permission::Read); 31];
+        let mut expected = vec![(position, Permission::Read); 11];
         expected.push((velocity, Permission::Write));
         assert_eq!(found, expected);
     }

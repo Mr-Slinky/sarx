@@ -1239,7 +1239,7 @@ mod tests {
     impl Component for Marker {}
 
     /// Stands for a different component type at each value of `N`, which lets one test build a
-    /// component set or a query of thirty-two types.
+    /// component set of thirty-two types, or a query of twelve.
     #[derive(Debug, PartialEq)]
     struct Numbered<const N: usize>(usize);
 
@@ -1282,8 +1282,8 @@ mod tests {
     );
 
     /// Defines the query type with the most fields that `Query` is implemented for. It reads
-    /// `Numbered<0>` to `Numbered<30>`, and changes `Numbered<31>`.
-    type Query32 = (
+    /// `Numbered<0>` to `Numbered<10>`, and changes `Numbered<11>`.
+    type Query12 = (
         &'static Numbered<0>,
         &'static Numbered<1>,
         &'static Numbered<2>,
@@ -1295,27 +1295,7 @@ mod tests {
         &'static Numbered<8>,
         &'static Numbered<9>,
         &'static Numbered<10>,
-        &'static Numbered<11>,
-        &'static Numbered<12>,
-        &'static Numbered<13>,
-        &'static Numbered<14>,
-        &'static Numbered<15>,
-        &'static Numbered<16>,
-        &'static Numbered<17>,
-        &'static Numbered<18>,
-        &'static Numbered<19>,
-        &'static Numbered<20>,
-        &'static Numbered<21>,
-        &'static Numbered<22>,
-        &'static Numbered<23>,
-        &'static Numbered<24>,
-        &'static Numbered<25>,
-        &'static Numbered<26>,
-        &'static Numbered<27>,
-        &'static Numbered<28>,
-        &'static Numbered<29>,
-        &'static Numbered<30>,
-        &'static mut Numbered<31>,
+        &'static mut Numbered<11>,
     );
 
     /// Adds 1 to a shared counter when dropped, which shows how many times clean-up code ran.
@@ -3479,10 +3459,9 @@ mod tests {
         );
     }
 
-    /// Checks the largest query, of thirty-two fields, which reads thirty-one types and changes the
-    /// last
+    /// Checks the largest query, of twelve fields, which reads eleven types and changes the last
     #[test]
-    fn query_mut_with_32_fields_returns_every_field() {
+    fn query_mut_with_12_fields_returns_every_field() {
         let mut world = World::new();
         let entity = world.spawn_empty();
         world
@@ -3490,17 +3469,17 @@ mod tests {
             .unwrap_or_else(|_| panic!("the entity should be alive"));
 
         let found: Vec<(usize, usize, usize)> = world
-            .query_mut::<Query32>()
+            .query_mut::<Query12>()
             .map(|item| {
-                item.31.0 += 100;
-                (item.0.0, item.30.0, item.31.0)
+                item.11.0 += 100;
+                (item.0.0, item.10.0, item.11.0)
             })
             .collect();
 
-        assert_eq!(found, [(0, 30, 131)], "first, next to last and last fields");
+        assert_eq!(found, [(0, 10, 111)], "first, next to last and last fields");
         assert_eq!(
-            world.get::<Numbered<31>>(entity),
-            Some(&Numbered(131)),
+            world.get::<Numbered<11>>(entity),
+            Some(&Numbered(111)),
             "changed component"
         );
     }

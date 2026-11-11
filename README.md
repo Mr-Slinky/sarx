@@ -121,6 +121,7 @@ The format of an ADR is set out further down, under Conventions.
 | [0020](docs/adr/0020-change-detection.md)                            | Change detection                | `enki` does not track changes, and a system reports sparse changes as events                        |
 | [0021](docs/adr/0021-telekinetic-hand.md)                            | Telekinetic hand                | The hand lifts by telekinesis, hovers above every object, and pushes objects only when it strikes   |
 | [0022](docs/adr/0022-rigid-creature-that-places-its-feet.md)         | A creature that places its feet | The hairless creature is built from rigid parts, and code places each foot along a planned route    |
+| [0023](docs/adr/0023-systems-declare-their-access.md)                | Systems declare their access    | A scheduler runs systems side by side where the reads and writes that they declare do not conflict  |
 
 ## Workspace
 

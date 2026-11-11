@@ -129,17 +129,6 @@ Every other change waits for an explicit instruction from the developer. That co
 - adding dependencies
 - changing the logic of code that the developer wrote
 
-### Lifetimes and Smart Pointers
-
-Lifetimes and smart pointers are the developer's weakest areas of Rust. The agent therefore explains
-each one wherever it appears in code that the agent writes, reviews or discusses. The explanation
-comes at that point, in plain words. It works from the code in front of the developer.
-
-The rule covers two kinds of feature:
-
-- lifetime annotations, such as the `'a` in `fn first<'a>(items: &'a [Item]) -> &'a Item`
-- smart pointers, such as `Box<T>`, `Arc<T>` and `Cow<'a, T>`, along with the others of their kind
-
 ### Code Review
 
 The review exists to improve the developer's Rust and graphics code.

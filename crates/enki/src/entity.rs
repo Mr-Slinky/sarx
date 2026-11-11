@@ -188,7 +188,11 @@ impl Entities {
     /// The example on [`Entities`] frees an entity at index 0, which raises its version to 1.
     pub(crate) fn free(&mut self, entity: Entity) {
         let slot = &mut self.slots[entity.index()];
-        debug_assert_eq!(slot.version, entity.version(), "only a living entity can be freed");
+        debug_assert_eq!(
+            slot.version,
+            entity.version(),
+            "only a living entity can be freed"
+        );
         slot.version += 1;
         // Frees the slot for `alloc` to reuse, unless its version has reached `u32::MAX`
         if slot.version != u32::MAX {

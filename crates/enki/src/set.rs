@@ -1,10 +1,10 @@
-//! Defines [`Bundle`], the trait that every tuple of one to thirty-two components implements.
+//! Defines [`ComponentSet`], the trait that every tuple of one to thirty-two components implements.
 //!
 //! # Usage
 //!
 //! A caller gives an entity several components in one call by passing them to
-//! `World::add_components` as a tuple. That tuple is a bundle. Each field is one component, and the
-//! fields can come in any order.
+//! `World::add_components` as a tuple. That tuple is a component set. Each field is one component,
+//! and the fields can come in any order.
 //!
 //! The example below spawns an entity, then gives it three components in one call.
 //!
@@ -18,11 +18,11 @@
 //!     .expect("the player should be alive");
 //! ```
 //!
-//! A bundle of one component takes a comma after the component, as in `(Health(100),)`. Rust parses
-//! `(Health(100))` as a `Health` in brackets, rather than as a tuple.
+//! A component set of one component takes a comma after the component, as in `(Health(100),)`. Rust
+//! parses `(Health(100))` as a `Health` in brackets, rather than as a tuple.
 //!
-//! A tuple of thirty-three or more components does not implement [`Bundle`]. The compiler rejects
-//! such a tuple as the argument to `add_components`.
+//! A tuple of thirty-three or more components does not implement [`ComponentSet`]. The compiler
+//! rejects such a tuple as the argument to `add_components`.
 
 use crate::archetype::Archetype;
 use crate::component::{Component, ComponentInfo};
@@ -35,18 +35,18 @@ use std::mem;
 //                                          Modules                                           \\
 // ========================================================================================== \\
 
-/// Declares the trait that seals [`Bundle`].
+/// Declares the trait that seals [`ComponentSet`].
 ///
-/// The example on [`Bundle`] passes a tuple of a `Position` and a `Health`, one of the tuple types
-/// that the crate implements `Sealed` for.
+/// The example on [`ComponentSet`] passes a tuple of a `Position` and a `Health`, one of the tuple
+/// types that the crate implements `Sealed` for.
 mod sealed {
-    /// Marks each type that the crate implements [`Bundle`](super::Bundle) for.
+    /// Marks each type that the crate implements [`ComponentSet`](super::ComponentSet) for.
     ///
     /// The trait is `pub` inside a private module. Code outside the crate therefore cannot write a
     /// path to it, and cannot implement it.
     ///
-    /// The example on [`Bundle`](super::Bundle) passes a tuple of a `Position` and a `Health`, one
-    /// of the tuple types that implement this trait.
+    /// The example on [`ComponentSet`](super::ComponentSet) passes a tuple of a `Position` and a
+    /// `Health`, one of the tuple types that implement this trait.
     pub trait Sealed {}
 }
 
@@ -56,9 +56,9 @@ mod sealed {
 
 /// Represents a group of components, written as a tuple with one field per component.
 ///
-/// Each field of a bundle must implement [`Component`].
+/// Each field of a component set must implement [`Component`].
 ///
-/// The module documentation in `bundle.rs` shows how a caller passes a bundle to `World`.
+/// The module documentation in `set.rs` shows how a caller passes a component set to `World`.
 ///
 /// # Visibility
 ///
@@ -66,22 +66,22 @@ mod sealed {
 /// attribute `#[doc(hidden)]` hides the two methods from the public documentation, since only code
 /// inside the crate needs them.
 ///
-/// Code outside the crate cannot implement the trait. `Bundle` requires the trait `Sealed`, which a
-/// private module in `bundle.rs` declares. Code outside the crate cannot write a path to `Sealed`,
-/// and therefore cannot implement it. As a result, the tuple implementations in the crate are the
-/// only ones.
+/// Code outside the crate cannot implement the trait. `ComponentSet` requires the trait `Sealed`,
+/// which a private module in `set.rs` declares. Code outside the crate cannot write a path to
+/// `Sealed`, and therefore cannot implement it. As a result, the tuple implementations in the crate
+/// are the only ones.
 ///
-/// A method on `World` that adds a bundle must rely on that guarantee. The method must build a
-/// table from the `ComponentInfo` values that [`Bundle::infos`] returns. It must then rely on
-/// [`Bundle::push_into`] to push one component onto each new column.
+/// A method on `World` that adds a component set must rely on that guarantee. The method must build
+/// a table from the `ComponentInfo` values that [`ComponentSet::infos`] returns. It must then rely
+/// on [`ComponentSet::push_into`] to push one component onto each new column.
 ///
 /// # Examples
 ///
 /// The example creates a tuple of a `Position` and a `Health`, and passes it to a function that
-/// accepts any bundle.
+/// accepts any component set.
 ///
 /// ```
-/// use enki::Bundle;
+/// use enki::ComponentSet;
 /// # use enki::Component;
 ///
 /// struct Position(f32, f32);
@@ -89,18 +89,19 @@ mod sealed {
 /// # impl Component for Position {}
 /// # impl Component for Health {}
 ///
-/// // Accepts any bundle
-/// fn accept<B: Bundle>(_bundle: B) {}
+/// // Accepts any component set
+/// fn accept<S: ComponentSet>(_set: S) {}
 ///
-/// // Passes a tuple of a `Position` and a `Health`. The tuple implements `Bundle`
+/// // Passes a tuple of a `Position` and a `Health`. The tuple implements `ComponentSet`
 /// accept((Position(0.0, 0.0), Health(100)));
 /// ```
-pub trait Bundle: sealed::Sealed + Send + Sync + 'static {
-    /// Returns one [`ComponentInfo`] for each type in the bundle, in the order of the tuple fields.
+pub trait ComponentSet: sealed::Sealed + Send + Sync + 'static {
+    /// Returns one [`ComponentInfo`] for each type in the component set, in the order of the tuple
+    /// fields.
     ///
     /// The method has no `self` parameter. A caller therefore calls it on the type, as in
-    /// `B::infos(registry)`. The result depends on the types in the bundle, and on the bits that
-    /// `registry` assigns to them.
+    /// `S::infos(registry)`. The result depends on the types in the component set, and on the bits
+    /// that `registry` assigns to them.
     ///
     /// Only `enki` can create a `ComponentRegistry`. As a result, only `enki` can call the method.
     ///
@@ -116,43 +117,46 @@ pub trait Bundle: sealed::Sealed + Send + Sync + 'static {
     ///
     /// # Examples
     ///
-    /// `add_components` on `World` calls it as `B::infos(&mut self.registry)`, where `B` is the
-    /// type of the bundle. The call borrows the registry alone, meaning the tables of the world
-    /// stay free for the rest of the method.
+    /// `add_components` on `World` calls it as `S::infos(&mut self.registry)`, where `S` is the
+    /// type of the component set. The call borrows the registry alone, meaning the tables of the
+    /// world stay free for the rest of the method.
     ///
     /// The test `infos_with_new_types_in_any_order_returns_infos_in_field_order` calls it for a
-    /// tuple type written out in full, as in `<(Position, Health) as Bundle>::infos(&mut registry)`.
+    /// tuple type written out in full, as in `<(Position, Health) as ComponentSet>::infos(&mut
+    /// registry)`.
     #[doc(hidden)]
     fn infos(registry: &mut ComponentRegistry) -> Vec<ComponentInfo>;
 
-    /// Represents the components that [`Bundle::push_into`] replaces, with one `Option` for each
-    /// field of the bundle.
+    /// Represents the components that [`ComponentSet::push_into`] replaces, with one `Option` for
+    /// each field of the component set.
     ///
-    /// For the bundle `(Position, Health)`, the type is `(Option<Position>, Option<Health>)`. A
-    /// field is `Some` where the new component replaced one at the row, and `None` where it was
-    /// pushed. The test `push_into_with_some_types_present_pushes_new_and_replaces_existing`
-    /// receives a value of this type.
+    /// For the component set `(Position, Health)`, the type is `(Option<Position>,
+    /// Option<Health>)`. A field is `Some` where the new component replaced one at the row, and
+    /// `None` where it was pushed. The test
+    /// `push_into_with_some_types_present_pushes_new_and_replaces_existing` receives a value of
+    /// this type.
     #[doc(hidden)]
     type Replaced;
 
-    /// Stores each component in the bundle in `table`, at row `row`, and returns the components
-    /// that it replaces.
+    /// Stores each component in the component set in `table`, at row `row`, and returns the
+    /// components that it replaces.
     ///
     /// Each component goes into the column in `table` that stores its type. Where `existing` has
-    /// the bit for that type, the entity already had a component of that type, and the new component
-    /// replaces the one at `row`. The method returns the old one in that field of the result.
-    /// Otherwise the method pushes the new component onto the end of the column.
+    /// the bit for that type, the entity already had a component of that type, and the new
+    /// component replaces the one at `row`. The method returns the old one in that field of the
+    /// result. Otherwise the method pushes the new component onto the end of the column.
     ///
     /// The caller owns the replaced components, and decides when they drop. `World` drops them
     /// once its slots record where the entity now lives. A `Drop` implementation that panics
     /// therefore runs only once the table and the slots agree.
     ///
-    /// The method takes the bundle by value, meaning the table owns each component from then on.
+    /// The method takes the component set by value, meaning the table owns each component from then
+    /// on.
     ///
     /// # Arguments
     ///
     /// * `table`: the table that receives the components. It MUST have a column for each type in
-    ///   the bundle.
+    ///   the component set.
     /// * `row`: the entity's row in `table`. For a push, the column MUST contain `row` components,
     ///   so that the push lands at `row`.
     /// * `existing`: the mask of the table that the entity was in before this call. It has a bit
@@ -160,20 +164,26 @@ pub trait Bundle: sealed::Sealed + Send + Sync + 'static {
     ///
     /// # Panics
     ///
-    /// Panics where `table` has no column for one of the types in the bundle, or where a column for
-    /// a type in `existing` has no component at `row`.
+    /// Panics where `table` has no column for one of the types in the component set, or where a
+    /// column for a type in `existing` has no component at `row`.
     ///
     /// # Examples
     ///
-    /// The method has a `self` parameter, unlike [`Bundle::infos`]. A caller therefore calls it on
-    /// the bundle itself, with the dot syntax, as in `components.push_into(target, row, existing)`.
-    /// The call takes the bundle by value, and the compiler rejects any use of it afterwards.
+    /// The method has a `self` parameter, unlike [`ComponentSet::infos`]. A caller therefore calls
+    /// it on the component set itself, with the dot syntax, as in `components.push_into(target,
+    /// row, existing)`. The call takes the component set by value, and the compiler rejects any use
+    /// of it afterwards.
     ///
     /// The test `push_into_with_some_types_present_pushes_new_and_replaces_existing` stores a
-    /// bundle for an entity that already has some of its types. It pushes the new components, and
-    /// receives the replaced ones back.
+    /// component set for an entity that already has some of its types. It pushes the new
+    /// components, and receives the replaced ones back.
     #[doc(hidden)]
-    fn push_into(self, table: &mut Archetype, row: usize, existing: ComponentMask) -> Self::Replaced;
+    fn push_into(
+        self,
+        table: &mut Archetype,
+        row: usize,
+        existing: ComponentMask,
+    ) -> Self::Replaced;
 }
 
 // ========================================================================================== \\
@@ -209,7 +219,7 @@ fn push_or_replace<T: Component>(
     // Finds the column for `T`, and panics where the table has none
     let column = table
         .components_of_mut(TypeId::of::<T>())
-        .expect("the table should have a column for every type in the bundle");
+        .expect("the table should have a column for every type in the component set");
 
     // Replaces the component at `row`, where the entity already had a `T`
     let bit = column.info().bit();
@@ -226,11 +236,11 @@ fn push_or_replace<T: Component>(
     None
 }
 
-/// Implements [`Bundle`] for every tuple with one field per listed type parameter.
+/// Implements [`ComponentSet`] for every tuple with one field per listed type parameter.
 ///
-/// The call `impl_bundle!(A, B, C)` implements [`Bundle`] for `(A, B, C)`, where each of `A`, `B`
-/// and `C` is any type that implements [`Component`]. The macro has no `#[macro_export]`,
-/// meaning code outside the crate cannot call it.
+/// The call `impl_component_set!(A, B, C)` implements [`ComponentSet`] for `(A, B, C)`, where each
+/// of `A`, `B` and `C` is any type that implements [`Component`]. The macro has no
+/// `#[macro_export]`, meaning code outside the crate cannot call it.
 ///
 /// # Pattern
 ///
@@ -244,20 +254,20 @@ fn push_or_replace<T: Component>(
 /// thirty-two. The type parameter names run from `A` to `Z`, then from `AA` to `AF`.
 ///
 /// ```ignore
-/// impl_bundle!(A);        // Implements `Bundle` for every tuple of one field
-/// impl_bundle!(A, B);     // Implements `Bundle` for every tuple of two fields
-/// impl_bundle!(A, B, C);  // Implements `Bundle` for every tuple of three fields
+/// impl_component_set!(A);        // Implements `ComponentSet` for every tuple of one field
+/// impl_component_set!(A, B);     // Implements `ComponentSet` for every tuple of two fields
+/// impl_component_set!(A, B, C);  // Implements `ComponentSet` for every tuple of three fields
 /// ...
-/// impl_bundle!(
+/// impl_component_set!(
 ///     A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T, U, V, W, X, Y, Z, AA, AB, AC,
 ///     AD, AE, AF
 /// );
 /// ```
 ///
-/// The number of fields in a tuple decides which call implements [`Bundle`] for it. The tuple
+/// The number of fields in a tuple decides which call implements [`ComponentSet`] for it. The tuple
 /// `(Position, Velocity, Health)` has three fields. Its implementation therefore comes from
-/// `impl_bundle!(A, B, C)`. In that implementation, `A` stands for `Position`, `B` for `Velocity`
-/// and `C` for `Health`.
+/// `impl_component_set!(A, B, C)`. In that implementation, `A` stands for `Position`, `B` for
+/// `Velocity` and `C` for `Health`.
 ///
 /// The tuple `(Health, Position, Velocity)` also has three fields, and uses the implementation from
 /// the same call. In that implementation, `A` stands for `Health`, `B` for `Position` and `C` for
@@ -265,16 +275,16 @@ fn push_or_replace<T: Component>(
 ///
 /// # Expansion of one call
 ///
-/// The call `impl_bundle!(A, B, C)` expands to the code below, in full. This documentation adds the
-/// comments, to explain each line. The expansion itself has no comments.
+/// The call `impl_component_set!(A, B, C)` expands to the code below, in full. This documentation
+/// adds the comments, to explain each line. The expansion itself has no comments.
 ///
 /// ```ignore
-/// // Marks every tuple of three components as a type that the crate implements `Bundle` for,
-/// // which `Bundle` requires
+/// // Marks every tuple of three components as a type that the crate implements `ComponentSet` for,
+/// // which `ComponentSet` requires
 /// impl<A: Component, B: Component, C: Component> sealed::Sealed for (A, B, C,) {}
 ///
-/// // Implements `Bundle` for every tuple of three types, where each type implements `Component`
-/// impl<A: Component, B: Component, C: Component> Bundle for (A, B, C,) {
+/// // Implements `ComponentSet` for every tuple of three types, where each type implements `Component`
+/// impl<A: Component, B: Component, C: Component> ComponentSet for (A, B, C,) {
 ///     // Returns one `ComponentInfo` per type, in the order of the tuple fields
 ///     fn infos(registry: &mut ComponentRegistry) -> Vec<ComponentInfo> {
 ///         vec![
@@ -334,15 +344,16 @@ fn push_or_replace<T: Component>(
 ///
 /// A tuple of thirty-three components needs a new call, below the call for thirty-two. The new
 /// call lists the same names as the call for thirty-two, followed by one more name, `AG`.
-macro_rules! impl_bundle {
+macro_rules! impl_component_set {
     ($($name:ident),+) => {
-        // Marks the tuple as a type that the crate implements `Bundle` for, which `Bundle` requires
+        // Marks the tuple as a type that the crate implements `ComponentSet` for, which
+        // `ComponentSet` requires
         impl<$($name: Component),+> sealed::Sealed for ($($name,)+) {}
 
         // Declares one type parameter per name, each with the component bound, and implements
-        // `Bundle` for the tuple of those parameters. The comma after each name turns a single
-        // name into a tuple of one field
-        impl<$($name: Component),+> Bundle for ($($name,)+) {
+        // `ComponentSet` for the tuple of those parameters. The comma after each name turns a
+        // single name into a tuple of one field
+        impl<$($name: Component),+> ComponentSet for ($($name,)+) {
             fn infos(registry: &mut ComponentRegistry) -> Vec<ComponentInfo> {
                 // Builds one `ComponentInfo` per type, in the order of the tuple fields
                 vec![$({
@@ -373,62 +384,62 @@ macro_rules! impl_bundle {
     };
 }
 
-// Implements `Bundle` for every tuple of one to thirty-two components
-impl_bundle!(A);
-impl_bundle!(A, B);
-impl_bundle!(A, B, C);
-impl_bundle!(A, B, C, D);
-impl_bundle!(A, B, C, D, E);
-impl_bundle!(A, B, C, D, E, F);
-impl_bundle!(A, B, C, D, E, F, G);
-impl_bundle!(A, B, C, D, E, F, G, H);
-impl_bundle!(A, B, C, D, E, F, G, H, I);
-impl_bundle!(A, B, C, D, E, F, G, H, I, J);
-impl_bundle!(A, B, C, D, E, F, G, H, I, J, K);
-impl_bundle!(A, B, C, D, E, F, G, H, I, J, K, L);
-impl_bundle!(A, B, C, D, E, F, G, H, I, J, K, L, M);
-impl_bundle!(A, B, C, D, E, F, G, H, I, J, K, L, M, N);
-impl_bundle!(A, B, C, D, E, F, G, H, I, J, K, L, M, N, O);
-impl_bundle!(A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P);
-impl_bundle!(A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q);
-impl_bundle!(A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R);
-impl_bundle!(A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S);
-impl_bundle!(A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T);
-impl_bundle!(
+// Implements `ComponentSet` for every tuple of one to thirty-two components
+impl_component_set!(A);
+impl_component_set!(A, B);
+impl_component_set!(A, B, C);
+impl_component_set!(A, B, C, D);
+impl_component_set!(A, B, C, D, E);
+impl_component_set!(A, B, C, D, E, F);
+impl_component_set!(A, B, C, D, E, F, G);
+impl_component_set!(A, B, C, D, E, F, G, H);
+impl_component_set!(A, B, C, D, E, F, G, H, I);
+impl_component_set!(A, B, C, D, E, F, G, H, I, J);
+impl_component_set!(A, B, C, D, E, F, G, H, I, J, K);
+impl_component_set!(A, B, C, D, E, F, G, H, I, J, K, L);
+impl_component_set!(A, B, C, D, E, F, G, H, I, J, K, L, M);
+impl_component_set!(A, B, C, D, E, F, G, H, I, J, K, L, M, N);
+impl_component_set!(A, B, C, D, E, F, G, H, I, J, K, L, M, N, O);
+impl_component_set!(A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P);
+impl_component_set!(A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q);
+impl_component_set!(A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R);
+impl_component_set!(A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S);
+impl_component_set!(A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T);
+impl_component_set!(
     A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T, U
 );
-impl_bundle!(
+impl_component_set!(
     A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T, U, V
 );
-impl_bundle!(
+impl_component_set!(
     A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T, U, V, W
 );
-impl_bundle!(
+impl_component_set!(
     A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T, U, V, W, X
 );
-impl_bundle!(
+impl_component_set!(
     A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T, U, V, W, X, Y
 );
-impl_bundle!(
+impl_component_set!(
     A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T, U, V, W, X, Y, Z
 );
-impl_bundle!(
+impl_component_set!(
     A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T, U, V, W, X, Y, Z, AA
 );
-impl_bundle!(
+impl_component_set!(
     A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T, U, V, W, X, Y, Z, AA, AB
 );
-impl_bundle!(
+impl_component_set!(
     A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T, U, V, W, X, Y, Z, AA, AB, AC
 );
-impl_bundle!(
+impl_component_set!(
     A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T, U, V, W, X, Y, Z, AA, AB, AC, AD
 );
-impl_bundle!(
+impl_component_set!(
     A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T, U, V, W, X, Y, Z, AA, AB, AC, AD,
     AE
 );
-impl_bundle!(
+impl_component_set!(
     A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T, U, V, W, X, Y, Z, AA, AB, AC, AD,
     AE, AF
 );
@@ -462,7 +473,7 @@ mod tests {
     impl Component for Velocity {}
 
     /// Stands for a different component type at each value of `N`, which lets one test build a
-    /// bundle of thirty-two types.
+    /// component set of thirty-two types.
     #[derive(Debug, PartialEq)]
     struct Marker<const N: usize>(usize);
 
@@ -496,8 +507,9 @@ mod tests {
         }
     }
 
-    /// Defines the bundle type with the most fields that `impl_bundle!` implements `Bundle` for.
-    type Bundle32 = (
+    /// Defines the component set type with the most fields that `impl_component_set!` implements
+    /// `ComponentSet` for.
+    type Set32 = (
         Marker<0>,
         Marker<1>,
         Marker<2>,
@@ -542,8 +554,8 @@ mod tests {
         ($($length:literal)*) => { [$(TypeId::of::<[u8; $length]>()),*] };
     }
 
-    /// Returns a `Bundle32` whose field of type `Marker<N>` contains `N`.
-    fn build_bundle_32() -> Bundle32 {
+    /// Returns a `Set32` whose field of type `Marker<N>` contains `N`.
+    fn build_set_32() -> Set32 {
         (
             Marker(0),
             Marker(1),
@@ -628,13 +640,14 @@ mod tests {
     /// world hands out its bits in that same order
     #[test]
     fn infos_with_new_types_in_any_order_returns_infos_in_field_order() {
-        // Defines the type of `Bundle::infos` for one bundle type, which each case passes
+        // Defines the type of `ComponentSet::infos` for one component set type, which each case
+        // passes
         type InfosFn = fn(&mut ComponentRegistry) -> Vec<ComponentInfo>;
 
         let cases: [(&str, InfosFn, [TypeId; 3]); 3] = [
             (
                 "position, health, velocity",
-                <(Position, Health, Velocity) as Bundle>::infos,
+                <(Position, Health, Velocity) as ComponentSet>::infos,
                 [
                     TypeId::of::<Position>(),
                     TypeId::of::<Health>(),
@@ -643,7 +656,7 @@ mod tests {
             ),
             (
                 "velocity, position, health",
-                <(Velocity, Position, Health) as Bundle>::infos,
+                <(Velocity, Position, Health) as ComponentSet>::infos,
                 [
                     TypeId::of::<Velocity>(),
                     TypeId::of::<Position>(),
@@ -652,7 +665,7 @@ mod tests {
             ),
             (
                 "health, velocity, position",
-                <(Health, Velocity, Position) as Bundle>::infos,
+                <(Health, Velocity, Position) as ComponentSet>::infos,
                 [
                     TypeId::of::<Health>(),
                     TypeId::of::<Velocity>(),
@@ -680,7 +693,7 @@ mod tests {
         registry.find_or_assign_bit(TypeId::of::<Health>());
         registry.find_or_assign_bit(TypeId::of::<Position>());
 
-        let infos = <(Position, Velocity, Health) as Bundle>::infos(&mut registry);
+        let infos = <(Position, Velocity, Health) as ComponentSet>::infos(&mut registry);
         let next_bit = registry.find_or_assign_bit(TypeId::of::<Marker<0>>());
 
         let expected = vec![
@@ -692,13 +705,14 @@ mod tests {
         assert_eq!(next_bit, ComponentMask::single(3), "next free bit");
     }
 
-    /// Checks that a second call for the same bundle returns the same infos, and takes no new bits
+    /// Checks that a second call for the same component set returns the same infos, and takes no
+    /// new bits
     #[test]
     fn infos_with_repeated_call_returns_same_infos() {
         let mut registry = ComponentRegistry::new();
-        let first = <(Position, Health) as Bundle>::infos(&mut registry);
+        let first = <(Position, Health) as ComponentSet>::infos(&mut registry);
 
-        let second = <(Position, Health) as Bundle>::infos(&mut registry);
+        let second = <(Position, Health) as ComponentSet>::infos(&mut registry);
         let next_bit = registry.find_or_assign_bit(TypeId::of::<Velocity>());
 
         assert_eq!(
@@ -709,13 +723,13 @@ mod tests {
         assert_eq!(next_bit, ComponentMask::single(2), "next free bit");
     }
 
-    /// Checks that a bundle that lists one type twice gets the same bit for both fields, which
-    /// leaves the world to reject the bundle
+    /// Checks that a component set that lists one type twice gets the same bit for both fields,
+    /// which leaves the world to reject the component set
     #[test]
     fn infos_with_repeated_type_returns_same_bit_twice() {
         let mut registry = ComponentRegistry::new();
 
-        let infos = <(Health, Health) as Bundle>::infos(&mut registry);
+        let infos = <(Health, Health) as ComponentSet>::infos(&mut registry);
 
         let expected = vec![
             (TypeId::of::<Health>(), ComponentMask::single(0)),
@@ -724,23 +738,24 @@ mod tests {
         assert_eq!(read_types_and_bits(&infos), expected);
     }
 
-    /// Checks the smallest bundle, of one field
+    /// Checks the smallest component set, of one field
     #[test]
     fn infos_with_one_field_returns_one_info() {
         let mut registry = ComponentRegistry::new();
 
-        let infos = <(Health,) as Bundle>::infos(&mut registry);
+        let infos = <(Health,) as ComponentSet>::infos(&mut registry);
 
         let expected = vec![(TypeId::of::<Health>(), ComponentMask::single(0))];
         assert_eq!(read_types_and_bits(&infos), expected);
     }
 
-    /// Checks the largest bundle, of thirty-two fields, with one bit per field in field order
+    /// Checks the largest component set, of thirty-two fields, with one bit per field in field
+    /// order
     #[test]
     fn infos_with_32_fields_returns_32_infos_in_field_order() {
         let mut registry = ComponentRegistry::new();
 
-        let infos = Bundle32::infos(&mut registry);
+        let infos = Set32::infos(&mut registry);
 
         let type_ids = marker_type_ids!(
              0  1  2  3  4  5  6  7  8  9 10 11 12 13 14 15
@@ -762,13 +777,14 @@ mod tests {
             registry.find_or_assign_bit(*type_id);
         }
 
-        let infos = <(Health,) as Bundle>::infos(&mut registry);
+        let infos = <(Health,) as ComponentSet>::infos(&mut registry);
 
         let expected = vec![(TypeId::of::<Health>(), ComponentMask::single(63))];
         assert_eq!(read_types_and_bits(&infos), expected);
     }
 
-    /// Checks that a world with every bit taken still describes a bundle of types that it has met
+    /// Checks that a world with every bit taken still describes a component set of types that it
+    /// has met
     #[test]
     fn infos_with_full_world_and_known_types_returns_known_bits() {
         let mut registry = ComponentRegistry::new();
@@ -778,7 +794,7 @@ mod tests {
             registry.find_or_assign_bit(*type_id);
         }
 
-        let infos = <(Health, Position) as Bundle>::infos(&mut registry);
+        let infos = <(Health, Position) as ComponentSet>::infos(&mut registry);
 
         let expected = vec![
             (TypeId::of::<Health>(), ComponentMask::single(1)),
@@ -894,7 +910,8 @@ mod tests {
         assert_eq!(read_column::<Health>(&table), [Health(7)], "healths");
     }
 
-    /// Checks that a bundle replaces the components at its row, and leaves the other rows alone
+    /// Checks that a component set replaces the components at its row, and leaves the other rows
+    /// alone
     #[test]
     fn push_into_with_existing_row_replaces_each_component() {
         let position = ComponentInfo::of::<Position>(ComponentMask::single(0));
@@ -921,8 +938,8 @@ mod tests {
         );
     }
 
-    /// Checks that one bundle pushes onto the columns that lack its row, and replaces at the row in
-    /// the columns that have it, as after an entity moves to a larger table
+    /// Checks that one component set pushes onto the columns that lack its row, and replaces at the
+    /// row in the columns that have it, as after an entity moves to a larger table
     #[test]
     fn push_into_with_some_types_present_pushes_new_and_replaces_existing() {
         let position = ComponentInfo::of::<Position>(ComponentMask::single(0));
@@ -980,10 +997,10 @@ mod tests {
         let health = ComponentInfo::of::<Health>(ComponentMask::single(1));
         let mut table = Archetype::new(&[volatile, health]);
         push_component(&mut table, Volatile { panics: true });
-        let bundle = (Volatile { panics: false }, Health(7));
+        let set = (Volatile { panics: false }, Health(7));
 
         let outcome = panic::catch_unwind(AssertUnwindSafe(|| {
-            bundle.push_into(&mut table, 0, volatile.bit());
+            set.push_into(&mut table, 0, volatile.bit());
         }));
 
         let stored_panics: Vec<bool> = read_column::<Volatile>(&table)
@@ -995,7 +1012,7 @@ mod tests {
         assert_eq!(read_column::<Health>(&table), [Health(7)], "healths");
     }
 
-    /// Checks the smallest bundle, of one field, for both a push and a replacement
+    /// Checks the smallest component set, of one field, for both a push and a replacement
     #[test]
     fn push_into_with_one_field_pushes_then_replaces() {
         let mut table = Archetype::new(&[ComponentInfo::of::<Health>(ComponentMask::single(0))]);
@@ -1006,14 +1023,14 @@ mod tests {
         assert_eq!(read_column::<Health>(&table), [Health(2)]);
     }
 
-    /// Checks the largest bundle, of thirty-two fields, in a table built from its own infos
+    /// Checks the largest component set, of thirty-two fields, in a table built from its own infos
     #[test]
     fn push_into_with_32_fields_pushes_onto_every_column() {
         let mut registry = ComponentRegistry::new();
-        let infos = Bundle32::infos(&mut registry);
+        let infos = Set32::infos(&mut registry);
         let mut table = Archetype::new(&infos);
 
-        build_bundle_32().push_into(&mut table, 0, ComponentMask::EMPTY);
+        build_set_32().push_into(&mut table, 0, ComponentMask::EMPTY);
 
         let lengths: Vec<Option<usize>> = infos
             .iter()
@@ -1032,7 +1049,7 @@ mod tests {
         );
     }
 
-    /// Checks that a table with no column for one of the bundle types panics
+    /// Checks that a table with no column for one of the types in the component set panics
     #[test]
     #[should_panic]
     fn push_into_with_missing_column_panics() {

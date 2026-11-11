@@ -17,9 +17,9 @@ use std::collections::HashMap;
 
 /// Maps each component type that a world has met to its bit.
 ///
-/// The type is `pub`, since the public trait `Bundle` names it in the signature of `infos`. The
-/// `registry` module is private, meaning code outside the crate cannot write a path to the type.
-/// Only `enki` can create a registry, since [`new`](Self::new) is `pub(crate)`.
+/// The type is `pub`, since the public trait `ComponentSet` names it in the signature of `infos`.
+/// The `registry` module is private, meaning code outside the crate cannot write a path to the
+/// type. Only `enki` can create a registry, since [`new`](Self::new) is `pub(crate)`.
 ///
 /// # Examples
 ///

@@ -29,8 +29,9 @@ use std::ops::{BitOr, BitOrAssign};
 /// A test can also build a mask for several types in one call, with `from_positions`. That method
 /// exists in test builds alone.
 ///
-/// The type is `pub` because the public trait `Bundle` names it in the signature of `push_into`.
-/// The `mask` module is private, so code outside the crate still cannot write a path to the type.
+/// The type is `pub` because the public trait `ComponentSet` names it in the signature of
+/// `push_into`. The `mask` module is private, so code outside the crate still cannot write a path
+/// to the type.
 ///
 /// # Examples
 ///
@@ -82,8 +83,8 @@ impl ComponentMask {
         Self(1 << position)
     }
 
-    /// Returns the mask with a set bit at each entry of `positions`, for tests to build a mask in one
-    /// line.
+    /// Returns the mask with a set bit at each entry of `positions`, for tests to build a mask in
+    /// one line.
     ///
     /// # Panics
     ///

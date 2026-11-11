@@ -21,7 +21,7 @@
 //! - [`World`] stores the entities and their components, and runs queries over them.
 //! - [`Entity`] refers to one entity in a world.
 //! - [`Component`] marks a type that a world can store on an entity.
-//! - [`Bundle`] describes a tuple of components that a world adds to an entity in one call.
+//! - [`ComponentSet`] describes a tuple of components that a world adds to an entity in one call.
 //! - [`Query`] describes the component types that a query visits, and whether it reads or changes
 //!   each one.
 //! - [`ReadOnlyQuery`] marks a query that only reads.
@@ -91,16 +91,16 @@
 //! ```
 
 mod archetype;
-mod bundle;
 mod component;
 mod entity;
 mod mask;
 mod query;
 mod registry;
+mod set;
 mod world;
 
-pub use bundle::Bundle;
 pub use component::Component;
 pub use entity::Entity;
 pub use query::{Query, ReadOnlyQuery};
+pub use set::ComponentSet;
 pub use world::World;

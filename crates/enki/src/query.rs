@@ -82,8 +82,8 @@ pub enum Permission {
 /// Describes the component types that a query asks for, and how the world hands them out.
 ///
 /// A query type is `&T` for a component that the caller reads, or `&mut T` for one that it changes.
-/// A tuple of one to thirty-two query types, such as `(A, B, C)`, is also a query, and asks for every
-/// type that its fields ask for.
+/// A tuple of one to thirty-two query types, such as `(A, B, C)`, is also a query, and asks for
+/// every type that its fields ask for.
 ///
 /// The world runs a query in three steps. It first calls [`Query::add_permissions`] to collect the
 /// component types that the query asks for. It then calls [`Query::find_columns`] to borrow the
@@ -364,8 +364,8 @@ unsafe impl<T: Component> Query for &mut T {
         let len = components.len();
 
         // SAFETY: `from_raw_parts_mut` requires an aligned pointer to `len` live values of `T`.
-        // `components_of` returned the column for the `TypeId` of `T`, `data` is always aligned, and
-        // every index below `len` stores a live component. The slice also has to span at most
+        // `components_of` returned the column for the `TypeId` of `T`, `data` is always aligned,
+        // and every index below `len` stores a live component. The slice also has to span at most
         // `isize::MAX` bytes, and `array_layout` keeps every block within that size.
         //
         // `from_raw_parts_mut` also requires that nothing else reads or changes those components
@@ -496,7 +496,7 @@ unsafe impl<T: Component> ReadOnlyQuery for &T {}
 /// The call `impl_query!(A, B, C)` implements [`Query`] for `(A, B, C)`, where each of `A`, `B`
 /// and `C` is a query, such as `&Position` or `&mut Velocity`. The file calls the macro once for
 /// each size of tuple, from one field to thirty-two. The pattern, and the reuse of each type
-/// parameter name as a variable name, work as in `impl_bundle!` in `bundle.rs`, whose
+/// parameter name as a variable name, work as in `impl_component_set!` in `set.rs`, whose
 /// documentation explains both.
 ///
 /// A field can itself be a tuple, since every tuple of queries is a query. `((&A, &B), &C)` is
@@ -1140,7 +1140,8 @@ mod tests {
         );
     }
 
-    /// Checks that a mutable column of a size-zero type has one entry for each row, and takes writes
+    /// Checks that a mutable column of a size-zero type has one entry for each row, and takes
+    /// writes
     #[test]
     fn find_columns_with_zero_size_write_query_returns_column_of_row_count() {
         let mut table = build_table(&[1.0, 2.0, 3.0]);

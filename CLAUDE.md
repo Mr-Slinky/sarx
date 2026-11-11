@@ -97,6 +97,44 @@ example messages.
 | "How would you structure the render loop?"               | Discussion  |
 | "Write a function that builds the terrain mesh."         | Instruction |
 
+### Call Sites in Design Discussion
+
+The developer reads Java far ahead of the line in front of them. In Rust, they still see only the
+code around that line. A design is judged by the code that it makes callers write, and the developer
+cannot yet picture that code from a description. The agent therefore does the looking ahead, and
+shows the result.
+
+Whenever a discussion touches a struct, a field, a method or a trait, the agent MUST show the call
+sites that the design produces, as code. Three rules apply:
+
+- **Code, not description.** A sentence such as "this makes the call site cleaner" never stands
+  alone. The call site that it means appears beside it.
+- **Contrast.** Every proposal shows the call site with the change and without it, side by side. A
+  field added to make a call cleaner appears in the call before the field exists, and in the call
+  after.
+- **Compiled.** Before showing a snippet, the agent compiles it. A snippet that uses only public
+  items compiles in a scratch crate outside the repository, which depends on the Sarx crates by
+  path. A snippet that uses an item private to a crate compiles in a temporary file inside that
+  crate, which the agent deletes before replying. A snippet shown as working compiles. A snippet
+  shown as failing fails with the error that the agent states.
+
+The call sites come from real Sarx work, such as the systems in
+[docs/planned-systems.md](docs/planned-systems.md), with real component names.
+
+The example below shows a proposal to give `Archetype` a method that returns several columns at
+once, set beside the call that a system makes without it.
+
+```rust
+// Without the method: two borrows of one table, which the compiler rejects
+let velocities = table.components_of_mut(velocity_id)?;
+let positions = table.components_of(position_id)?; // error[E0502]: cannot borrow `*table` as immutable because it is also borrowed as mutable
+steer(velocities, positions);
+
+// With the method: one borrow, split into two columns
+let [velocities, positions] = table.get_disjoint_components_mut([velocity_id, position_id])?;
+steer(velocities, positions);
+```
+
 ### Areas Open to Agents
 
 Four areas are open to agents. In the first two, an agent acts on its own initiative. In the other

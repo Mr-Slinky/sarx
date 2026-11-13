@@ -41,6 +41,9 @@ checksum = "683d7910e743518b0e34f1186f92494becacb047c7b6bf616c96772180fef923"
 name = "amaterasu"
 version = "0.1.0"
 dependencies = [
+ "bytemuck",
+ "glam",
+ "hermes",
  "wgpu",
 ]
 
@@ -518,6 +521,9 @@ name = "glam"
 version = "0.34.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "627003914c6057c9c8f0832ee4f870b5a4f599d0cfa83f4072675114860cd0ff"
+dependencies = [
+ "bytemuck",
+]
 
 [[package]]
 name = "glow"
@@ -590,6 +596,7 @@ dependencies = [
 name = "hermes"
 version = "0.1.0"
 dependencies = [
+ "serde",
  "serde_json",
 ]
 

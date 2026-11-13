@@ -33,6 +33,7 @@
 mod error;
 mod mesh;
 mod renderer;
+mod camera;
 
 pub use error::RendererError;
 pub use renderer::{RenderWindow, Renderer};

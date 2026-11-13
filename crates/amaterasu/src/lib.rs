@@ -31,6 +31,7 @@
 //! as ignored.
 
 mod error;
+mod context;
 mod mesh;
 mod renderer;
 mod camera;

@@ -6,3 +6,4 @@ mod document;
 mod model;
 
 pub use error::GltfError;
+pub use model::{MeshData, read_mesh};

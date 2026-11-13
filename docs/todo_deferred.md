@@ -60,3 +60,25 @@ counts.
 **Why it waits**: the game has a handful of component types so far, far below 64.
 
 **When to revisit**: once the game has about 40 component types.
+
+## hermes
+
+### More GLB files as test data
+
+**Today**: the tests that read a real GLB file all read `assets/hand-model.glb`, the hand that the
+developer exported from Blender. Every other test builds its bytes by hand. The hand file has one
+mesh with one primitive, stores its indices as 16-bit numbers, and packs each attribute tightly in
+its own buffer view.
+
+**The change**: each new GLB file that Sarx takes on would join the tests as it lands. A file that
+differs from the hand in one of these ways would cover a path that only hand-built bytes reach
+today:
+
+- indices stored as 32-bit numbers, which a mesh with more than 65,535 vertices needs
+- a buffer view with a `byteStride`, which interleaves the attributes of each vertex
+- more than one mesh, or more than one primitive in a mesh
+- a file from an exporter other than Blender
+
+**Why it waits**: Sarx has one model so far, the hand.
+
+**When to revisit**: each time that a new GLB file arrives under `assets/`.

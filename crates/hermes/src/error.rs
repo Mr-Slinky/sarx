@@ -8,7 +8,10 @@ pub enum GltfError {
     NotGlb,
     /// The header states a glTF version other than 2
     UnsupportedVersion(u32),
-    /// A read ran past the end of the file or of its binary chunk
+    /// The header states a total length that differs from the length of the file
+    LengthMismatch { stated: u32, actual: usize },
+    /// A read ran past the end of the file, of its binary chunk, or of the buffer view that the
+    /// accessor belongs to
     Truncated,
     /// A chunk has a different type from the one that its place in the file calls for
     UnexpectedChunk { expected: u32, found: u32 },
@@ -16,12 +19,20 @@ pub enum GltfError {
     Json(serde_json::Error),
     /// The file contains no mesh, or its first mesh has no primitive
     MissingMesh,
+    /// The primitive that `read_mesh` reads has no `indices`
+    MissingIndices,
+    /// The primitive that `read_mesh` reads has no `NORMAL` attribute
+    MissingNormals,
     /// An index points past the end of the accessor list
     MissingAccessor(usize),
     /// An index points past the end of the buffer view list
     MissingBufferView(usize),
+    /// A buffer view states a `byteStride` that glTF forbids: one outside 4 to 252, one that is
+    /// not a multiple of 4, one smaller than an element, or any stride on a view of indices
+    InvalidStride(usize),
     /// An accessor has an unsupported `componentType`, which defines the number type, or an
-    /// unsupported `type`, which defines whether each element is a scalar, vector or matrix
+    /// unsupported `type`, which defines whether each element is a scalar, vector or matrix, or
+    /// has no `bufferView`, which glTF uses for an accessor whose elements are all zero
     UnsupportedAccessor(usize),
 }
 
@@ -33,8 +44,11 @@ impl Display for GltfError {
             Self::UnsupportedVersion(version) => {
                 write!(f, "expected glTF version 2, found version {version}")
             }
+            Self::LengthMismatch { stated, actual } => {
+                write!(f, "the header states a length of {stated} bytes, but the file has {actual}")
+            }
             Self::Truncated => {
-                write!(f, "the file or its binary chunk ends before the data that it describes")
+                write!(f, "the file, its binary chunk or a buffer view ends before the data that it describes")
             }
             // States both chunk types, in hexadecimal, as the glTF specification lists them
             Self::UnexpectedChunk { expected, found } => {
@@ -47,10 +61,13 @@ impl Display for GltfError {
             Self::MissingMesh => {
                 write!(f, "the file contains no mesh, or its first mesh has no primitive")
             }
+            Self::MissingIndices => write!(f, "the first primitive has no indices"),
+            Self::MissingNormals => write!(f, "the first primitive has no normals"),
             Self::MissingAccessor(index) => write!(f, "accessor {index} does not exist"),
             Self::MissingBufferView(index) => write!(f, "buffer view {index} does not exist"),
+            Self::InvalidStride(index) => write!(f, "buffer view {index} has a stride that glTF forbids"),
             Self::UnsupportedAccessor(index) => {
-                write!(f, "accessor {index} has an unsupported component type or element type")
+                write!(f, "accessor {index} has an unsupported component type or element type, or no buffer view")
             }
         }
     }

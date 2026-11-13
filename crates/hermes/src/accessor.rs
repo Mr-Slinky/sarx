@@ -11,6 +11,8 @@ const FLOAT_CODE: u32 = 5126;
 const UNSIGNED_SHORT_CODE: u32 = 5123;
 const UNSIGNED_INT_CODE: u32 = 5125;
 const VEC3_SIZE: usize = 12;
+const MIN_STRIDE: usize = 4;
+const MAX_STRIDE: usize = 252;
 
 /// Returns every vec3 element in the file, in the same order that the file stores them
 pub(crate) fn read_vec3s(document: &Document, binary: &[u8], index: usize) -> Result<Vec<[f32; 3]>, GltfError> {
@@ -21,7 +23,9 @@ pub(crate) fn read_vec3s(document: &Document, binary: &[u8], index: usize) -> Re
         return Err(GltfError::UnsupportedAccessor(index));
     }
 
-    let layout = find_layout(document, accessor, VEC3_SIZE)?;
+    // Rejects an accessor whose elements are all zero, since it has no data to read
+    let view_index = accessor.buffer_view.ok_or(GltfError::UnsupportedAccessor(index))?;
+    let layout = find_layout(document, accessor, view_index, VEC3_SIZE)?;
     ensure_fit(&layout, accessor.count, VEC3_SIZE, binary.len())?;
     let mut values = Vec::with_capacity(accessor.count);
     for element in 0..accessor.count {
@@ -51,7 +55,13 @@ pub(crate) fn read_indices(document: &Document, binary: &[u8], index: usize) -> 
         _ => return Err(GltfError::UnsupportedAccessor(index)),
     };
 
-    let layout = find_layout(document, accessor, element_size)?;
+    let view_index = accessor.buffer_view.ok_or(GltfError::UnsupportedAccessor(index))?;
+    let layout = find_layout(document, accessor, view_index, element_size)?;
+    // glTF forbids a stride on a buffer view that holds indices
+    if layout.is_strided {
+        return Err(GltfError::InvalidStride(view_index));
+    }
+
     ensure_fit(&layout, accessor.count, element_size, binary.len())?;
     // Makes room for every index at once
     let mut indices = Vec::with_capacity(accessor.count);
@@ -74,17 +84,29 @@ pub(crate) fn read_indices(document: &Document, binary: &[u8], index: usize) -> 
 struct Layout {
     start: usize, // where the first element starts in the binary chunk
     stride: usize,
+    view_end: usize,  // where the buffer view ends in the binary chunk
+    is_strided: bool, // whether the buffer view states its own stride
 }
 
-fn find_layout(document: &Document, accessor: &Accessor, element_size: usize) -> Result<Layout, GltfError> {
-    let view_index = accessor.buffer_view;
+fn find_layout(document: &Document, accessor: &Accessor, view_index: usize, element_size: usize) -> Result<Layout, GltfError> {
     let view = document.buffer_views.get(view_index).ok_or(GltfError::MissingBufferView(view_index))?;
+    if let Some(stride) = view.byte_stride {
+        // Applies the limits that glTF sets on `byteStride`
+        let is_valid = (MIN_STRIDE..=MAX_STRIDE).contains(&stride) && stride % 4 == 0 && stride >= element_size;
+        if !is_valid {
+            return Err(GltfError::InvalidStride(view_index));
+        }
+    }
+
     let start = view.byte_offset.checked_add(accessor.byte_offset).ok_or(GltfError::Truncated)?;
+    let view_end = view.byte_offset.checked_add(view.byte_length).ok_or(GltfError::Truncated)?;
     let stride = view.byte_stride.unwrap_or(element_size);
-    Ok(Layout { start, stride })
+    let is_strided = view.byte_stride.is_some();
+    Ok(Layout { start, stride, view_end, is_strided })
 }
 
-/// Checks that every element lies inside the binary chunk, before a caller reserves room for them.
+/// Checks that every element lies inside both the buffer view and the binary chunk, before a
+/// caller reserves room for them.
 fn ensure_fit(layout: &Layout, count: usize, element_size: usize, binary_len: usize) -> Result<(), GltfError> {
     // An empty accessor reads nothing, no matter where it starts
     let Some(last) = count.checked_sub(1) else {
@@ -96,7 +118,7 @@ fn ensure_fit(layout: &Layout, count: usize, element_size: usize, binary_len: us
         .and_then(|span| span.checked_add(layout.start))
         .and_then(|last_start| last_start.checked_add(element_size))
         .ok_or(GltfError::Truncated)?;
-    if end > binary_len {
+    if end > layout.view_end || end > binary_len {
         return Err(GltfError::Truncated);
     }
 

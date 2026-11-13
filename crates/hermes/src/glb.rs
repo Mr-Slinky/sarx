@@ -31,8 +31,16 @@ pub(crate) fn split_glb(file: &[u8]) -> Result<Glb<'_>, GltfError> {
         return Err(GltfError::UnsupportedVersion(version));
     }
 
+    let stated_length = u32::from_le_bytes(read_bytes_from(file, 8)?);
     let (json, json_end) = read_chunk(file, HEADER_LENGTH, JSON_CHUNK)?;
     let (binary, _) = read_chunk(file, json_end, BINARY_CHUNK)?;
+
+    // Checks the length last, so that a file cut short inside a chunk reports `Truncated`
+    let actual_length = file.len();
+    let is_length_correct = usize::try_from(stated_length).is_ok_and(|stated| stated == actual_length);
+    if !is_length_correct {
+        return Err(GltfError::LengthMismatch { stated: stated_length, actual: actual_length });
+    }
 
     Ok(Glb {json, binary})
 }

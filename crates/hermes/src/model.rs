@@ -15,8 +15,10 @@ pub fn read_mesh(file: &[u8]) -> Result<MeshData, GltfError> {
     let mesh = document.meshes.first().ok_or(GltfError::MissingMesh)?;
     let primitive = mesh.primitives.first().ok_or(GltfError::MissingMesh)?;
     let positions = read_vec3s(&document, glb.binary, primitive.attributes.position)?;
-    let normals = read_vec3s(&document, glb.binary, primitive.attributes.normal)?;
-    let indices = read_indices(&document, glb.binary, primitive.indices)?;
+    let normal_index = primitive.attributes.normal.ok_or(GltfError::MissingNormals)?;
+    let normals = read_vec3s(&document, glb.binary, normal_index)?;
+    let indices_index = primitive.indices.ok_or(GltfError::MissingIndices)?;
+    let indices = read_indices(&document, glb.binary, indices_index)?;
     Ok(MeshData { positions, normals, indices })
 }
 

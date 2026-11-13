@@ -77,7 +77,7 @@ pub(crate) struct Mesh {
 #[derive(Deserialize)]
 pub(crate) struct Primitive {
     pub(crate) attributes: Attributes, // the accessor for each kind of vertex data
-    pub(crate) indices: usize,         // the accessor for the triangle list
+    pub(crate) indices: Option<usize>, // the accessor for the triangle list
 }
 
 /// The individual data of a vertex
@@ -86,13 +86,13 @@ pub(crate) struct Attributes {
     #[serde(rename = "POSITION")]
     pub(crate) position: usize, // the accessor for the vertex positions
     #[serde(rename = "NORMAL")]
-    pub(crate) normal: usize,   // the accessor for the vertex normals
+    pub(crate) normal: Option<usize>, // the accessor for the vertex normals
 }
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct Accessor {
-    pub(crate) buffer_view: usize, // the `id` of the buffer
+    pub(crate) buffer_view: Option<usize>, // the `id` of the buffer; absent where every element is zero
     #[serde(default)]
     pub(crate) byte_offset: usize,
     pub(crate) component_type: u32, // the number type, as a code that the glTF specification sets
@@ -106,6 +106,7 @@ pub(crate) struct Accessor {
 pub(crate) struct BufferView {
     #[serde(default)]
     pub(crate) byte_offset: usize,
+    pub(crate) byte_length: usize,
     pub(crate) byte_stride: Option<usize>,
 }
 

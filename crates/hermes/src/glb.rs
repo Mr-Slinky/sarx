@@ -1,3 +1,9 @@
+//! Splits a GLB file into its JSON and binary chunks.
+//!
+//! The constants in this module come from
+//! [Binary glTF Layout](https://registry.khronos.org/glTF/specs/2.0/glTF-2.0.html#binary-gltf-layout)
+//! in the glTF 2.0 specification.
+
 use crate::GltfError;
 use crate::bytes::read_bytes_from;
 

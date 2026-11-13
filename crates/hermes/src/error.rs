@@ -109,12 +109,16 @@ mod tests {
         match error {
             GltfError::NotGlb => "NotGlb",
             GltfError::UnsupportedVersion(_) => "UnsupportedVersion",
+            GltfError::LengthMismatch { .. } => "LengthMismatch",
             GltfError::Truncated => "Truncated",
             GltfError::UnexpectedChunk { .. } => "UnexpectedChunk",
             GltfError::Json(_) => "Json",
             GltfError::MissingMesh => "MissingMesh",
+            GltfError::MissingIndices => "MissingIndices",
+            GltfError::MissingNormals => "MissingNormals",
             GltfError::MissingAccessor(_) => "MissingAccessor",
             GltfError::MissingBufferView(_) => "MissingBufferView",
+            GltfError::InvalidStride(_) => "InvalidStride",
             GltfError::UnsupportedAccessor(_) => "UnsupportedAccessor",
         }
     }
@@ -124,6 +128,10 @@ mod tests {
         let variants = vec![
             GltfError::NotGlb,
             GltfError::UnsupportedVersion(3),
+            GltfError::LengthMismatch {
+                stated: 120,
+                actual: 96,
+            },
             GltfError::Truncated,
             GltfError::UnexpectedChunk {
                 expected: 0x4E4F_534A,
@@ -131,8 +139,11 @@ mod tests {
             },
             GltfError::Json(build_json_error()),
             GltfError::MissingMesh,
+            GltfError::MissingIndices,
+            GltfError::MissingNormals,
             GltfError::MissingAccessor(7),
             GltfError::MissingBufferView(7),
+            GltfError::InvalidStride(7),
             GltfError::UnsupportedAccessor(7),
         ];
 

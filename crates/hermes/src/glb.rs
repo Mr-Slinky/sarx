@@ -131,7 +131,7 @@ mod tests {
     }
 
     /// Checks that the header and the two chunks of the hand model fill the file, with no byte
-    /// left over
+    /// left over, and that the header states the length of the file
     #[test]
     fn split_glb_with_hand_model_returns_chunks_that_fill_the_file() {
         let file = HAND_MODEL;
@@ -139,8 +139,11 @@ mod tests {
         let glb = split_glb(file).expect("the hand model is a valid GLB file");
         let chunk_lengths = glb.json.len() + glb.binary.len();
         let total_length = HEADER_LENGTH + 2 * CHUNK_HEADER_LENGTH + chunk_lengths;
+        let stated_length = u32::from_le_bytes(read_bytes_from(file, 8).unwrap());
 
         assert_eq!(total_length, file.len(), "header and chunks against the file length");
+        assert_eq!(stated_length, 263_796, "total length that the header states");
+        assert_eq!(stated_length as usize, file.len(), "stated length against the file length");
     }
 
     /// Checks that `split_glb` returns the bytes of each chunk unchanged, including empty chunks
@@ -248,6 +251,37 @@ mod tests {
             let result = split_glb(file);
 
             assert!(matches!(result, Err(GltfError::Truncated)), "error for {name}");
+        }
+    }
+
+    /// Checks that a header stating any total length but the length of the file is rejected,
+    /// naming both lengths, from one byte off up to the largest length that a header can state
+    #[test]
+    fn split_glb_with_wrong_total_length_returns_length_mismatch() {
+        let valid = build_glb(b"{}  ", &[1, 2, 3, 4]);
+        let actual_length = valid.len();
+        let true_length = u32::try_from(actual_length).expect("test file fits in a u32");
+        let cases = [
+            ("one byte more than the file", true_length + 1),
+            ("one byte less than the file", true_length - 1),
+            ("zero length", 0),
+            ("largest length", u32::MAX),
+        ];
+
+        for (name, stated_length) in cases {
+            let mut file = valid.clone();
+            file[8..HEADER_LENGTH].copy_from_slice(&stated_length.to_le_bytes());
+
+            let result = split_glb(&file);
+
+            assert!(
+                matches!(
+                    result,
+                    Err(GltfError::LengthMismatch { stated, actual })
+                        if stated == stated_length && actual == actual_length
+                ),
+                "error for {name}"
+            );
         }
     }
 

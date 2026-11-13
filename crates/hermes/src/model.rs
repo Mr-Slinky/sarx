@@ -50,24 +50,29 @@ mod tests {
     /// The accessors of the fixture file. Accessors 0 to 2 read the triangle. Accessor 3 has the
     /// unsupported type `VEC2`, accessor 4 counts more vec3s than the binary chunk holds, and
     /// accessors 5 and 6 count no elements. Accessor 7 names buffer view 9, which does not exist,
-    /// and accessor 8 counts more indices than the binary chunk holds
+    /// and accessor 8 counts more indices than the binary chunk holds. Accessors 4 and 8 stay
+    /// inside their buffer views, so that the binary chunk is the bound that they cross
     const FIXTURE_ACCESSORS: &str = r#"[
         {"bufferView":0,"componentType":5126,"count":3,"type":"VEC3"},
         {"bufferView":1,"componentType":5126,"count":3,"type":"VEC3"},
         {"bufferView":2,"componentType":5123,"count":3,"type":"SCALAR"},
         {"bufferView":0,"componentType":5126,"count":3,"type":"VEC2"},
-        {"bufferView":0,"componentType":5126,"count":100,"type":"VEC3"},
+        {"bufferView":3,"componentType":5126,"count":100,"type":"VEC3"},
         {"bufferView":0,"componentType":5126,"count":0,"type":"VEC3"},
         {"bufferView":2,"componentType":5123,"count":0,"type":"SCALAR"},
         {"bufferView":9,"componentType":5126,"count":3,"type":"VEC3"},
-        {"bufferView":2,"componentType":5123,"count":100,"type":"SCALAR"}
+        {"bufferView":4,"componentType":5123,"count":100,"type":"SCALAR"}
     ]"#;
 
-    /// The buffer views of the fixture file: the positions, the normals, then the indices
+    /// The buffer views of the fixture file: the positions, the normals, then the indices. Views 3
+    /// and 4 start where the positions and the indices start, and run past the 80-byte binary
+    /// chunk: view 3 holds 100 vec3s, and view 4 holds 100 indices
     const FIXTURE_BUFFER_VIEWS: &str = r#"[
         {"buffer":0,"byteOffset":0,"byteLength":36},
         {"buffer":0,"byteOffset":36,"byteLength":36},
-        {"buffer":0,"byteOffset":72,"byteLength":6}
+        {"buffer":0,"byteOffset":72,"byteLength":6},
+        {"buffer":0,"byteOffset":0,"byteLength":1200},
+        {"buffer":0,"byteOffset":72,"byteLength":200}
     ]"#;
 
     /// Pads `bytes` with `fill` until its length is a multiple of 4, as the glTF specification
@@ -221,21 +226,40 @@ mod tests {
         assert!(mesh.indices.is_empty(), "indices of the empty primitive");
     }
 
-    /// Checks that only the first mesh is read, when a second one names accessors that do not exist
+    /// Checks that only the first mesh is read, when a second one names accessors that do not
+    /// exist, or leaves out its `indices` and its `NORMAL` attribute
     #[test]
     fn read_mesh_with_two_meshes_reads_first() {
-        let file = build_fixture_glb(
-            r#"[
-                {"primitives":[{"attributes":{"POSITION":0,"NORMAL":1},"indices":2}]},
-                {"primitives":[{"attributes":{"POSITION":99,"NORMAL":99},"indices":99}]}
-            ]"#,
-        );
+        let cases = [
+            (
+                "second mesh naming missing accessors",
+                r#"[
+                    {"primitives":[{"attributes":{"POSITION":0,"NORMAL":1},"indices":2}]},
+                    {"primitives":[{"attributes":{"POSITION":99,"NORMAL":99},"indices":99}]}
+                ]"#,
+            ),
+            (
+                "second mesh without indices or normals",
+                r#"[
+                    {"primitives":[{"attributes":{"POSITION":0,"NORMAL":1},"indices":2}]},
+                    {"primitives":[{"attributes":{"POSITION":0}}]}
+                ]"#,
+            ),
+        ];
 
-        let mesh = read_mesh(&file).unwrap();
+        for (name, meshes) in cases {
+            let file = build_fixture_glb(meshes);
 
-        assert_eq!(mesh.positions, TRIANGLE_POSITIONS, "positions of the first mesh");
-        assert_eq!(mesh.normals, TRIANGLE_NORMALS, "normals of the first mesh");
-        assert_eq!(mesh.indices, TRIANGLE_INDICES.map(u32::from), "indices of the first mesh");
+            let mesh = read_mesh(&file).unwrap();
+
+            assert_eq!(mesh.positions, TRIANGLE_POSITIONS, "positions of the first mesh for {name}");
+            assert_eq!(mesh.normals, TRIANGLE_NORMALS, "normals of the first mesh for {name}");
+            assert_eq!(
+                mesh.indices,
+                TRIANGLE_INDICES.map(u32::from),
+                "indices of the first mesh for {name}"
+            );
+        }
     }
 
     /// Checks that only the first primitive is read, when a second one names accessors that do
@@ -307,8 +331,11 @@ mod tests {
         version_one[4..8].copy_from_slice(&1_u32.to_le_bytes());
         let mut binary_chunk_first = build_fixture_glb(TRIANGLE_MESHES);
         binary_chunk_first[16..20].copy_from_slice(&0x004E_4942_u32.to_le_bytes());
+        let mut length_one_more = build_fixture_glb(TRIANGLE_MESHES);
+        let stated_length = length_one_more.len() as u32 + 1;
+        length_one_more[8..12].copy_from_slice(&stated_length.to_le_bytes());
 
-        let cases: [(&str, Vec<u8>, fn(&GltfError) -> bool); 17] = [
+        let cases: [(&str, Vec<u8>, fn(&GltfError) -> bool); 20] = [
             ("wrong magic", wrong_magic, |error| matches!(error, GltfError::NotGlb)),
             ("version 1", version_one, |error| matches!(error, GltfError::UnsupportedVersion(1))),
             ("BIN chunk type in place of JSON", binary_chunk_first, |error| {
@@ -319,6 +346,9 @@ mod tests {
             }),
             ("empty file", Vec::new(), |error| matches!(error, GltfError::Truncated)),
             ("binary chunk cut short", cut_short, |error| matches!(error, GltfError::Truncated)),
+            ("total length one byte more than the file", length_one_more, |error| {
+                matches!(error, GltfError::LengthMismatch { stated, actual } if *stated as usize == actual + 1)
+            }),
             ("malformed JSON", build_glb("{", &[]), |error| matches!(error, GltfError::Json(_))),
             (
                 "accessor index as text",
@@ -347,6 +377,16 @@ mod tests {
                     r#"[{"primitives":[{"attributes":{"POSITION":0,"NORMAL":1},"indices":97}]}]"#,
                 ),
                 |error| matches!(error, GltfError::MissingAccessor(97)),
+            ),
+            (
+                "primitive without normals",
+                build_fixture_glb(r#"[{"primitives":[{"attributes":{"POSITION":0},"indices":2}]}]"#),
+                |error| matches!(error, GltfError::MissingNormals),
+            ),
+            (
+                "primitive without indices",
+                build_fixture_glb(r#"[{"primitives":[{"attributes":{"POSITION":0,"NORMAL":1}}]}]"#),
+                |error| matches!(error, GltfError::MissingIndices),
             ),
             (
                 "unsupported position accessor",

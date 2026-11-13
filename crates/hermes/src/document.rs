@@ -60,8 +60,12 @@ use serde::Deserialize;
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct Document {
+    // glTF lets a file leave out each of these lists, which then reads as an empty list
+    #[serde(default)]
     pub(crate) meshes: Vec<Mesh>,
+    #[serde(default)]
     pub(crate) accessors: Vec<Accessor>, // how to read each kind of data
+    #[serde(default)]
     pub(crate) buffer_views: Vec<BufferView>,
 }
 

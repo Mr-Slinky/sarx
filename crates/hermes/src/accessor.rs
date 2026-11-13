@@ -22,6 +22,7 @@ pub(crate) fn read_vec3s(document: &Document, binary: &[u8], index: usize) -> Re
     }
 
     let layout = find_layout(document, accessor, VEC3_SIZE)?;
+    ensure_fit(&layout, accessor.count, VEC3_SIZE, binary.len())?;
     let mut values = Vec::with_capacity(accessor.count);
     for element in 0..accessor.count {
         let offset = layout.start + element * layout.stride;
@@ -51,6 +52,7 @@ pub(crate) fn read_indices(document: &Document, binary: &[u8], index: usize) -> 
     };
 
     let layout = find_layout(document, accessor, element_size)?;
+    ensure_fit(&layout, accessor.count, element_size, binary.len())?;
     // Makes room for every index at once
     let mut indices = Vec::with_capacity(accessor.count);
     for element in 0..accessor.count {
@@ -77,9 +79,28 @@ struct Layout {
 fn find_layout(document: &Document, accessor: &Accessor, element_size: usize) -> Result<Layout, GltfError> {
     let view_index = accessor.buffer_view;
     let view = document.buffer_views.get(view_index).ok_or(GltfError::MissingBufferView(view_index))?;
-    let start = view.byte_offset + accessor.byte_offset;
+    let start = view.byte_offset.checked_add(accessor.byte_offset).ok_or(GltfError::Truncated)?;
     let stride = view.byte_stride.unwrap_or(element_size);
     Ok(Layout { start, stride })
+}
+
+/// Checks that every element lies inside the binary chunk, before a caller reserves room for them.
+fn ensure_fit(layout: &Layout, count: usize, element_size: usize, binary_len: usize) -> Result<(), GltfError> {
+    // An empty accessor reads nothing, no matter where it starts
+    let Some(last) = count.checked_sub(1) else {
+        return Ok(());
+    };
+
+    let end = last
+        .checked_mul(layout.stride)
+        .and_then(|span| span.checked_add(layout.start))
+        .and_then(|last_start| last_start.checked_add(element_size))
+        .ok_or(GltfError::Truncated)?;
+    if end > binary_len {
+        return Err(GltfError::Truncated);
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]

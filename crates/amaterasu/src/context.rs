@@ -73,6 +73,7 @@ impl GpuContext {
     /// is called anti-aliasing.
     const SAMPLE_COUNT: u32 = 4;
 
+    const DEPTH_FORMAT: TextureFormat = TextureFormat::Depth32Float;
     // ====================================================================================== \\
     //                                      Constructors                                      \\
     // ====================================================================================== \\
@@ -454,17 +455,11 @@ impl GpuContext {
 ///
 /// The renderer replaces all of these parts together, whenever it replaces the surface.
 pub(crate) struct SurfaceContext {
-    /// The window that the surface belongs to. `GpuContext::recreate` creates a new surface for
-    /// it when wgpu reports the surface lost.
     window: Arc<dyn DisplayAndWindowHandle>,
-    /// The surface, which hands out one texture for each frame to draw into. It shows each
-    /// finished texture in the window.
     pub(crate) surface: Surface<'static>,
-    /// The size and pixel format of the surface's textures.
     config: SurfaceConfiguration,
-    /// A view of the multisampled texture. The render pass draws each frame into this texture
-    /// first. The GPU then averages each pixel's samples into the surface texture.
     pub(crate) msaa_view: TextureView,
+    pub(crate) depth_view: TextureView,
 }
 
 impl SurfaceContext {
@@ -495,17 +490,21 @@ impl SurfaceContext {
         config.present_mode = PresentMode::AutoVsync;
         // Configures the surface at that size, in the configuration's pixel format
         surface.configure(device, &config);
-        // Creates the multisampled texture at the same size and pixel format
         let msaa_view = Self::create_msaa_view(device, &config);
-        // Returns the context, which keeps the configuration for later resizes
+        let depth_view = Self::create_depth_view(device, &config);
+
         Self {
             window,
             surface,
             config,
             msaa_view,
+            depth_view,
         }
     }
 
+    // ====================================================================================== \\
+    //                                     Helper Methods                                     \\
+    // ====================================================================================== \\
     /// Reconfigures the surface at `width` by `height` pixels.
     ///
     /// It also replaces the multisampled texture with one of the new size.
@@ -525,6 +524,7 @@ impl SurfaceContext {
         // Replaces the multisampled texture with one at the new size, since wgpu fixes a
         // texture's size when it creates the texture
         self.msaa_view = Self::create_msaa_view(device, &self.config);
+        self.depth_view = Self::create_depth_view(device, &self.config);
     }
 
     /// Rebuilds the surface's textures from the current configuration.
@@ -543,9 +543,6 @@ impl SurfaceContext {
         self.surface.configure(device, &self.config);
     }
 
-    // ====================================================================================== \\
-    //                                     Helper Methods                                     \\
-    // ====================================================================================== \\
     /// Creates a multisampled texture to match the surface, and returns a view of it.
     ///
     /// The texture has the size and pixel format of the surface. It stores
@@ -581,6 +578,29 @@ impl SurfaceContext {
         };
         let texture = device.create_texture(&descriptor);
         // Returns a view of the whole texture, which the render pass draws through
+        texture.create_view(&TextureViewDescriptor::default())
+    }
+
+    fn create_depth_view(device: &Device, config: &SurfaceConfiguration) -> TextureView {
+        // size texture to match surface
+        let size = Extent3d {
+            width: config.width,
+            height: config.height,
+            depth_or_array_layers: 1,
+        };
+
+        let descr = TextureDescriptor {
+            label: Some("Depth"),
+            size,
+            mip_level_count: 1,
+            sample_count: GpuContext::SAMPLE_COUNT,
+            dimension: TextureDimension::D2,
+            format: GpuContext::DEPTH_FORMAT,
+            usage: TextureUsages::RENDER_ATTACHMENT,
+            view_formats: &[],
+        };
+
+        let texture = device.create_texture(&descr);
         texture.create_view(&TextureViewDescriptor::default())
     }
 }

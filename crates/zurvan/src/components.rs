@@ -9,6 +9,7 @@ pub struct Position(pub(crate) Vec3);
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Velocity(pub(crate) Vec3);
 
+// The point an entity is trying to reach
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Target(pub(crate) Vec3);
 

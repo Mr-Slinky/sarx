@@ -7,13 +7,15 @@ use std::time::Duration;
 pub struct Simulation {
     world: World,
     hand: Entity,
-    unsimulated: Duration, // time that has passed and that no step has used yet, always below `STEP`
+    // Stores the time that has passed and that no step has used yet. Between calls to `advance`,
+    // it stays below `STEP`.
+    unsimulated: Duration,
 }
 
 impl Simulation {
-    // The length of one step, one sixtieth of a second, (60hz)
+    // Defines the length of one step as one sixtieth of a second, which gives 60 steps a second.
     pub const STEP: Duration = Duration::from_nanos(16_666_667);
-    // The most time that one call to `advance` simulates
+    // Defines the most elapsed time that one call to `advance` adds to `unsimulated`.
     const MAX_ELAPSED: Duration = Duration::from_millis(250);
     const HOVER_HEIGHT: f32 = 1.0;
     const HAND_SPEED: f32 = 20.0;

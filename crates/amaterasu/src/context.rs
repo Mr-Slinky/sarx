@@ -16,9 +16,9 @@
 //! // Connects to a GPU that can draw to the window, and configures the window's surface
 //! let gpu = GpuContext::new(window, width, height).await?;
 //!
-//! // Compiles the shader, then builds the pipeline around it
-//! let shader = gpu.create_shader("Flat colour shader", shader_source);
-//! let pipeline = gpu.create_pipeline(&shader);
+//! // Compiles the shader, then builds the pipeline around it and the two uniform layouts
+//! let shader = gpu.create_shader("Lit shader", shader_source);
+//! let pipeline = gpu.create_pipeline(&shader, &scene_layout, &object_layout);
 //! ```
 
 use std::borrow::Cow;
@@ -44,7 +44,7 @@ use crate::renderer::RenderWindow;
 
 /// The connection to one GPU, together with the surface that the GPU draws into.
 ///
-/// The connection lasts as long as the renderer. The surface is dropped while the app is
+/// The connection lasts as long as the renderer. `suspend` drops the surface while the app is
 /// suspended, leaving `surface_context` as `None`.
 pub(crate) struct GpuContext {
     /// The surface and the parts built to match it. It is `None` while the app is suspended.
@@ -114,7 +114,7 @@ impl GpuContext {
         let display = Box::new(Arc::clone(&window));
         // Creates the wgpu instance, and gives it that display handle
         let instance = Instance::new(InstanceDescriptor::new_with_display_handle(display));
-        // Creates the surface, which keeps a third owner of the window
+        // Creates the surface, which keeps a third `Arc` to the window
         let surface = instance.create_surface(Arc::clone(&window))?;
 
         // Chooses a GPU that can draw to the surface, preferring a dedicated GPU over an integrated
@@ -164,7 +164,8 @@ impl GpuContext {
             return Err(RendererError::UnsupportedSampleCount);
         }
 
-        // Configures the surface, and creates the multisampled texture that frames draw into
+        // Configures the surface, and creates the multisampled and depth textures that frames draw
+        // into
         let surface_context = SurfaceContext::new(window, surface, &device, config);
 
         Ok(Self {
@@ -181,19 +182,20 @@ impl GpuContext {
     // ====================================================================================== \\
     //                                      API Methods                                       \\
     // ====================================================================================== \\
-    /// Resizes the surface and the multisampled texture to `width` by `height` pixels.
+    /// Resizes the surface, the multisampled texture and the depth texture to `width` by `height`
+    /// pixels.
     ///
     /// While the app is suspended, no surface exists, and `resize` returns at once. A width or
-    /// height of zero also leaves both as they are, since `Surface::configure` panics on a size of
-    /// zero.
+    /// height of zero also leaves all three as they are, since `Surface::configure` panics on a
+    /// size of zero.
     ///
     /// # Examples
     ///
     /// A minimised window typically reports a size of zero, which `resize` ignores.
     ///
     /// ```ignore
-    /// gpu.resize(1920, 1080); // resizes both to 1920 by 1080
-    /// gpu.resize(0, 0);       // leaves both as they are, at 1920 by 1080
+    /// gpu.resize(1920, 1080); // resizes all three to 1920 by 1080
+    /// gpu.resize(0, 0);       // leaves all three as they are, at 1920 by 1080
     /// ```
     pub(crate) fn resize(&mut self, width: u32, height: u32) {
         if width == 0 || height == 0 {
@@ -257,14 +259,14 @@ impl GpuContext {
         Ok(())
     }
 
-    /// Drops the surface, its configuration and the multisampled texture.
+    /// Drops the surface, its configuration, the multisampled texture and the depth texture.
     ///
     /// # Examples
     ///
     /// The renderer calls it when the app loses its window.
     ///
     /// ```ignore
-    /// // Drops the surface, its configuration and the multisampled texture
+    /// // Drops the surface, its configuration, the multisampled texture and the depth texture
     /// gpu.suspend();
     /// ```
     pub(crate) fn suspend(&mut self) {
@@ -298,7 +300,7 @@ impl GpuContext {
     where
         W: RenderWindow,
     {
-        // Drops the old surface first (where one exists) since Vulkan can refuse a second surface
+        // Drops the old surface first, where one exists, since Vulkan can refuse a second surface
         // for a window that already has one
         self.surface_context = None;
         let surface_context = self.create_surface_context(window, width, height)?;
@@ -313,13 +315,13 @@ impl GpuContext {
     ///
     /// # Examples
     ///
-    /// The example copies the triangle into a vertex buffer, then hands the buffer to a render
+    /// The example copies the hand's mesh into a vertex buffer, then hands the buffer to a render
     /// pass.
     ///
     /// ```ignore
-    /// // Copies the vertices of the triangle into a new vertex buffer, then binds the buffer to
+    /// // Copies the vertices of the hand's mesh into a new vertex buffer, then binds the buffer to
     /// // vertex buffer slot 0
-    /// let mesh = Mesh::build_triangle();
+    /// let mesh = Mesh::from_mesh_data(hand);
     /// let vertex_buffer = gpu.create_vertex_buffer(&mesh);
     /// render_pass.set_vertex_buffer(0, vertex_buffer.slice(..));
     /// ```
@@ -413,8 +415,8 @@ impl GpuContext {
     ///
     /// ```ignore
     /// // Embeds the shader file in the binary as a string, then compiles it into a shader
-    /// let shader_source = include_str!("../shaders/flat_colour.wgsl");
-    /// let shader = gpu.create_shader("Flat colour shader", shader_source);
+    /// let shader_source = include_str!("../shaders/lit.wgsl");
+    /// let shader = gpu.create_shader("Lit shader", shader_source);
     /// ```
     pub(crate) fn create_shader(&self, label: &str, source: &str) -> ShaderModule {
         let descriptor = ShaderModuleDescriptor {
@@ -424,12 +426,16 @@ impl GpuContext {
         self.device.create_shader_module(descriptor)
     }
 
-    /// Builds the pipeline that draws a `Mesh` in one flat colour.
+    /// Builds the lit pipeline, which draws a `Mesh` in one colour, shaded by a single light.
     ///
     /// The pipeline runs two functions from `shader`. `vs_main` runs once for each vertex, and
     /// places the vertex in the window. `fs_main` runs once for each pixel that the mesh covers,
-    /// and returns the pixel's colour. The pipeline writes into textures in the surface's pixel
-    /// format, taking `SAMPLE_COUNT` samples for each pixel.
+    /// and returns the pixel's colour. The shader reads the scene uniforms through `scene_layout`
+    /// at group 0, and the object uniforms through `object_layout` at group 1.
+    ///
+    /// The pipeline writes colour into textures in the surface's pixel format, taking
+    /// `SAMPLE_COUNT` samples for each pixel. It also tests and writes depth in `DEPTH_FORMAT`,
+    /// keeping only the nearest surface at each sample.
     ///
     /// # Examples
     ///
@@ -437,7 +443,7 @@ impl GpuContext {
     ///
     /// ```ignore
     /// // Builds the pipeline, then selects it for the draws that follow in the render pass
-    /// let pipeline = gpu.create_pipeline(&shader);
+    /// let pipeline = gpu.create_pipeline(&shader, &scene_layout, &object_layout);
     /// render_pass.set_pipeline(&pipeline);
     /// ```
     pub(crate) fn create_pipeline(
@@ -522,8 +528,8 @@ impl GpuContext {
     /// Creates a `SurfaceContext` for `window`, at `width` by `height` pixels.
     ///
     /// It creates the surface, checks that the surface supports the pixel format that the pipeline
-    /// was built for, and configures it in that format. Last, it creates a multisampled texture to
-    /// match the surface.
+    /// was built for, and configures it in that format. Last, it creates a multisampled texture and
+    /// a depth texture to match the surface.
     ///
     /// # Errors
     ///
@@ -574,7 +580,7 @@ pub(crate) struct SurfaceContext {
 
 impl SurfaceContext {
     /// Configures `surface` with `config`, and creates a multisampled texture of the same size
-    /// and pixel format.
+    /// and pixel format. It also creates a depth texture of the same size.
     ///
     /// # Examples
     ///
@@ -617,22 +623,22 @@ impl SurfaceContext {
     // ====================================================================================== \\
     /// Reconfigures the surface at `width` by `height` pixels.
     ///
-    /// It also replaces the multisampled texture with one of the new size.
+    /// It also replaces the multisampled texture and the depth texture with ones of the new size.
     ///
     /// # Examples
     ///
-    /// The example resizes both for a window of 1920 by 1080 pixels.
+    /// The example resizes all three for a window of 1920 by 1080 pixels.
     ///
     /// ```ignore
-    /// // Reconfigures the surface at 1920 by 1080 pixels, and replaces the multisampled texture
+    /// // Reconfigures the surface at 1920 by 1080 pixels, and replaces both textures
     /// surface_context.resize(&device, 1920, 1080);
     /// ```
     fn resize(&mut self, device: &Device, width: u32, height: u32) {
         self.config.width = width;
         self.config.height = height;
         self.reconfigure(device);
-        // Replaces the multisampled texture with one at the new size, since wgpu fixes a
-        // texture's size when it creates the texture
+        // Replaces the multisampled and depth textures with ones at the new size, since wgpu fixes
+        // a texture's size when it creates the texture
         self.msaa_view = Self::create_msaa_view(device, &self.config);
         self.depth_view = Self::create_depth_view(device, &self.config);
     }
@@ -692,7 +698,6 @@ impl SurfaceContext {
     }
 
     fn create_depth_view(device: &Device, config: &SurfaceConfiguration) -> TextureView {
-        // size texture to match surface
         let size = Extent3d {
             width: config.width,
             height: config.height,

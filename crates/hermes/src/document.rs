@@ -1,5 +1,8 @@
-//! Models the JSON found in a .glb file to the structs that are defined in this module.
-//! The parsed JSON looks like this:
+//! Defines the structs that serde parses the JSON chunk of a GLB file into.
+//!
+//! The structs model only the fields that the reader uses, and serde skips the rest. The JSON
+//! chunk of the hand model looks like the text below, with its long lists cut short.
+//!
 //! ```json
 //! {
 //!   "asset": { "generator": "Khronos glTF Blender I/O v5.0.21", "version": "2.0" },
@@ -51,7 +54,6 @@
 //!   "animations": [ /* 8 */ ]
 //! }
 //! ```
-//!
 
 
 
@@ -60,11 +62,11 @@ use serde::Deserialize;
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct Document {
-    // glTF lets a file leave out each of these lists, which then reads as an empty list
+    // glTF lets a file leave out each of these lists, and serde then fills in an empty list
     #[serde(default)]
     pub(crate) meshes: Vec<Mesh>,
     #[serde(default)]
-    pub(crate) accessors: Vec<Accessor>, // how to read each kind of data
+    pub(crate) accessors: Vec<Accessor>, // describes how to read each kind of data
     #[serde(default)]
     pub(crate) buffer_views: Vec<BufferView>,
 }
@@ -76,29 +78,30 @@ pub(crate) struct Mesh {
 
 #[derive(Deserialize)]
 pub(crate) struct Primitive {
-    pub(crate) attributes: Attributes, // the accessor for each kind of vertex data
-    pub(crate) indices: Option<usize>, // the accessor for the triangle list
+    pub(crate) attributes: Attributes, // points to the accessor for each kind of vertex data
+    pub(crate) indices: Option<usize>, // points to the accessor for the triangle list
 }
 
-/// The individual data of a vertex
+/// Points to the accessor that stores each kind of vertex data, under the attribute names that
+/// glTF uses
 #[derive(Deserialize)]
 pub(crate) struct Attributes {
     #[serde(rename = "POSITION")]
-    pub(crate) position: usize, // the accessor for the vertex positions
+    pub(crate) position: usize, // points to the accessor for the vertex positions
     #[serde(rename = "NORMAL")]
-    pub(crate) normal: Option<usize>, // the accessor for the vertex normals
+    pub(crate) normal: Option<usize>, // points to the accessor for the vertex normals
 }
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct Accessor {
-    pub(crate) buffer_view: Option<usize>, // the `id` of the buffer; absent where every element is zero
+    pub(crate) buffer_view: Option<usize>, // points to the buffer view; absent where every element is zero
     #[serde(default)]
     pub(crate) byte_offset: usize,
-    pub(crate) component_type: u32, // the number type, as a code that the glTF specification sets
+    pub(crate) component_type: u32, // defines the number type, as a code that the glTF specification sets
     pub(crate) count: usize,
     #[serde(rename = "type")]
-    pub(crate) kind: String, // the shape of each element, such as `VEC3` or `SCALAR`
+    pub(crate) kind: String, // defines the shape of each element, such as `VEC3` or `SCALAR`
 }
 
 #[derive(Deserialize)]
@@ -115,7 +118,7 @@ mod tests {
     use super::*;
     use crate::glb::split_glb;
 
-    /// Holds the GLB file that Blender exported for the hand model
+    /// Contains the GLB file that Blender exported for the hand model
     const HAND_MODEL: &[u8] = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/hand-model.glb"));
 
     /// Returns the JSON chunk of the hand model
@@ -144,15 +147,15 @@ mod tests {
         Some((view.byte_offset, view.byte_length, view.byte_stride))
     }
 
-    /// Returns the position and normal accessors that `json` names, or `None` where `json` fails
-    /// to parse
+    /// Returns the position and normal accessors that `json` points to, or `None` where `json`
+    /// fails to parse
     fn summarise_attributes(json: &str) -> Option<(usize, Option<usize>)> {
         let attributes = serde_json::from_str::<Attributes>(json).ok()?;
         Some((attributes.position, attributes.normal))
     }
 
-    /// Returns the position, normal and index accessors that `json` names, or `None` where `json`
-    /// fails to parse
+    /// Returns the position, normal and index accessors that `json` points to, or `None` where
+    /// `json` fails to parse
     fn summarise_primitive(json: &str) -> Option<(usize, Option<usize>, Option<usize>)> {
         let primitive = serde_json::from_str::<Primitive>(json).ok()?;
         let attributes = primitive.attributes;
@@ -170,8 +173,8 @@ mod tests {
         ))
     }
 
-    /// Checks that the hand model's document holds one mesh, whose primitive names the expected
-    /// accessors, along with 115 accessors and 115 buffer views
+    /// Checks that the hand model's document contains one mesh, whose primitive points to the
+    /// expected accessors, along with 115 accessors and 115 buffer views
     #[test]
     fn document_from_json_with_hand_model_returns_mesh_and_lists() {
         let json = read_hand_json();
@@ -418,7 +421,7 @@ mod tests {
         }
     }
 
-    /// Checks that a primitive keeps the largest accessor index that a `usize` can hold, in every
+    /// Checks that a primitive keeps the largest accessor index that a `usize` can store, in every
     /// field
     #[test]
     fn primitive_from_json_with_largest_values_returns_accessors() {
@@ -457,8 +460,8 @@ mod tests {
         }
     }
 
-    /// Checks that the attributes are rejected where a name is missing, misspelt or holds the
-    /// wrong type
+    /// Checks that the attributes are rejected where a name is missing, is misspelt or has a value
+    /// of the wrong type
     #[test]
     fn attributes_from_json_with_abnormal_json_returns_error() {
         let cases = [
@@ -537,7 +540,7 @@ mod tests {
         }
     }
 
-    /// Checks that an accessor keeps the largest value that each number field can hold
+    /// Checks that an accessor keeps the largest value that each number field can store
     #[test]
     fn accessor_from_json_with_largest_values_returns_fields() {
         let json = format!(
@@ -552,7 +555,7 @@ mod tests {
         assert_eq!(fields, Some(expected), "fields of the accessor with the largest values");
     }
 
-    /// Checks that an accessor is rejected where a number field holds one past its largest value
+    /// Checks that an accessor is rejected where a number field is one past its largest value
     #[test]
     fn accessor_from_json_with_values_past_largest_returns_error() {
         let past_usize = usize::MAX as u128 + 1;
@@ -583,7 +586,7 @@ mod tests {
         }
     }
 
-    /// Checks that an accessor is rejected where a required field is missing, misnamed or holds
+    /// Checks that an accessor is rejected where a required field is missing, is misnamed or has
     /// the wrong type
     #[test]
     fn accessor_from_json_with_abnormal_json_returns_error() {
@@ -650,7 +653,7 @@ mod tests {
     }
 
     /// Checks that a buffer view keeps the largest offset, length and stride that a `usize` can
-    /// hold
+    /// store
     #[test]
     fn buffer_view_from_json_with_largest_values_returns_fields() {
         let json = format!(
@@ -665,7 +668,7 @@ mod tests {
     }
 
     /// Checks that a buffer view is rejected where its byte length is missing, or where its
-    /// offset, length or stride is out of range or holds the wrong type
+    /// offset, length or stride is out of range or has the wrong type
     #[test]
     fn buffer_view_from_json_with_abnormal_json_returns_error() {
         let past_usize = usize::MAX as u128 + 1;

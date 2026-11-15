@@ -11,19 +11,19 @@
 //!
 //! # Examples
 //!
-//! The example creates a renderer for a winit window, then draws one frame.
+//! The example creates a renderer for a winit window, then draws one frame of the hand.
 //!
 //! Setting up the GPU is asynchronous, meaning `Renderer::new` returns a future. In the example,
 //! `block_on` stands for any function that runs a future until it finishes.
 //!
 //! ```ignore
-//! // Creates a renderer for the window, at the window's current size
+//! // Creates a renderer that draws the hand's mesh into the window, at the window's current size
 //! let size = window.inner_size();
-//! let renderer_setup = Renderer::new(Arc::clone(&window), size.width, size.height);
+//! let renderer_setup = Renderer::new(Arc::clone(&window), size.width, size.height, hand);
 //! let mut renderer = block_on(renderer_setup)?;
 //!
-//! // Draws one frame, as the caller does each time the window needs redrawing
-//! renderer.render()?;
+//! // Draws one frame through the camera, as the caller does each time the window needs redrawing
+//! renderer.render(&camera, hand_transform)?;
 //! ```
 //!
 //! Most examples in these docs need a window from a windowing library, such as winit. Each of

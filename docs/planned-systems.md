@@ -8,8 +8,9 @@ The list exists to guide design. The ECS is built for the systems that will run 
 developer or an agent designs a part of the ECS, or plans a feature, they read this list and check
 the design against the systems that it must serve.
 
-None of these systems exists yet. Every component name below, such as `Needs` or `Task`, is a
-working guess, and the counts come from the limits that [ADR 0019](adr/0019-scale-target.md) sets:
+Two systems exist so far, in a first form. `steering` and `movement` in `zurvan` move the god's hand
+towards the cursor, through the `Position`, `Velocity`, `Target` and `Speed` components. Every other
+component name below, such as `Needs` or `Task`, is a working guess. The counts come from the limits that [ADR 0019](adr/0019-scale-target.md) sets:
 50,000 villagers, 500,000 entities, and 15,000 villagers on screen at once.
 
 ## Keeping the List Current
@@ -108,24 +109,25 @@ The renderer comes from [ADR 0005](adr/0005-simulation-apart-from-rendering.md),
 Each system above uses the tables in one of four ways. A design for the ECS serves all four, and
 puts the first one ahead of the others, since most of the time in a step goes there.
 
-1. **A full pass over a few columns.** Needs, tasks, steering, integrate, part animation and extract
-   each visit every row of every table that has their component types. Each one reads or writes
-   only a few columns.
-2. **A few entities, picked by handle.** The hand, the assignments of the planner, damage and
+1. A system makes a full pass over a few columns. Needs, tasks, steering, integrate, part animation
+   and extract each visit every row of every table that has their component types. Each one reads
+   or writes only a few columns.
+2. A system picks a few entities by handle. The hand, the assignments of the planner, damage and
    collisions each reach a handful of entities through their handles. Collisions reach two entities
    in the same columns at once.
-3. **Structural changes.** Spawning, despawning, adding a component and removing one are rare while
-   a level runs, apart from bursts during combat. Loading a level spawns up to 500,000 entities in
-   one burst.
-4. **Single things and small groups.** The hand, the creature, each village and each faction is one
-   entity, or one value that the whole game shares.
+3. A system makes structural changes. Spawning, despawning, adding a component and removing one are
+   rare while a level runs, apart from bursts during combat. Loading a level spawns up to 500,000
+   entities in one burst.
+4. A system works on single things and small groups. The hand, the creature, each village and each
+   faction is one entity, or one value that the whole game shares.
 
 ## Open Questions
 
 The list raises questions that a design for the ECS must answer.
 
-- **Villager parts.** A villager has about 6 rigid parts, under ADR 0012. Were each part an entity
-  of its own, 50,000 villagers would need 300,000 entities for their parts alone. With the villagers
-  themselves, that comes to 350,000 of the 500,000 entities that ADR 0019 allows, which leaves
-  150,000 for every tree, rock, building and thrown object. The TODO list already asks how the
-  tables store the hierarchy of a figure built from parts.
+- A villager has about 6 rigid parts, under ADR 0012, and the design must decide whether each part
+  is an entity. Were each part an entity of its own, 50,000 villagers would need 300,000 entities
+  for their parts alone. With the villagers themselves, that comes to 350,000 of the 500,000
+  entities that ADR 0019 allows, which leaves 150,000 for every tree, rock, building and thrown
+  object. The TODO list already asks how the tables store the hierarchy of a figure built from
+  parts.

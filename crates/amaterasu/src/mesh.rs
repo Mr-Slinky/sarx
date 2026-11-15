@@ -1,7 +1,8 @@
-//! The shape that the renderer draws, stored as a list of vertices.
+//! The shape that the renderer draws, stored as a list of vertices and a list of indices.
 //!
-//! A vertex is one corner of a shape. The GPU draws the shape from its vertices, joining every
-//! three of them into a triangle.
+//! A vertex is one corner of a shape. An index is a position in the list of vertices. The GPU
+//! draws the shape by joining every three indices into a triangle, whose corners are the vertices
+//! that those indices pick out.
 
 use bytemuck::{Pod, Zeroable};
 use hermes::MeshData;
@@ -11,47 +12,57 @@ use wgpu::{BufferAddress, VertexAttribute, VertexBufferLayout, VertexFormat, Ver
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
 pub(crate) struct Vertex {
-    position: [f32; 3], // where the corner sits, in the model's own space
+    position: [f32; 3], // the corner's position, in the model's own space
     normal: [f32; 3],   // the direction that the surface faces at this corner
 }
 
-/// The vertices of one shape, each stored as an x, y and z coordinate in clip space.
+/// The vertices and indices of one shape.
 ///
-/// Clip space is the coordinate system that the GPU draws in. Its x runs from -1 at the window's
-/// left edge to 1 at its right edge, and its y runs from -1 at the bottom edge to 1 at the top.
+/// Each vertex stores a position in the model's own space, and the normal, which is the direction
+/// that the surface faces at that corner.
 ///
-/// A caller copies the vertices into a vertex buffer, using the bytes that `to_bytes` returns.
+/// A caller copies the vertices into a vertex buffer, using the bytes that `cast_vertex_bytes`
+/// returns. It copies the indices into an index buffer in the same way, using `cast_index_bytes`.
 /// The pipeline then reads each vertex back through `LAYOUT`.
 ///
 /// # Examples
 ///
-/// The example copies a triangle into a vertex buffer, then draws every vertex in it.
+/// The example copies the hand's mesh into a vertex buffer and an index buffer, then draws every
+/// triangle in it.
 ///
 /// ```ignore
-/// // Copies the vertices into a vertex buffer, using the bytes that `to_bytes` returns
-/// let mesh = Mesh::build_triangle();
-/// let contents = mesh.to_bytes();
+/// // Copies the vertices into a vertex buffer, using the bytes that `cast_vertex_bytes` returns
+/// let mesh = Mesh::from_mesh_data(hand);
 /// let descriptor = BufferInitDescriptor {
 ///     label: Some("Mesh vertices"),
-///     contents: &contents,
+///     contents: mesh.cast_vertex_bytes(),
 ///     usage: BufferUsages::VERTEX,
 /// };
 /// let vertex_buffer = device.create_buffer_init(&descriptor);
 ///
-/// // Draws every vertex in the buffer, which the pipeline reads back through `LAYOUT`
+/// // Copies the indices into an index buffer, using the bytes that `cast_index_bytes` returns
+/// let descriptor = BufferInitDescriptor {
+///     label: Some("Mesh indices"),
+///     contents: mesh.cast_index_bytes(),
+///     usage: BufferUsages::INDEX,
+/// };
+/// let index_buffer = device.create_buffer_init(&descriptor);
+///
+/// // Draws every triangle, reading each vertex back through `LAYOUT`
 /// render_pass.set_vertex_buffer(0, vertex_buffer.slice(..));
-/// render_pass.draw(0..mesh.vertex_count(), 0..1);
+/// render_pass.set_index_buffer(index_buffer.slice(..), IndexFormat::Uint32);
+/// render_pass.draw_indexed(0..mesh.count_indices(), 0, 0..1);
 /// ```
 pub(crate) struct Mesh {
     vertices: Vec<Vertex>, // every corner, each stored once
-    indices: Vec<u32>,     // three entries for each triangle, each one a position in `vertices`
+    indices: Vec<u32>,     // three entries for each triangle, each one an index into `vertices`
 }
 
 impl Mesh {
-    /// The layout that tells the pipeline how to read the bytes that `to_bytes` returns.
+    /// The layout that tells the pipeline how to read the bytes that `cast_vertex_bytes` returns.
     ///
-    /// Each vertex takes 12 bytes. The vertex shader receives them at location 0, as three `f32`
-    /// values.
+    /// Each vertex takes 24 bytes. The vertex shader receives the position at location 0 and the
+    /// normal at location 1, each as three `f32` values.
     pub(crate) const LAYOUT: VertexBufferLayout<'static> = VertexBufferLayout {
         // Steps 24 bytes from one vertex to the next
         array_stride: size_of::<Vertex>() as BufferAddress,

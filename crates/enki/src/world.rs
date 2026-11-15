@@ -9,8 +9,8 @@
 //!
 //! The world stores its entities in tables, as ADR 0011 sets out. Each table is an [`Archetype`].
 //! A table stores every entity that has one exact set of component types, with one column for each
-//! type. Every entity with a `Position` and a `Health`, for example, lives in the same table. Every
-//! entity with a `Position`, a `Health` and a `Velocity` lives in another table.
+//! type. The world stores every entity with a `Position` and a `Health`, for example, in the same
+//! table. It stores every entity with a `Position`, a `Health` and a `Velocity` in another table.
 //!
 //! A new entity has no components. It therefore starts in the empty table, which has no columns.
 //! The empty table always takes position [`World::EMPTY`] in the list of tables.
@@ -125,7 +125,7 @@ use std::fmt;
 /// // Despawns the player, which drops its health along with it
 /// world.despawn(player);
 ///
-/// // Checks that the old handle now reaches no entity
+/// // Checks that the old handle does not reach an entity any more
 /// assert!(world.get::<Health>(player).is_none());
 /// ```
 pub struct World {
@@ -245,7 +245,6 @@ impl World {
             return false;
         };
 
-        // Borrows the entity's table, to change it in place
         let archetype_table = &mut self.archetypes[location.arch_index()];
         // Deletes the entity's row, which moves the table's last entity into that row
         let filled_opt = archetype_table.remove_entity(location.row());
@@ -254,7 +253,6 @@ impl World {
 
         // Raises the slot's version, which makes `locate` refuse every copy of the dead handle
         self.entities.free(entity);
-        // Reports that the entity existed
         true
     }
 
@@ -374,7 +372,8 @@ impl World {
         // components out, since dropping them inside the move would run their `Drop` before the
         // slots record the move
         let mut replaced = None;
-        // The target has every column that the source table has, meaning `take` never runs
+        // Passes `swap_remove` as `take`, which never runs, since the target has every column that
+        // the source table has
         self.move_entity(
             entity,
             location,
@@ -740,7 +739,6 @@ impl World {
     /// returns the mask with bits 0 and 1 set, whether the query reads or changes each type. The
     /// list for `(&Position, &Velocity)` returns `None`, since `Velocity` has no bit.
     fn find_query_mask(&self, permissions: &[(TypeId, Permission)]) -> Option<ComponentMask> {
-        // Starts with a mask that has no bits set
         let mut mask = ComponentMask::EMPTY;
         // Visits each type in the list, ignoring whether the query reads or changes it
         for (type_id, _) in permissions {
@@ -964,7 +962,6 @@ impl World {
         }
         // Adds the new table at that position
         self.archetypes.push(archetype);
-        // Returns the new table's position
         index
     }
 
@@ -1050,7 +1047,6 @@ impl World {
         // where one does
         let moved_ent = source_table.move_entity(location.row(), target_table, take, fill);
 
-        // Describes where the entity now lives
         let new_location = Location::new(target, row);
         // Updates the slot of `entity`, and the slot of `moved_ent`, which is the entity that
         // filled its old row
@@ -1110,7 +1106,7 @@ impl Default for World {
     ///
     /// The example on [`World`] builds the same world with [`World::new`].
     fn default() -> Self {
-        Self::new() // Builds the same empty world as `new`
+        Self::new()
     }
 }
 
@@ -1232,7 +1228,8 @@ mod tests {
 
     impl Component for Velocity {}
 
-    /// Takes no memory, which gives the world a column for a type with a size of zero.
+    /// Has a size of zero, which gives the world a column for a type that does not take any
+    /// memory.
     #[derive(Debug, PartialEq)]
     struct Marker;
 
@@ -1400,8 +1397,8 @@ mod tests {
     /// A slot is live where the free list lacks its index and its version is below `u32::MAX`. The
     /// helper checks five things:
     ///
-    /// - Each live slot points at a table row that holds the slot's own entity.
-    /// - Each table row holds an entity whose slot is live and points back at that row. Together
+    /// - Each live slot points at a table row that contains the slot's own entity.
+    /// - Each table row contains an entity whose slot is live and points back at that row. Together
     ///   with the first check and equal counts, every live slot then owns exactly one row.
     /// - Every column has one component for each row of its table.
     /// - `indices` files each table under the table's own mask, and has one entry for each table.
@@ -1419,7 +1416,7 @@ mod tests {
             assert!(freed.insert(index), "index {index} freed twice");
         }
 
-        // Checks that each live slot points at a row that holds its entity, and counts them
+        // Checks that each live slot points at a row that contains its entity, and counts them
         let mut live_slots = 0;
         for index in 0..world.entities.count_slots() {
             let (version, location) = world.entities.read_slot(index);
@@ -1530,7 +1527,8 @@ mod tests {
         }
     }
 
-    /// Checks that each spawned entity lives in the empty table, at the row of its spawn order
+    /// Checks that the world stores each spawned entity in the empty table, at the row of its spawn
+    /// order
     #[test]
     fn spawn_empty_with_several_spawns_places_each_in_next_row_of_empty_table() {
         let mut world = World::new();
@@ -1812,7 +1810,7 @@ mod tests {
         );
     }
 
-    /// Checks that a component of a type the entity already has replaces the old one in place
+    /// Checks that a component of a type that the entity already has replaces the old one in place
     #[test]
     fn add_component_with_existing_component_type_replaces_value_in_place() {
         let mut world = World::new();
@@ -2460,8 +2458,8 @@ mod tests {
         );
     }
 
-    /// Checks that `add_component` hands the component back for a handle of no living entity, and
-    /// leaves the world unchanged
+    /// Checks that `add_component` hands the component back for a handle that does not refer to a
+    /// living entity, and leaves the world unchanged
     #[test]
     fn add_component_with_handle_of_no_living_entity_returns_component() {
         let cases = [
@@ -2474,7 +2472,7 @@ mod tests {
         for (label, handle) in cases {
             let mut world = World::new();
             world.spawn_empty();
-            // Spawns and despawns the entity at index 1, which the first case then names
+            // Spawns and despawns the entity at index 1, which the first case then uses
             let despawned = world.spawn_empty();
             world.despawn(despawned);
 
@@ -2517,8 +2515,8 @@ mod tests {
         assert_eq!(world.get::<Health>(entity), Some(&Health(100)), "health");
     }
 
-    /// Checks that `add_components` hands the component set back for a handle of no living entity,
-    /// and leaves the world unchanged
+    /// Checks that `add_components` hands the component set back for a handle that does not refer
+    /// to a living entity, and leaves the world unchanged
     #[test]
     fn add_components_with_handle_of_no_living_entity_returns_set() {
         let cases = [
@@ -2544,8 +2542,8 @@ mod tests {
     }
 
     /// Checks that `add_components` hands the component set back without dropping it, where the
-    /// handle refers to no living entity, and that the component set drops once when the caller
-    /// drops it
+    /// handle does not refer to a living entity, and that the component set drops once when the
+    /// caller drops it
     #[test]
     fn add_components_with_despawned_entity_returns_set_undropped() {
         let drops = Arc::new(AtomicUsize::new(0));
@@ -3025,7 +3023,7 @@ mod tests {
         assert_eq!(found, None);
     }
 
-    /// Checks that a handle at another version of a living entity's slot reaches nothing
+    /// Checks that a handle at another version of a living entity's slot does not reach an entity
     #[test]
     fn get_with_other_version_of_living_slot_returns_none() {
         let cases = [

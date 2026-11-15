@@ -19,7 +19,7 @@ use wgpu::{CreateSurfaceError, RequestAdapterError, RequestDeviceError};
 /// The example prints the failure, then the wgpu error behind it, where there is one.
 ///
 /// ```ignore
-/// if let Err(error) = renderer.render() {
+/// if let Err(error) = renderer.render(&camera, hand_transform) {
 ///     // Prints the failure
 ///     eprintln!("Error: {error}");
 ///

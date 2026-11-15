@@ -11,10 +11,10 @@ decision-makers: Kheagen Haskins
 wgpu copies data to the GPU as a slice of bytes, a `&[u8]`. The GPU then reads those bytes by the
 layout that the pipeline states, such as a byte offset for each vertex attribute.
 
-Today, `Mesh` stores each vertex as `[f32; 3]`. Its `to_bytes` method builds a new `Vec<u8>`, and
-copies each coordinate into it with `to_ne_bytes`.
+Before this decision, `Mesh` stored each vertex as `[f32; 3]`. Its `to_bytes` method built a new
+`Vec<u8>`, and copied each coordinate into it with `to_ne_bytes`.
 
-The hand step brings two more kinds of data. A vertex becomes a `Vertex` struct, with a position and
+The hand step brought two more kinds of data. A vertex became a `Vertex` struct, with a position and
 a normal. The camera also sends its matrices to the shader in a uniform buffer, which is a small GPU
 buffer that every vertex can read.
 
@@ -22,7 +22,7 @@ Copying field by field needs more code with every new field. A direct cast avoid
 treating the memory of a struct as bytes without copying it.
 
 A direct cast is safe only for some types. Where a struct has padding, the compiler leaves gaps
-between its fields, and those gaps hold uninitialised memory. Reading uninitialised memory as `u8`
+between its fields, and those gaps contain uninitialised memory. Reading uninitialised memory as `u8`
 is undefined behaviour.
 
 How does Sarx turn vertices and uniforms into bytes?
@@ -74,8 +74,7 @@ which ADR 0017 sets out. A `Mat4` field then counts as `Pod` inside a uniform st
 
 ### Confirmation
 
-Nothing in the code embodies this decision yet. Once `Vertex` exists, a reader confirms it with two
-checks:
+A reader confirms this decision in `amaterasu` with two checks:
 
 - `Vertex` and each uniform struct take `#[repr(C)]`, and derive `Pod` and `Zeroable`.
 - No type that the GPU reads has a `to_bytes` method of its own.
@@ -92,9 +91,9 @@ bytemuck is a small library of safe casts between types and bytes.
 
 ### A `to_bytes` Method on Each Type
 
-Each type would copy its fields into a `Vec<u8>`, as `Mesh::to_bytes` does today.
+Each type would copy its fields into a `Vec<u8>`, as `Mesh::to_bytes` did before this decision.
 
-- Good, because the code contains no `unsafe` block.
+- Good, because the code does not contain an `unsafe` block.
 - Bad, because every new field needs a new line in `to_bytes`. A field left out shifts every offset
   after it, and nothing reports the mistake until the picture comes out wrong.
 - Bad, because every call copies the data once before wgpu copies it again.

@@ -412,7 +412,6 @@ impl Archetype {
         // Ends the program where anything below panics, since the columns would then differ in
         // length
         let guard = AbortOnUnwind;
-        // Visits each column in the table
         for components in &mut self.components {
             // Drops the entity's component, and fills `row` with the column's last component
             components.swap_remove(row);
@@ -495,12 +494,8 @@ impl Archetype {
         // Ends the program where anything below panics, since the columns in both tables would then
         // differ in length
         let guard = AbortOnUnwind;
-        // Visits each column in this table
         for components in &mut self.components {
-            // Finds the component type that the column stores
             let type_id = components.info().type_id();
-            // Moves the entity's component where the target stores its type, and hands the column to
-            // `take` otherwise
             match target.components_of_mut(type_id) {
                 // Moves the component to the end of the target's column for the same type
                 Some(target_components) => components.move_component(row, target_components),
@@ -541,7 +536,6 @@ impl Archetype {
     /// entity joins the entity list without a `Health`, it returns `false`.
     fn has_one_component_per_entity(&self) -> bool {
         let ent_count = self.entities.len();
-        // Checks that every column has one component for each row
         self.components
             .iter()
             .all(|components| components.len() == ent_count)
@@ -1097,7 +1091,7 @@ mod tests {
         assert_eq!(target.entities, [first], "target entities");
     }
 
-    /// Checks that a column of a zero-sized type moves by count alone
+    /// Checks that a column of a type of size zero moves by count alone
     #[test]
     fn move_entity_with_zero_size_type_moves_count() {
         struct Tag;
@@ -1299,8 +1293,8 @@ mod tests {
         }
     }
 
-    /// Checks that the reserved rows fit in the blocks that the table already has, meaning no
-    /// column and not the entity list moves to a larger block
+    /// Checks that the reserved rows fit in the blocks that the table already has, meaning that
+    /// neither the entity list nor any column moves to a larger block
     #[test]
     fn reserve_with_varying_additional_rows_fits_rows_without_moving_blocks() {
         let cases = [1_u32, 4, 9];
@@ -1573,7 +1567,7 @@ mod tests {
         assert_eq!(drops_after_table, 3, "drops after the table is gone");
     }
 
-    /// Checks that a column of a zero-sized type with clean-up code drops the removed component
+    /// Checks that a column of a type of size zero with clean-up code drops the removed component
     #[test]
     fn remove_entity_with_zero_size_drop_type_drops_removed_component() {
         // Counts the drops outside the type, since a type of size zero has no room for a counter

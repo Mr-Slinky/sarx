@@ -14,7 +14,7 @@ leaves open what the player does from the start of a level until then.
 
 A game loop is the cycle of actions that a player repeats throughout a level. Each pass through the
 loop leaves the player a little stronger, and gives them a reason to start the next one. Sarx needs
-a game loop that carries the player towards the win condition.
+a game loop that leads the player towards the win condition.
 
 ADR 0012 gives Sarx a stylised look, with bright colours and simple forms, and builds each villager
 from separate rigid parts. It also leaves open what makes that look belong to Sarx alone.
@@ -34,7 +34,7 @@ Spore lets the player build each creature in an editor. An editor of that kind w
 developer a year or more to build. Every body that it allowed would also need its own walk, its own
 collision shape and its own way of breaking apart in combat.
 
-What game loop carries the player towards victory, and can the same idea give the people of Sarx a
+What game loop leads the player towards victory, and can the same idea give the people of Sarx a
 look of their own?
 
 ## Decision Drivers
@@ -169,8 +169,8 @@ The god's hand, however, is not made of a material. It looks like a normal human
 
 Clay is the first material that the developer will build, as a full vertical slice of the game
 around clay figures: the model, the break, the physics and the ceremony. The first people and the
-first creature in that slice are therefore clay. Wood and the
-other materials will follow once clay has proved the idea.
+first creature in that slice are therefore clay. Wood and the other materials will follow once clay
+has proved the idea.
 
 ### Open Points
 

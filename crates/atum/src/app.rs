@@ -4,7 +4,8 @@
 //! closing the window, winit calls a method on [`App`].
 //!
 //! The `App` owns the window, together with the [`Renderer`] that draws into it. Each method passes
-//! its event on to the renderer, prints it, or ends the program.
+//! its event on to the renderer, stores the cursor's position, prints the event, or ends the
+//! program.
 
 use crate::executor::block_on;
 use amaterasu::{Camera, Renderer};
@@ -54,7 +55,6 @@ impl App {
     const CAMERA_TARGET: Vec3 = Vec3::new(0.3, 0.0, -2.0);
 
     pub(crate) fn new() -> Self {
-        // Points the camera at `CAMERA_TARGET` from `CAMERA_EYE`
         let camera = Camera::new(Self::CAMERA_EYE, Self::CAMERA_TARGET);
         Self {
             window: None,
@@ -67,7 +67,7 @@ impl App {
     }
 
     fn draw_frame(&mut self, event_loop: &ActiveEventLoop) {
-        // Returns until both the window and the renderer exist
+        // Skips the frame until both the window and the renderer exist
         let (Some(window), Some(renderer)) = (&self.window, self.renderer.as_mut()) else {
             return;
         };
@@ -75,13 +75,14 @@ impl App {
         let now = Instant::now();
         // Measures the time since the last frame, or zero on the first frame
         let elapsed = self.last_frame.map_or(Duration::ZERO, |last| now - last);
-        // Records this frame's start for the next one
         self.last_frame = Some(now);
 
         let size = window.inner_size();
         // Converts the window size to floats for the camera's maths
         let window_size = Vec2::new(size.width as f32, size.height as f32);
-        // Aims the hand at the ground under the cursor, where the cursor has moved over the window and its ray reaches the ground
+        // Aims the hand at the ground under the cursor. The camera casts a ray through the cursor,
+        // and the aim changes only once the cursor has moved over the window and the ray meets
+        // the ground
         if let Some(cursor) = self.cursor
             && let Some(ray) = self.camera.cast_ray(cursor, window_size)
             && let Some(ground_point) = ray.meet_ground()
@@ -126,8 +127,9 @@ impl App {
 impl ApplicationHandler for App {
     /// Creates the window and the renderer on the first call.
     ///
-    /// Every later call gives the renderer a new surface for the window. Where the renderer cannot
-    /// be set up, or cannot take its new surface, `resumed` ends the event loop.
+    /// Every later call gives the renderer a new surface for the window. Where the hand model
+    /// cannot be read, the renderer cannot be set up, or the renderer cannot take its new surface,
+    /// `resumed` prints the error and ends the program.
     ///
     /// # Panics
     ///
@@ -157,7 +159,7 @@ impl ApplicationHandler for App {
                 .expect("Failed to create the window");
             let window = Arc::new(window);
 
-            // Reads the hand's mesh, or ends the program where the file cannot be read
+            // Reads the hand's mesh, or ends the program where the hand model cannot be read
             let hand = match hermes::read_mesh(Self::HAND_MODEL) {
                 Ok(hand) => hand,
                 Err(error) => {
@@ -183,11 +185,12 @@ impl ApplicationHandler for App {
 
     /// Handles one event for the window.
     ///
-    /// `window_event` passes each resize and redraw on to the renderer, ends the program when the
-    /// player closes the window, and prints every other event to standard output.
+    /// `window_event` passes each resize on to the renderer, and draws a frame for each redraw. It
+    /// stores the cursor's position whenever the cursor moves, ends the program when the player
+    /// closes the window, and prints every other event to standard output.
     ///
-    /// Where `render` returns an error, such as a lost connection to the GPU or a surface that it
-    /// cannot replace, `window_event` prints the error and ends the program too.
+    /// Where `render` returns an error, such as a lost connection to the GPU or a surface that the
+    /// renderer cannot replace, `window_event` prints the error and ends the program too.
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _: WindowId, event: WindowEvent) {
         match event {
             WindowEvent::CloseRequested => event_loop.exit(),

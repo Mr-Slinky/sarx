@@ -3,13 +3,13 @@ const AMBIENT: f32 = 0.2;
 // The colour of the hand's skin, as RGB from 0 to 1
 const SKIN: vec3<f32> = vec3<f32>(0.85, 0.64, 0.52);
 
-// Matches `SceneUniforms` in `uniforms.rs`, field for field
+// Matches `SceneUniforms` in `uniform.rs`, field for field
 struct Scene {
     view_projection: mat4x4<f32>,
     light_direction: vec4<f32>,
 }
 
-// Matches `ObjectUniforms` in `uniforms.rs`
+// Matches `ObjectUniforms` in `uniform.rs`
 struct Object {
     model: mat4x4<f32>,
 }
@@ -33,15 +33,13 @@ struct VertexOutput {
 
 @vertex
 fn vs_main(input: VertexInput) -> VertexOutput {
-    // Declares the output, which the lines below fill in
     var output: VertexOutput;
     // Places the vertex in the world, with w set to 1, since it is a point
     let world_position = object.model * vec4<f32>(input.position, 1.0);
     // Places the world point on the screen, through the camera's matrix
     output.clip_position = scene.view_projection * world_position;
-    // Turns the normal with the mesh, with w set to 0, since a direction does not move with a translation
+    // Rotates the normal with the mesh, with w set to 0, since a direction does not move with a translation
     output.normal = (object.model * vec4<f32>(input.normal, 0.0)).xyz;
-    // Returns both
     return output;
 }
 

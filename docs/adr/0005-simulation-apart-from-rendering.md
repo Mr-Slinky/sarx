@@ -58,7 +58,7 @@ that the step covers. With the cap, it runs the game in slow motion. Without the
 further behind on every frame, until the backlog of steps froze the game.
 
 The simulation lives in the `zurvan` crate, which depends on `enki` and does not depend on any
-graphics code. The first fixed-step simulation arrives with the TODO item "Draw the god's hand and
+graphics code. The first fixed-step simulation arrived with the TODO item "Draw the god's hand and
 move it with the cursor across a flat ground plane".
 
 Two questions remain open. This decision leaves both to a later discussion.
@@ -87,13 +87,13 @@ Two questions remain open. This decision leaves both to a later discussion.
 `cargo tree -p zurvan` does not list a graphics crate, such as `wgpu`, `winit` or `amaterasu`.
 The `[dependencies]` table in `crates/zurvan/Cargo.toml` shows the same.
 
-Once the simulation exists, a reader also checks the code for four points:
+A reader also checks `Simulation` in `zurvan`, and the game loop in `atum`, for four points:
 
 - The step length is a single constant.
 - The function that advances the simulation by one step does not take elapsed frame time.
 - The game loop calls that function as many times as the clock calls for, separately from its call
   to draw a frame.
-- The loop adds no more than 250 ms to its running total in one frame.
+- The loop adds at most 250 ms to its running total in one frame.
 
 ## Pros and Cons of the Options
 

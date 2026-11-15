@@ -185,8 +185,8 @@ pub unsafe trait Query: sealed::Sealed {
     ///
     /// - Nothing changes the columns of `archetype` during `'w`, apart from the query itself
     ///   through a column that it borrows mutably. Nothing else reads such a column. A caller that
-    ///   holds `&mut World` for `'w` meets this guarantee. So does a caller that holds `&World` for
-    ///   a query that implements [`ReadOnlyQuery`].
+    ///   borrows `&mut World` for `'w` meets this guarantee. So does a caller that borrows `&World`
+    ///   for a query that implements [`ReadOnlyQuery`].
     /// - `check_permissions` has already returned for the query type, without a panic.
     /// - No other live slice of a column that the query borrows mutably exists during `'w`. Shared
     ///   slices of one column can overlap, which Rust allows. Two `query::<&Position>()` iterators
@@ -244,7 +244,7 @@ pub unsafe trait Query: sealed::Sealed {
     ///
     /// # Examples
     ///
-    /// For the rows of a `Position` column that holds `Position(1.0)` and `Position(2.0)`, row 1
+    /// For the rows of a `Position` column that stores `Position(1.0)` and `Position(2.0)`, row 1
     /// returns `&Position(2.0)`. The test `split_rows_with_read_query_yields_items_in_row_order`
     /// reads every row in order.
     #[doc(hidden)]
@@ -282,7 +282,7 @@ pub unsafe trait Query: sealed::Sealed {
 /// # Lifetimes
 ///
 /// The lifetime `'w` is the borrow of the column that [`Query::build_rows`] receives as a
-/// `&'w mut [T]`. `start` is a raw pointer, which carries no lifetime. The field `borrow` keeps
+/// `&'w mut [T]`. `start` is a raw pointer, which has no lifetime. The field `borrow` keeps
 /// `'w` attached, as though the struct still contained the `&'w mut [T]`. The compiler therefore
 /// treats the column as borrowed for as long as the struct or any item built from it is in use.
 ///
@@ -375,7 +375,7 @@ unsafe impl<T: Component> Query for &mut T {
         // raw pointer `data`. The borrow of `archetype` therefore leaves that block open to a write
         // through `start`. Three guarantees from the caller keep every other reference off it:
         //
-        // - The caller holds `&mut World` for `'w`, meaning nothing outside the query reaches any
+        // - The caller borrows `&mut World` for `'w`, meaning nothing outside the query reaches any
         //   table. A `&mut T` query reaches this method only through the `_mut` methods on
         //   `World`, since `&mut T` does not implement `ReadOnlyQuery`, and the seal on
         //   `ReadOnlyQuery` stops any other crate from implementing it.
@@ -920,7 +920,7 @@ mod tests {
         check_permissions::<(&mut Position, &Velocity, &Tag, &Position)>();
     }
 
-    /// Checks that a size-zero type that the query changes twice panics like any other type
+    /// Checks that a type of size zero that the query changes twice panics like any other type
     #[test]
     #[should_panic]
     fn check_permissions_with_duplicate_zero_size_type_panics() {
@@ -1075,7 +1075,7 @@ mod tests {
         );
     }
 
-    /// Checks that a mutable column of a size-zero type has one entry for each row, and takes
+    /// Checks that a mutable column of a type of size zero has one entry for each row, and takes
     /// writes
     #[test]
     fn find_columns_with_zero_size_write_query_returns_column_of_row_count() {
@@ -1250,7 +1250,7 @@ mod tests {
         }
     }
 
-    /// Checks that a size-zero type still yields one item for each row, beside a type with data
+    /// Checks that a type of size zero still yields one item for each row, beside a type with data
     #[test]
     fn split_rows_with_zero_size_type_yields_one_item_per_row() {
         let mut table = build_table(&[1.0, 2.0, 3.0]);

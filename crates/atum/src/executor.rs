@@ -34,7 +34,7 @@ use std::thread::{self, Thread};
 /// assert_eq!(answer, 42);
 ///
 /// // Polls the renderer's setup until it finishes, parking the thread while it waits
-/// let renderer_setup = Renderer::new(Arc::clone(&window), size.width, size.height);
+/// let renderer_setup = Renderer::new(Arc::clone(&window), size.width, size.height, hand);
 /// let renderer = block_on(renderer_setup)?;
 /// ```
 pub(crate) fn block_on<F: Future>(future: F) -> F::Output {

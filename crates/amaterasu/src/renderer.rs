@@ -9,8 +9,8 @@
 //! connection, a surface can be lost and replaced while the program runs. A
 //! [`SurfaceContext`](crate::context::SurfaceContext) stores it.
 //!
-//! Both live in the `gpu_context` module. This module holds the renderer, which draws each frame
-//! with them.
+//! Both are defined in the `context` module. This module defines the renderer, which draws each
+//! frame with them.
 
 use glam::{Mat4, Vec4};
 use hermes::MeshData;
@@ -46,8 +46,11 @@ use crate::uniform::{ObjectUniforms, SceneUniforms};
 ///
 /// ```ignore
 /// // Creates a renderer at 1280 by 720 pixels, for any window that meets the three bounds
-/// async fn create_renderer<W: RenderWindow>(window: Arc<W>) -> Result<Renderer, RendererError> {
-///     Renderer::new(window, 1280, 720).await
+/// async fn create_renderer<W: RenderWindow>(
+///     window: Arc<W>,
+///     hand: MeshData,
+/// ) -> Result<Renderer, RendererError> {
+///     Renderer::new(window, 1280, 720, hand).await
 /// }
 /// ```
 pub trait RenderWindow: DisplayAndWindowHandle + Debug + 'static {}
@@ -71,14 +74,14 @@ impl<W> RenderWindow for W where W: DisplayAndWindowHandle + Debug + 'static {}
 /// ```ignore
 /// // Creates the renderer once the window exists
 /// let size = window.inner_size();
-/// let renderer_setup = Renderer::new(Arc::clone(&window), size.width, size.height);
+/// let renderer_setup = Renderer::new(Arc::clone(&window), size.width, size.height, hand);
 /// let mut renderer = block_on(renderer_setup)?;
 ///
 /// // Passes each new window size to `resize`, and calls `render` each time the window needs
 /// // redrawing
 /// match event {
 ///     WindowEvent::Resized(size) => renderer.resize(size.width, size.height),
-///     WindowEvent::RedrawRequested => renderer.render()?,
+///     WindowEvent::RedrawRequested => renderer.render(&camera, hand_transform)?,
 ///     _ => {}
 /// }
 /// ```
@@ -95,7 +98,7 @@ pub struct Renderer {
 }
 
 impl Renderer {
-    /// The dark blue that fills each frame before the renderer draws the triangle.
+    /// The dark blue that fills each frame before the renderer draws the hand.
     const CLEAR_COLOUR: Color = Color {
         r: 0.1,
         g: 0.2,
@@ -106,11 +109,12 @@ impl Renderer {
     // The direction that the light travels in: downwards, and a little to the left and away from the camera
     const LIGHT_DIRECTION: Vec4 = Vec4::new(-0.3, -1.0, -0.5, 0.0);
 
-    /// Creates a renderer that draws into `window`, at `width` by `height` pixels.
+    /// Creates a renderer that draws `hand` into `window`, at `width` by `height` pixels.
     ///
-    /// `new` first connects to a GPU that can draw to the window. It then copies the triangle into
-    /// GPU memory and compiles the shader. Last, it builds the pipeline, which is the set of
-    /// settings that the GPU follows to draw the triangle.
+    /// `new` first connects to a GPU that can draw to the window. It then copies the hand's mesh
+    /// into GPU memory, creates the buffers that the shader reads the camera and the light from,
+    /// and compiles the shader. Last, it builds the pipeline, which is the set of settings that the
+    /// GPU follows to draw the hand.
     ///
     /// # Errors
     ///
@@ -128,9 +132,9 @@ impl Renderer {
     /// The example creates a renderer for a winit window, at the window's current size.
     ///
     /// ```ignore
-    /// // Creates a renderer that draws into the window at its current size
+    /// // Creates a renderer that draws the hand's mesh into the window at its current size
     /// let size = window.inner_size();
-    /// let renderer_setup = Renderer::new(Arc::clone(&window), size.width, size.height);
+    /// let renderer_setup = Renderer::new(Arc::clone(&window), size.width, size.height, hand);
     ///
     /// // Waits for the setup to finish, since `new` returns a future
     /// let renderer = block_on(renderer_setup)?;
@@ -210,7 +214,7 @@ impl Renderer {
     /// renderer.suspend();
     ///
     /// // Skips the frame and returns `Ok(())`
-    /// renderer.render()?;
+    /// renderer.render(&camera, hand_transform)?;
     /// ```
     pub fn suspend(&mut self) {
         self.gpu.suspend();
@@ -255,7 +259,9 @@ impl Renderer {
 
     /// Draws one frame and shows it in the window.
     ///
-    /// Each frame shows an orange triangle over a dark blue background.
+    /// Each frame shows the hand over a dark blue background, lit from one direction and seen
+    /// through `camera`. `hand_transform` is the hand's model matrix, which places the hand's mesh
+    /// in the world.
     ///
     /// Some calls skip the frame. While the app is suspended, no surface exists, and `render`
     /// returns at once.
@@ -287,7 +293,7 @@ impl Renderer {
     ///
     /// ```ignore
     /// // Draws one frame and shows it in the window
-    /// if let Err(error) = renderer.render() {
+    /// if let Err(error) = renderer.render(&camera, hand_transform) {
     ///     // Ends the program, since each error points to a dead connection, a lost surface that
     ///     // could not be replaced, or a bug
     ///     eprintln!("Error: {error}");
@@ -346,7 +352,7 @@ impl Renderer {
 
         // Points the pass at the multisampled texture, which stores several samples for each
         // pixel. The pass clears that texture and draws into it. It then averages each pixel's
-        // samples into the surface texture, thereby smoothing the triangle's edges
+        // samples into the surface texture, thereby smoothing the hand's edges
         let colour_attachment = RenderPassColorAttachment {
             view: &surface_context.msaa_view,
             depth_slice: None,

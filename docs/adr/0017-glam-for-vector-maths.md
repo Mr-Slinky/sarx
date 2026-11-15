@@ -12,7 +12,7 @@ The hand step draws the god's hand in 3D, and moves it with the cursor. Both par
 vector and matrix maths.
 
 The camera gives the vertex shader two matrices. The view matrix moves every point in the world so
-that the camera sits at the origin, looking down one axis. The projection matrix then applies
+that the camera stands at the origin, looking down one axis. The projection matrix then applies
 perspective, which makes distant points move towards the centre of the screen.
 
 The ray from the cursor runs the same maths in reverse. It starts from a point on the screen, and
@@ -48,8 +48,9 @@ Where does Sarx get its vector and matrix maths?
 
 ## Decision Outcome
 
-Chosen option: "glam", because it answers all three questions in the README in its favour. It brings
-no architecture, it hides only arithmetic, and it saves work in every layer that follows.
+Chosen option: "glam", because it answers all three questions in the README in its favour. It does
+not bring an architecture of its own, it hides only arithmetic, and it saves work in every layer
+that follows.
 
 glam supplies the types that the hand step uses: `Vec3` for points, directions and normals, `Mat4`
 for the camera, and `Quat` for the rotations that ADR 0014 turns by slerp.
@@ -73,16 +74,15 @@ must use the version without `_gl`.
   GPU buffer in the way that ADR 0018 sets out.
 - Bad, because glam hides the arithmetic inside each operation, such as how a matrix is inverted.
 - Bad, because glam is below version 1.0. A change in its second version number can break the API,
-  as with winit. An agent therefore checks the glam source for the version in `Cargo.lock`, as it
-  does for wgpu.
+  as with winit. An agent therefore checks the glam source for the version that `Cargo.lock`
+  records, as for wgpu.
 
 ### Confirmation
 
-Nothing in the code embodies this decision yet. Once the camera exists, a reader confirms it with two
-checks:
+A reader confirms this decision with two checks:
 
 - The workspace depends on `glam`.
-- Sarx declares no vector or matrix type of its own.
+- Sarx does not declare a vector or matrix type of its own.
 
 ## Pros and Cons of the Options
 
@@ -102,7 +102,7 @@ The developer would write `Vec3`, `Mat4` and `Quat`, along with the operations t
 - Good, because the developer would write the arithmetic of every operation.
 - Bad, because every layer from the hand step onwards would wait on that maths.
 - Bad, because a mistake in an inverse or a slerp shows up only as a wrong picture on the screen. It
-  gives no error that points to the faulty line.
+  does not give an error that points to the faulty line.
 
 ### nalgebra
 

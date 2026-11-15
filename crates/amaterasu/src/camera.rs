@@ -21,24 +21,40 @@ impl Camera {
     const FAR: f32 = 100.0;
 
     pub fn new(eye: Vec3, target: Vec3) -> Self {
-        // Stores where the camera stands and what it looks at
         Self { eye, target }
     }
 
     pub fn build_view_projection(&self, aspect_ratio: f32) -> Mat4 {
         let view_matrix = view::look_at_mat4(self.eye, self.target, Vec3::Y);
-        // applies perspective and maps depth to 0 to 1
+        // Applies perspective, and maps depth to the range 0 to 1
         let proj_matrix =
             proj::directx::perspective(Self::FOV_Y, aspect_ratio, Self::NEAR, Self::FAR);
 
-        // applies the view first and the projection second
+        // Applies the view first and the projection second
         proj_matrix * view_matrix
     }
 
-    /// The hand must follow the cursor. The cursor, however, is a point on the screen, and
-    /// the hand lives in the world. One pixel covers a whole line of world points, from
-    /// just in front of the camera out to the furthest distance it draws. This method finds
-    /// that line.
+    /// Returns the ray that runs through the world under `cursor`.
+    ///
+    /// The cursor is a point on the screen, in pixels from the window's top-left corner.
+    /// `window_size` gives the window's width and height in pixels. One pixel covers a whole line
+    /// of world points, from the camera's near plane out to the furthest distance that the camera
+    /// draws. The returned ray starts on the near plane and follows that line, one unit long.
+    ///
+    /// Returns `None` where the window has a width or height of zero, as a minimised window does.
+    ///
+    /// # Examples
+    ///
+    /// The example finds the point on the ground under the cursor.
+    ///
+    /// ```ignore
+    /// // Casts the ray under the cursor, then finds where it meets the ground
+    /// if let Some(ray) = camera.cast_ray(cursor, window_size)
+    ///     && let Some(ground_point) = ray.meet_ground()
+    /// {
+    ///     println!("The cursor is over {ground_point}");
+    /// }
+    /// ```
     pub fn cast_ray(&self, cursor: Vec2, window_size: Vec2) -> Option<Ray> {
         // Returns `None` for a window with no area, such as a minimised one, since the maths divides by its size
         if window_size.x <= 0.0 || window_size.y <= 0.0 {
@@ -60,7 +76,6 @@ impl Camera {
         let far_point = inverse.project_point3(Vec3::new(clip_x, clip_y, 1.0));
         // Points from the near point towards the far point, at a length of one unit
         let direction = (far_point - near_point).normalize();
-        // Returns the ray
         Some(Ray {
             origin: near_point,
             direction,

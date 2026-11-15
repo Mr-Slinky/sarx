@@ -30,7 +30,7 @@ A phone means an Android build. That build needs three things:
 - a Gradle project that packages the app
 - the Android SDK and NDK on the developer's machine
 
-A phone also means holding the renderer to the limits that wgpu guarantees on OpenGL ES 3.1. Those
+A phone also means keeping the renderer within the limits that wgpu guarantees on OpenGL ES 3.1. Those
 limits cap a texture at 2048 pixels on each side. A window on a 1440p or 4K monitor is wider than
 that, and its surface then fails to configure.
 
@@ -81,7 +81,7 @@ The code that a port would need stays in place. It consists of two pieces:
 
 ### Confirmation
 
-`GpuContext::new` in `crates/amaterasu/src/renderer.rs` requests `Limits::default()`.
+`GpuContext::new` in `crates/amaterasu/src/context.rs` requests `Limits::default()`.
 
 ## Pros and Cons of the Options
 

@@ -147,7 +147,7 @@ pub trait ComponentSet: sealed::Sealed + Send + Sync + 'static {
     /// result. Otherwise the method pushes the new component onto the end of the column.
     ///
     /// The caller owns the replaced components, and decides when they drop. `World` drops them
-    /// once its slots record where the entity now lives. A `Drop` implementation that panics
+    /// once its slots record where the entity is now stored. A `Drop` implementation that panics
     /// therefore runs only once the table and the slots agree.
     ///
     /// The method takes the component set by value, meaning the table owns each component from then
@@ -224,7 +224,6 @@ fn push_or_replace<T: Component>(
     // Replaces the component at `row`, where the entity already had a `T`
     let bit = column.info().bit();
     if existing.contains_any(bit) {
-        // Finds the component at `row`
         let slot = &mut column.as_mut_slice::<T>()[row];
         // Puts `value` in its place, and returns the old component for the caller to drop
         return Some(mem::replace(slot, value));
@@ -232,7 +231,6 @@ fn push_or_replace<T: Component>(
 
     // Moves `value` onto the end of the column
     column.push_typed(value);
-    // Reports that no component was replaced
     None
 }
 
@@ -685,8 +683,8 @@ mod tests {
         }
     }
 
-    /// Checks that a type the world has met before keeps its bit, and a new type takes the next
-    /// free bit
+    /// Checks that a type that the world has met before keeps its bit, and a new type takes the
+    /// next free bit
     #[test]
     fn infos_with_known_and_new_types_reuses_known_bits() {
         let mut registry = ComponentRegistry::new();
@@ -862,7 +860,7 @@ mod tests {
         }
     }
 
-    /// Checks that a component type that takes no memory is still pushed and replaced by count
+    /// Checks that a component type of size zero is still pushed and replaced by count
     #[test]
     fn push_or_replace_with_zero_size_type_pushes_then_replaces() {
         #[derive(Debug, PartialEq)]

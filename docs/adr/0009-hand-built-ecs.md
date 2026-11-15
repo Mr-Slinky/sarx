@@ -115,7 +115,7 @@ specs is an older ECS library for Rust. It is best known as the ECS of the Ameth
 - Bad, because it brings its own architecture. Systems implement its `System` trait, and declare
   their data through its `SystemData` types. Its dispatcher then runs them.
 - Bad, because it hides the ECS, which is the part that the developer wants to learn.
-- Bad, because Amethyst ended development in 2022, as far as the author knows. specs appears to
+- Bad, because Amethyst ended development in 2022, as far as the developer knows. specs appears to
   have seen little new work since.
 
 ### Plain Structs, One per Kind of Object

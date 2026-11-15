@@ -96,8 +96,7 @@ cross the split, and splitting it by component would leave each villager in seve
 pros and cons below set out.
 
 The boundary between simulation and rendering is another matter, since ADR 0005 already draws it.
-The renderer could keep a
-world of its own, copied from the simulation after each step. The simulation would then run its
+The renderer could keep a world of its own, copied from the simulation after each step. The simulation would then run its
 next step while the renderer draws the last one. That remains open as a later addition.
 
 ### How a System Declares Its Access
@@ -146,7 +145,7 @@ Two other forms were considered:
 
 The scheduler must keep its systems in one list, in the order that they were added. Where two
 systems conflict, the one earlier in the list runs first. Systems that do not conflict run whenever
-a worker is free, wherever they sit in the list.
+a worker is free, wherever they appear in the list.
 
 ```rust
 scheduler.add_system(input);
@@ -197,7 +196,7 @@ decided while it runs, from how busy the workers are at that moment.
 
 Splitting never creates a conflict, since each chunk is a separate part of a column that the system
 already declared. A system MUST wait for every chunk to finish before it returns, since each chunk
-borrows the world through the borrow that the system holds. `std::thread::scope` applies the same
+borrows the world through the same borrow as the system. `std::thread::scope` applies the same
 rule to scoped threads.
 
 A system that started threads of its own would compete with the workers for the same cores. Every
@@ -211,7 +210,7 @@ which the hand follows.
 
 The world must store its resources in a map from the `TypeId` of each resource type to its value.
 Each value is a `Box<dyn Any + Send + Sync>`, which the world downcasts to the type that a caller
-asks for. A world holds at most one resource of each type. Code outside the scheduler, such as the
+asks for. A world stores at most one resource of each type. Code outside the scheduler, such as the
 setup of a level, inserts and reads resources through the world, in the way that it reaches
 entities.
 
@@ -230,15 +229,15 @@ of them writes the resource, and the other reads or writes it. Each `Permission`
 whether it refers to a component or a resource. A type that is both a component and a resource then
 produces a conflict only where two systems use it in the same role.
 
-Before the first step, the scheduler must check that the world holds every resource that its systems
-ask for. Where one is missing, the scheduler refuses to start, and names the system and the missing
-type.
+Before the first step, the scheduler must check that the world stores every resource that its
+systems ask for. Where one is missing, the scheduler refuses to start, and reports the system and the
+missing type.
 
 Resources live in the world because `SystemParam` builds every parameter from the world. Systems and
 the code outside the scheduler then reach components and resources through one value. Two other
 homes were considered:
 
-- A single entity that holds the resource as a component. Queries and the conflict check would work
+- A single entity that stores the resource as a component. Queries and the conflict check would work
   with no new code. Nothing would keep the entity unique, and each read would search the tables as a
   query does.
 - The scheduler, apart from the world. The setup of a level and the tests run without the scheduler,
@@ -265,7 +264,7 @@ homes were considered:
 
 ### Confirmation
 
-The query rules can be confirmed in `enki` today, with three checks:
+A reader can confirm the query rules in `enki` today, with three checks:
 
 - `World::query` takes `&self`, and accepts only a `Q: ReadOnlyQuery`.
 - `World::query_mut` takes `&mut self`.
@@ -278,7 +277,7 @@ Once the scheduler exists, a reader confirms the rest with seven checks:
 - The startup log lists each pair of conflicting systems, in the order that the list gives it.
 - The scheduler creates its worker threads once, and no system starts a thread of its own.
 - A system reaches a resource only through `Res<T>` or `ResMut<T>`.
-- The scheduler refuses to start where a system asks for a resource that the world does not hold.
+- The scheduler refuses to start where a system asks for a resource that the world does not store.
 - The scheduler runs two systems at once only where neither writes a type that the other declares.
 
 ## Pros and Cons of the Options

@@ -82,8 +82,8 @@ A system that moves hungry villagers towards food walks the second table alone. 
 `Position` and `Hungry` columns in order.
 
 Sparse sets, a second way to store components, remain open as a later extension. The developer
-would add them for one component type at a time. They would add them only where a measurement shows that
-moving entities between tables has become the slow part of a step.
+would add them for one component type at a time, and only where a measurement shows that moving
+entities between tables has become the slow part of a step.
 
 ### Queries per Table
 
@@ -175,7 +175,7 @@ EnTT, a widely used C++ ECS, appears to store its components this way.
   looks the entity up in the other store. Removals shuffle each store in a different order. After
   that, those lookups land at scattered addresses.
 - Bad, because the fix for those lookups has a limit. EnTT calls the fix a group, and a group keeps a
-  chosen set of stores in the same order. As far as the author knows, a component type belongs to
+  chosen set of stores in the same order. As far as the developer knows, a component type belongs to
   one group at most. As a result, only the queries chosen ahead of time read in order.
 
 ### Archetypes, with Sparse-Set Storage as an Option for Each Component Type

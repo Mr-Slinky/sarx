@@ -94,7 +94,7 @@ impl Entity {
 /// Hands out entity handles, and records where each living entity is stored.
 ///
 /// The allocator stores one slot for each entity index. A slot records the version of its index,
-/// and the location of the entity that holds the index. A freed entity's index goes on a free
+/// and the location of the entity that uses the index. A freed entity's index goes on a free
 /// list, which [`alloc`](Self::alloc) takes from before it adds a new slot.
 ///
 /// # Examples
@@ -181,7 +181,7 @@ impl Entities {
     /// documentation sets out why.
     ///
     /// The caller MUST pass a living entity. A debug build panics where it does not. A release
-    /// build would raise the version of whichever entity holds the slot, and end its life.
+    /// build would raise the version of whichever entity occupies the slot, and end its life.
     ///
     /// # Examples
     ///

@@ -1,7 +1,7 @@
 //! The `componentType` codes in this module come from
 //! [Accessor Data Types](https://registry.khronos.org/glTF/specs/2.0/glTF-2.0.html#accessor-data-types)
-//! in the glTF 2.0 specification. `VEC3_SIZE` is derived from the specification rather than
-//! stated in it
+//! in the glTF 2.0 specification. The specification does not state `VEC3_SIZE`, which follows
+//! from it: a vec3 is three floats of four bytes each.
 
 use crate::bytes::read_bytes_from;
 use crate::GltfError;
@@ -14,7 +14,17 @@ const VEC3_SIZE: usize = 12;
 const MIN_STRIDE: usize = 4;
 const MAX_STRIDE: usize = 252;
 
-/// Returns every vec3 element in the file, in the same order that the file stores them
+/// Returns every element of the accessor at `index`, in the order that `binary` stores them
+///
+/// The accessor must have the `type` `VEC3` and float components, and must point to a buffer
+/// view. Where it does not, the function returns `UnsupportedAccessor`. Where an element runs
+/// past the end of its buffer view, or past the end of `binary`, it returns `Truncated`.
+///
+/// ```text
+/// accessor 0 = { "bufferView": 0, "componentType": 5126, "count": 2, "type": "VEC3" }
+/// binary     = the floats 1, 2, 3, 4, 5, 6, each stored as four little-endian bytes
+/// read_vec3s(&document, binary, 0)  ->  Ok([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
+/// ```
 pub(crate) fn read_vec3s(document: &Document, binary: &[u8], index: usize) -> Result<Vec<[f32; 3]>, GltfError> {
     // Finds the accessor, or fails where the index points past the end of the list
     let accessor = document.accessors.get(index).ok_or(GltfError::MissingAccessor(index))?;
@@ -23,7 +33,7 @@ pub(crate) fn read_vec3s(document: &Document, binary: &[u8], index: usize) -> Re
         return Err(GltfError::UnsupportedAccessor(index));
     }
 
-    // Rejects an accessor whose elements are all zero, since it has no data to read
+    // Rejects an accessor without a buffer view, which glTF leaves out where every element is zero
     let view_index = accessor.buffer_view.ok_or(GltfError::UnsupportedAccessor(index))?;
     let layout = find_layout(document, accessor, view_index, VEC3_SIZE)?;
     ensure_fit(&layout, accessor.count, VEC3_SIZE, binary.len())?;
@@ -51,22 +61,19 @@ pub(crate) fn read_indices(document: &Document, binary: &[u8], index: usize) -> 
         UNSIGNED_SHORT_CODE => 2,
         // A 32-bit index takes four bytes
         UNSIGNED_INT_CODE => 4,
-        // Every other type is an error
         _ => return Err(GltfError::UnsupportedAccessor(index)),
     };
 
     let view_index = accessor.buffer_view.ok_or(GltfError::UnsupportedAccessor(index))?;
     let layout = find_layout(document, accessor, view_index, element_size)?;
-    // glTF forbids a stride on a buffer view that holds indices
+    // glTF forbids a stride on a buffer view that stores indices
     if layout.is_strided {
         return Err(GltfError::InvalidStride(view_index));
     }
 
     ensure_fit(&layout, accessor.count, element_size, binary.len())?;
-    // Makes room for every index at once
     let mut indices = Vec::with_capacity(accessor.count);
     for element in 0..accessor.count {
-        // Finds where this index starts
         let offset = layout.start + element * layout.stride;
         // Reads the index at its stored size, and widens a 16-bit index to 32 bits
         let value = if element_size == 2 {
@@ -105,10 +112,16 @@ fn find_layout(document: &Document, accessor: &Accessor, view_index: usize, elem
     Ok(Layout { start, stride, view_end, is_strided })
 }
 
-/// Checks that every element lies inside both the buffer view and the binary chunk, before a
-/// caller reserves room for them.
+/// Returns `Ok` where every element lies inside both the buffer view and the binary chunk, and
+/// `Truncated` otherwise. A caller runs it before it reserves room for the elements.
+///
+/// ```text
+/// start 0, stride 12, view_end 36, count 3, element_size 12, binary_len 36  ->  Ok(())
+/// start 0, stride 12, view_end 36, count 4, element_size 12, binary_len 48  ->  Err(Truncated)
+/// count 0, with any layout                                                   ->  Ok(())
+/// ```
 fn ensure_fit(layout: &Layout, count: usize, element_size: usize, binary_len: usize) -> Result<(), GltfError> {
-    // An empty accessor reads nothing, no matter where it starts
+    // Accepts an empty accessor wherever it starts, since it does not read any bytes
     let Some(last) = count.checked_sub(1) else {
         return Ok(());
     };
@@ -130,7 +143,7 @@ mod tests {
     use super::*;
     use crate::glb::split_glb;
 
-    /// Holds the GLB file that Blender exported for the hand model
+    /// Contains the GLB file that Blender exported for the hand model
     const HAND_MODEL: &[u8] =
         include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/hand-model.glb"));
 
@@ -150,7 +163,7 @@ mod tests {
     }
 
     /// Returns the JSON of one buffer view with no stride, which starts at `byte_offset` in the
-    /// binary chunk and holds `byte_length` bytes
+    /// binary chunk and is `byte_length` bytes long
     fn write_view(byte_offset: usize, byte_length: usize) -> String {
         format!(r#"{{"byteOffset": {byte_offset}, "byteLength": {byte_length}}}"#)
     }
@@ -202,7 +215,7 @@ mod tests {
             &write_view(8, 28),
         );
         // Twelve bytes of padding come before the data, and four bytes after it. Each padding float
-        // differs, so that a start in the wrong place reads different values
+        // differs, and a start in the wrong place therefore reads different values
         let binary = write_f32s(&[-1.0, -2.0, -3.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, -4.0]);
 
         let result = read_vec3s(&document, &binary, 0);
@@ -219,7 +232,7 @@ mod tests {
                {"bufferView": 0, "byteOffset": 12, "componentType": 5126, "count": 2, "type": "VEC3"}"#,
             r#"{"byteLength": 48, "byteStride": 24}"#,
         );
-        // Each vertex holds a position, then a normal
+        // Each vertex stores a position, then a normal
         let binary = write_f32s(&[1.0, 2.0, 3.0, 0.0, 1.0, 0.0, 4.0, 5.0, 6.0, 0.0, 0.0, -1.0]);
 
         let positions = read_vec3s(&document, &binary, 0);
@@ -256,7 +269,7 @@ mod tests {
     /// Checks that an element whose last byte is the last byte of the chunk is read
     #[test]
     fn read_vec3s_with_data_ending_at_chunk_end_returns_last_element() {
-        // The two offsets differ, so that adding either one twice reads from the wrong place
+        // The two offsets differ, and adding either one twice therefore reads from the wrong place
         let document = parse_document(
             r#"{"bufferView": 0, "byteOffset": 8, "componentType": 5126, "count": 1, "type": "VEC3"}"#,
             &write_view(16, 20),
@@ -362,7 +375,7 @@ mod tests {
         ];
 
         for (name, rejected) in cases {
-            // A valid accessor comes first, so that the rejected one has the index 1
+            // Places a valid accessor first, which gives the rejected one the index 1
             let valid = write_accessor(5126, 1, "VEC3");
             let document = parse_document(&format!("{valid}, {rejected}"), &write_view(0, 12));
 
@@ -385,7 +398,7 @@ mod tests {
         ];
 
         for (name, stride) in cases {
-            // A valid view comes first, so that the rejected one has the index 1
+            // Places a valid view first, which gives the rejected one the index 1
             let accessor = r#"{"bufferView": 1, "componentType": 5126, "count": 1, "type": "VEC3"}"#;
             let views = format!(r#"{{"byteLength": 12}}, {{"byteLength": 12, "byteStride": {stride}}}"#);
             let document = parse_document(accessor, &views);
@@ -401,7 +414,7 @@ mod tests {
     #[test]
     fn read_vec3s_with_data_past_view_or_chunk_end_returns_truncated() {
         // Each case gives the view offset, view length, accessor offset, stride, count and chunk
-        // length. Except where the case names the view, the view holds the data and the chunk
+        // length. Except where the case mentions the view, the view contains the data and the chunk
         // cuts it short
         let cases = [
             ("chunk one byte short", 0, 36, 0, None, 3, 35),
@@ -453,7 +466,8 @@ mod tests {
         }
     }
 
-    /// Checks that a count far beyond what the chunk holds fails as truncated, before any allocation
+    /// Checks that a count far beyond what the chunk contains fails as truncated, before any
+    /// allocation
     #[test]
     fn read_vec3s_with_largest_count_returns_truncated() {
         let document = parse_document(&write_accessor(5126, usize::MAX, "VEC3"), &write_view(0, 36));
@@ -551,8 +565,8 @@ mod tests {
     fn read_indices_with_view_and_accessor_offsets_skips_both() {
         // Each case gives the component type, view offset, view length, accessor offset and chunk.
         // Three padding indices come before the indices 4, 5 and 6, and one after them. The padding
-        // values differ, and so do the two offsets, so that a start in the wrong place reads other
-        // values
+        // values differ, as do the two offsets, and a start in the wrong place therefore reads
+        // other values
         let cases = [
             ("16-bit", 5123, 4, 8, 2, write_u16s(&[10, 11, 12, 4, 5, 6, 13])),
             ("32-bit", 5125, 8, 16, 4, write_u32s(&[10, 11, 12, 4, 5, 6, 13])),
@@ -703,7 +717,7 @@ mod tests {
         ];
 
         for (name, rejected) in cases {
-            // A valid accessor comes first, so that the rejected one has the index 1
+            // Places a valid accessor first, which gives the rejected one the index 1
             let valid = write_accessor(5125, 1, "SCALAR");
             let document = parse_document(&format!("{valid}, {rejected}"), &write_view(0, 4));
 
@@ -727,7 +741,7 @@ mod tests {
         ];
 
         for (name, component_type, stride) in cases {
-            // A valid view comes first, so that the rejected one has the index 1
+            // Places a valid view first, which gives the rejected one the index 1
             let accessor = format!(
                 r#"{{"bufferView": 1, "componentType": {component_type}, "count": 1, "type": "SCALAR"}}"#
             );
@@ -745,8 +759,8 @@ mod tests {
     #[test]
     fn read_indices_with_data_past_view_or_chunk_end_returns_truncated() {
         // Each case gives the component type, view offset, view length, accessor offset, count and
-        // chunk length. Except where the case names the view, the view holds the indices and the
-        // chunk cuts them short
+        // chunk length. Except where the case mentions the view, the view contains the indices and
+        // the chunk cuts them short
         let cases = [
             ("16-bit chunk one byte short", 5123, 0, 6, 0, 3, 5),
             ("32-bit chunk one byte short", 5125, 0, 12, 0, 3, 11),
@@ -791,7 +805,8 @@ mod tests {
         }
     }
 
-    /// Checks that a count far beyond what the chunk holds fails as truncated, before any allocation
+    /// Checks that a count far beyond what the chunk contains fails as truncated, before any
+    /// allocation
     #[test]
     fn read_indices_with_largest_count_returns_truncated() {
         let document = parse_document(&write_accessor(5125, usize::MAX, "SCALAR"), &write_view(0, 12));

@@ -21,7 +21,7 @@ pub(crate) struct Glb<'a> {
 
 pub(crate) fn split_glb(file: &[u8]) -> Result<Glb<'_>, GltfError> {
     let magic = u32::from_le_bytes(read_bytes_from(file, 0)?);
-    // Ensure the bytes being parsed are, in fact, GLTF bytes
+    // Rejects a file whose first four bytes are not `glTF`
     if magic != MAGIC {
         return Err(GltfError::NotGlb);
     }
@@ -63,13 +63,13 @@ fn read_chunk(file: &[u8], offset: usize, expected: u32) -> Result<(&[u8], usize
 mod tests {
     use super::*;
 
-    /// Holds the bytes of the GLB file that Blender exported for the hand model
+    /// Contains the bytes of the GLB file that Blender exported for the hand model
     const HAND_MODEL: &[u8] = include_bytes!(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/../../assets/hand-model.glb"
     ));
 
-    /// Stands for a chunk type that the glTF specification does not define
+    /// Represents a chunk type that the glTF specification does not define
     const UNKNOWN_CHUNK: u32 = 0x5458_4554;
 
     /// Returns the 12-byte GLB header with the given `magic`, `version` and total `length`
@@ -100,11 +100,12 @@ mod tests {
         file[8..HEADER_LENGTH].copy_from_slice(&length.to_le_bytes());
     }
 
-    /// Returns a GLB file with a JSON chunk holding `json` and a BIN chunk holding `binary`
+    /// Returns a GLB file with a JSON chunk that contains `json`, and a BIN chunk that contains
+    /// `binary`
     ///
-    /// Each chunk holds its bytes exactly as given. The specification pads every chunk to a
-    /// multiple of four bytes, so a caller that passes a length of 2 builds a file that a strict
-    /// reader would reject. `split_glb` does not check the padding, and the tests rely on that.
+    /// Each chunk contains its bytes exactly as given. The specification pads every chunk to a
+    /// multiple of four bytes. A caller that passes a length of 2 therefore builds a file that a
+    /// strict reader would reject. `split_glb` does not check the padding, and the tests rely on that.
     fn build_glb(json: &[u8], binary: &[u8]) -> Vec<u8> {
         let mut file = build_header(MAGIC, VERSION, 0);
         append_chunk(&mut file, JSON_CHUNK, json);
@@ -255,7 +256,7 @@ mod tests {
     }
 
     /// Checks that a header stating any total length but the length of the file is rejected,
-    /// naming both lengths, from one byte off up to the largest length that a header can state
+    /// with both lengths in the error, from one byte off up to the largest length that a header can state
     #[test]
     fn split_glb_with_wrong_total_length_returns_length_mismatch() {
         let valid = build_glb(b"{}  ", &[1, 2, 3, 4]);
@@ -285,7 +286,8 @@ mod tests {
         }
     }
 
-    /// Checks that a first chunk of any type but JSON is rejected, naming both chunk types
+    /// Checks that a first chunk of any type but JSON is rejected, with both chunk types in the
+    /// error
     #[test]
     fn split_glb_with_wrong_first_chunk_type_returns_unexpected_chunk() {
         let cases = [
@@ -312,7 +314,8 @@ mod tests {
         }
     }
 
-    /// Checks that a second chunk of any type but BIN is rejected, naming both chunk types
+    /// Checks that a second chunk of any type but BIN is rejected, with both chunk types in the
+    /// error
     #[test]
     fn split_glb_with_wrong_second_chunk_type_returns_unexpected_chunk() {
         let cases = [
@@ -343,7 +346,8 @@ mod tests {
     /// from one byte past the end up to the largest length that a chunk header can state
     #[test]
     fn split_glb_with_json_length_past_end_returns_truncated() {
-        // The JSON data starts at byte 20 of a 32-byte file, so 12 bytes follow its start
+        // The JSON data starts at byte 20 of a 32-byte file, which leaves 12 bytes from its start
+        // to the end of the file
         let lengths = [13, 1_000, u32::MAX];
 
         for length in lengths {
@@ -444,7 +448,8 @@ mod tests {
         }
     }
 
-    /// Checks that `read_chunk` rejects a chunk of any other type, naming both chunk types
+    /// Checks that `read_chunk` rejects a chunk of any other type, with both chunk types in the
+    /// error
     #[test]
     fn read_chunk_with_other_chunk_type_returns_unexpected_chunk() {
         let cases = [

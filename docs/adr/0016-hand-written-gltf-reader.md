@@ -32,7 +32,7 @@ How does Sarx read a glTF file?
   byte offset, a stride and a number type for each attribute.
 - Sarx reads only the files that its own Blender export writes. The reader therefore has to handle
   the features of that export alone.
-- Parsing JSON text teaches nothing about graphics.
+- Parsing JSON text does not teach anything about graphics.
 
 ## Considered Options
 
@@ -85,11 +85,14 @@ reader is graphics code.
 
 ### Confirmation
 
-Nothing in the code embodies this decision yet. Once the hand loads, a reader confirms it with three
-checks:
+`hermes` reads the mesh of the hand, and does not read animations yet. A reader confirms the
+decision with two checks today:
 
 - The workspace depends on `serde` and `serde_json`, and does not depend on `gltf`.
 - The code that reads the block of bytes is Sarx's own.
+
+Once the reader returns animations, a third check applies:
+
 - The reader returns each animation as its channels. The pose code for the hand, rather than the
   reader, picks out the rotations.
 
@@ -113,6 +116,6 @@ which return the vertex data as Rust values.
 
 ### A Hand-Written Reader, with a Hand-Written JSON Parser
 
-- Good, because Sarx would take on no library for glTF.
+- Good, because Sarx would not take on a library for glTF.
 - Bad, because a JSON parser runs to a few hundred lines that concern text parsing alone. The
   developer does not want to build it.

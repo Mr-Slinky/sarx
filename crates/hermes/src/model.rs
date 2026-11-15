@@ -10,7 +10,7 @@ pub struct MeshData {
 }
 
 pub fn read_mesh(file: &[u8]) -> Result<MeshData, GltfError> {
-    let glb = split_glb(file)?; // holds json and binary data
+    let glb = split_glb(file)?;
     let document: Document = serde_json::from_slice(glb.json)?;
     let mesh = document.meshes.first().ok_or(GltfError::MissingMesh)?;
     let primitive = mesh.primitives.first().ok_or(GltfError::MissingMesh)?;
@@ -43,14 +43,15 @@ mod tests {
     /// The indices of the triangle that the fixture file stores
     const TRIANGLE_INDICES: [u16; 3] = [0, 1, 2];
 
-    /// The meshes of a fixture file with one mesh, whose one primitive reads the triangle
+    /// The meshes of a fixture file with one mesh, whose only primitive points to the accessors
+    /// for the triangle
     const TRIANGLE_MESHES: &str =
         r#"[{"primitives":[{"attributes":{"POSITION":0,"NORMAL":1},"indices":2}]}]"#;
 
     /// The accessors of the fixture file. Accessors 0 to 2 read the triangle. Accessor 3 has the
-    /// unsupported type `VEC2`, accessor 4 counts more vec3s than the binary chunk holds, and
-    /// accessors 5 and 6 count no elements. Accessor 7 names buffer view 9, which does not exist,
-    /// and accessor 8 counts more indices than the binary chunk holds. Accessors 4 and 8 stay
+    /// unsupported type `VEC2`, accessor 4 counts more vec3s than the binary chunk contains, and
+    /// accessors 5 and 6 have a count of zero. Accessor 7 points to buffer view 9, which does not
+    /// exist, and accessor 8 counts more indices than the binary chunk contains. Accessors 4 and 8 stay
     /// inside their buffer views, so that the binary chunk is the bound that they cross
     const FIXTURE_ACCESSORS: &str = r#"[
         {"bufferView":0,"componentType":5126,"count":3,"type":"VEC3"},
@@ -66,7 +67,7 @@ mod tests {
 
     /// The buffer views of the fixture file: the positions, the normals, then the indices. Views 3
     /// and 4 start where the positions and the indices start, and run past the 80-byte binary
-    /// chunk: view 3 holds 100 vec3s, and view 4 holds 100 indices
+    /// chunk: view 3 has room for 100 vec3s, and view 4 for 100 indices
     const FIXTURE_BUFFER_VIEWS: &str = r#"[
         {"buffer":0,"byteOffset":0,"byteLength":36},
         {"buffer":0,"byteOffset":36,"byteLength":36},
@@ -91,15 +92,15 @@ mod tests {
         file.extend_from_slice(data);
     }
 
-    /// Returns a GLB file holding `json` in its JSON chunk and `binary` in its binary chunk.
-    /// The JSON is padded with spaces and the binary data with zeros
+    /// Returns a GLB file that contains `json` in its JSON chunk and `binary` in its binary chunk.
+    /// The function pads the JSON with spaces, and the binary data with zeros
     fn build_glb(json: &str, binary: &[u8]) -> Vec<u8> {
         let mut json_chunk = json.as_bytes().to_vec();
         pad_to_four(&mut json_chunk, b' ');
         let mut binary_chunk = binary.to_vec();
         pad_to_four(&mut binary_chunk, 0);
 
-        // The header, then the chunk header and data of each of the two chunks
+        // Counts the 12-byte header, then the 8-byte header and the data of each chunk
         let total_length = 12 + 8 + json_chunk.len() + 8 + binary_chunk.len();
         let mut file = Vec::with_capacity(total_length);
         file.extend_from_slice(&0x4654_6C67_u32.to_le_bytes());
@@ -198,7 +199,7 @@ mod tests {
         assert_eq!(mesh.indices, TRIANGLE_INDICES.map(u32::from), "indices");
     }
 
-    /// Checks that the positions and normals come from the accessors that the attributes name,
+    /// Checks that the positions and normals come from the accessors that the attributes point to,
     /// rather than from the order of the accessors
     #[test]
     fn read_mesh_with_swapped_accessors_follows_attribute_names() {
@@ -212,7 +213,7 @@ mod tests {
         assert_eq!(mesh.normals, TRIANGLE_POSITIONS, "normals read through accessor 0");
     }
 
-    /// Checks that a primitive whose accessors count no elements gives an empty mesh
+    /// Checks that a primitive whose accessors have a count of zero gives an empty mesh
     #[test]
     fn read_mesh_with_empty_primitive_returns_empty_data() {
         let file = build_fixture_glb(
@@ -226,7 +227,7 @@ mod tests {
         assert!(mesh.indices.is_empty(), "indices of the empty primitive");
     }
 
-    /// Checks that only the first mesh is read, when a second one names accessors that do not
+    /// Checks that only the first mesh is read, when a second one points to accessors that do not
     /// exist, or leaves out its `indices` and its `NORMAL` attribute
     #[test]
     fn read_mesh_with_two_meshes_reads_first() {
@@ -262,8 +263,8 @@ mod tests {
         }
     }
 
-    /// Checks that only the first primitive is read, when a second one names accessors that do
-    /// not exist
+    /// Checks that only the first primitive is read, when a second one points to accessors that
+    /// do not exist
     #[test]
     fn read_mesh_with_two_primitives_reads_first() {
         let file = build_fixture_glb(
@@ -307,8 +308,8 @@ mod tests {
     /// Checks that a valid glTF file that leaves out the optional `meshes` list gives `MissingMesh`
     #[test]
     fn read_mesh_with_no_meshes_key_returns_missing_mesh() {
-        // The smallest JSON that the glTF specification accepts. The specification forbids an
-        // empty array, so a file without meshes leaves the key out
+        // Builds the smallest JSON that the glTF specification accepts. Since the specification
+        // forbids an empty array, a file without meshes leaves the key out
         let file = build_glb(r#"{"asset":{"version":"2.0"}}"#, &[]);
 
         let result = read_mesh(&file);

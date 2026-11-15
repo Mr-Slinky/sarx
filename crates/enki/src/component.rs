@@ -1,23 +1,23 @@
-//! Defines [`Component`] and [`ComponentVec`], the trait that marks a type as a component, and the vector that stores
-//! the components of one type, respectively.
+//! Defines [`Component`], the trait that marks a type as a component, and [`ComponentVec`], the
+//! vector that stores the components of one type.
 //!
 //! An archetype is one set of component types, modelled as a table with one row for each entity
 //! and one column for each component type. [`ComponentVec`] represents a column in this
 //! **archetype table**.
 //!
 //! A [`ComponentVec`] stores its components next to each other, in one block of memory. A table
-//! built from these vectors therefore has column-major order, meaning that
-//! neighbouring components in a column are also neighbours in memory. Contrastingly, the components of one row lie
-//! in separate blocks, one block per column.
+//! built from these vectors therefore has column-major order, meaning that neighbouring components
+//! in a column are also neighbours in memory. The components of one row, however, lie in separate
+//! blocks, one block per column.
 //!
 //! A table learns its component types at run time, as ADR 0011 sets out. A generic `Vec<T>` needs
 //! its type at compile time, meaning it cannot serve as a column. Therefore, a [`ComponentVec`]
 //! stores its components as raw bytes.
 //!
-//! A [`ComponentInfo`] describes those bytes to [`ComponentVec`]. It stores the memory layout, type name, type identity,
-//! and drop function of its [`Component`]. It also stores the bit that the world gives its
-//! component type. Each table combines the bits of its types into a mask, which the
-//! [`archetype`](crate::archetype) module describes in more detail.
+//! A [`ComponentInfo`] describes those bytes to [`ComponentVec`]. It stores the memory layout, the
+//! name, the identity and the drop function of one [`Component`] type. It also stores the bit that
+//! the world gives that component type. Each table combines the bits of its types into a mask,
+//! which the [`archetype`](crate::archetype) module describes in more detail.
 //!
 //! The compiler cannot check the type of a [`ComponentVec`]'s bytes. As a result,
 //! [`ComponentVec::push`], the one `unsafe` method, takes raw bytes and has a Safety section that
@@ -530,7 +530,6 @@ impl ComponentVec {
         // Panics before anything changes, where `index` lies past the last component
         assert!(index < self.len, "the index must be below the length");
 
-        // Finds the index of the last component
         let last_idx = self.len - 1;
         // Swaps the removed component with the last one, where the two differ
         if index != last_idx {
@@ -909,8 +908,9 @@ impl ComponentInfo {
     /// and a different bit for each component type in one world. The method stores `bit` without
     /// checking it. A wrong bit gives a table a wrong mask, and queries then match the wrong tables.
     ///
-    /// The bound `T: 'static` means that `T` does not contain a borrowed reference that could expire. A
-    /// vector can then keep a `T` for as long as it needs. `TypeId::of` requires the same bound.
+    /// The bound `T: 'static` means that `T` does not contain a borrowed reference that could
+    /// expire. A vector can then keep a `T` for as long as it needs. `TypeId::of` requires the same
+    /// bound.
     ///
     /// The bound `T: Send + Sync` lets a vector move its components between threads, and share them.
     ///

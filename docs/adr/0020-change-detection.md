@@ -86,8 +86,9 @@ tables that nobody changed, can bring it in at that point.
 
 ### Consequences
 
-- Good, because the systems that write every villager write nothing beyond their own components. At
-  50,000 villagers, the memory traffic that they avoid leaves time for more systems in each step.
+- Good, because the systems that write every villager do not write anything beyond their own
+  components. At 50,000 villagers, the memory traffic that they avoid leaves time for more systems
+  in each step.
 - Good, because a reader of sparse changes reads only those changes. Five damaged villagers mean
   five entries to read, whatever the population.
 - Good, because a system keeps a plain `&mut T`, which it can pass to any function that takes one.

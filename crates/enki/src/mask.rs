@@ -30,7 +30,7 @@ use std::ops::{BitOr, BitOrAssign};
 /// A test can also build a mask for several types in one call, with `from_positions`. That method
 /// exists in test builds alone.
 ///
-/// The type is `pub` because the public trait `ComponentSet` names it in the signature of
+/// The type is `pub` because the public trait `ComponentSet` uses it in the signature of
 /// `push_into`. The `mask` module is private, so code outside the crate still cannot write a path
 /// to the type.
 ///
@@ -351,7 +351,7 @@ mod tests {
         }
     }
 
-    /// Checks that `intersects` returns `true` only where the two masks share a type
+    /// Checks that `contains_any` returns `true` only where the two masks share a type
     #[test]
     fn intersects_with_standard_and_extreme_masks_returns_expected() {
         let table = ComponentMask::from_positions(&[0, 2, 63]);

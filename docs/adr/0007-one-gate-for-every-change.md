@@ -80,8 +80,8 @@ Several points remain open. The developer settles them once the simulation has c
 
 ### Confirmation
 
-Nothing in the code embodies this decision yet. `zurvan`, the crate for the simulation, does not yet
-change the world.
+Nothing in the code embodies this decision yet. `zurvan`, the crate for the simulation, moves the
+god's hand towards the cursor, and does not make any other change to the world.
 
 Once the simulation changes the world, a reviewer confirms three points:
 

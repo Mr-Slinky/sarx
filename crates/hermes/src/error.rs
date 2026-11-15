@@ -30,9 +30,12 @@ pub enum GltfError {
     /// A buffer view states a `byteStride` that glTF forbids: one outside 4 to 252, one that is
     /// not a multiple of 4, one smaller than an element, or any stride on a view of indices
     InvalidStride(usize),
-    /// An accessor has an unsupported `componentType`, which defines the number type, or an
-    /// unsupported `type`, which defines whether each element is a scalar, vector or matrix, or
-    /// has no `bufferView`, which glTF uses for an accessor whose elements are all zero
+    /// An accessor has a form that the reader does not support
+    ///
+    /// An accessor states its number type in `componentType`, and whether each element is a
+    /// scalar, vector or matrix in `type`. Either one can take a value that the reader does not
+    /// support. The reader also returns this error for an accessor without a `bufferView`, which
+    /// glTF leaves out where every element is zero.
     UnsupportedAccessor(usize),
 }
 
@@ -86,7 +89,6 @@ impl Error for GltfError {
 
 impl From<serde_json::Error> for GltfError {
     fn from(error: serde_json::Error) -> Self {
-        // Wraps the serde_json error in the `Json` variant
         Self::Json(error)
     }
 }
@@ -100,9 +102,9 @@ mod tests {
         serde_json::from_str::<serde_json::Value>("{").unwrap_err()
     }
 
-    /// Returns the name of the variant that `error` holds
+    /// Returns the name of the variant that `error` is
     ///
-    /// The `match` names every variant and has no wildcard arm. A new variant therefore stops the
+    /// The `match` has an arm for every variant, and has no wildcard arm. A new variant therefore stops the
     /// tests compiling until it gains an arm here, which is the prompt to add an instance of it to
     /// `build_every_variant` as well.
     fn name_variant(error: &GltfError) -> &'static str {
@@ -123,7 +125,7 @@ mod tests {
         }
     }
 
-    /// Returns one instance of every variant, each beside the name that `name_variant` gives it
+    /// Returns one instance of every variant, each beside the name that `name_variant` returns for it
     fn build_every_variant() -> Vec<(&'static str, GltfError)> {
         let variants = vec![
             GltfError::NotGlb,
@@ -155,7 +157,7 @@ mod tests {
 
     /// Returns each run of decimal digits in `message`, as a whole number in text form
     ///
-    /// For example, `"accessor 70 does not exist"` gives `["70"]`. Matching a whole run, rather
+    /// For example, `"accessor 70 does not exist"` returns `["70"]`. Matching a whole run, rather
     /// than any substring, stops the value `0` from matching the last digit of `70`.
     fn split_numbers(message: &str) -> Vec<&str> {
         message
@@ -176,7 +178,7 @@ mod tests {
         Ok(())
     }
 
-    /// Checks that the instances that the tests share hold no variant twice
+    /// Checks that the instances that the tests share do not contain any variant twice
     #[test]
     fn build_every_variant_with_no_data_returns_each_variant_once() {
         let variants = build_every_variant();
@@ -240,7 +242,8 @@ mod tests {
         }
     }
 
-    /// Checks that the variants carrying an index or version include that value, as a whole number
+    /// Checks that the variants that contain an index or a version include that value, as a whole
+    /// number
     #[test]
     fn fmt_with_standard_and_extreme_values_includes_value() {
         let cases = [

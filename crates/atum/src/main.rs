@@ -4,8 +4,8 @@
 //! hands each event to the program as it arrives.
 //!
 //! `main` creates winit's event loop and hands it an [`App`], and winit then calls a method on the
-//! `App` for each event. The first call, to `resumed`, creates the window, and the program ends
-//! when the player closes it.
+//! `App` for each event. The first call, to `resumed`, creates the window. The program ends when
+//! the player closes the window.
 
 mod app;
 mod executor;

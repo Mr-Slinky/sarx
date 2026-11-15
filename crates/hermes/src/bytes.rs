@@ -1,12 +1,20 @@
 use crate::GltfError;
 
-/// Reads a byte array from a large array, using the given `offset`
+/// Returns the `N` bytes that start at `offset` in `bytes`, copied into an array
+///
+/// Returns `Truncated` where those bytes run past the end of `bytes`, or where `offset + N`
+/// overflows a `usize`.
+///
+/// ```text
+/// bytes = [10, 11, 12, 13, 14], offset = 1, N = 2  ->  Ok([11, 12])
+/// bytes = [10, 11, 12, 13, 14], offset = 4, N = 2  ->  Err(Truncated)
+/// ```
 pub(crate) fn read_bytes_from<const N: usize>(bytes: &[u8], offset: usize) -> Result<[u8; N], GltfError> {
     // Fails rather than wrapping round where an offset from a corrupt file nears `usize::MAX`
     let end = offset.checked_add(N).ok_or(GltfError::Truncated)?;
     let slice = bytes.get(offset..end).ok_or(GltfError::Truncated)?;
     let mut arr = [0; N];
-    arr.copy_from_slice(slice); // Copies the N bytes into a fixed-size array
+    arr.copy_from_slice(slice);
     Ok(arr)
 }
 
@@ -14,7 +22,7 @@ pub(crate) fn read_bytes_from<const N: usize>(bytes: &[u8], offset: usize) -> Re
 mod tests {
     use super::*;
 
-    /// Builds eight bytes, each holding its own index plus 10, so that every offset reads
+    /// Returns eight bytes, each equal to its own index plus 10, so that every offset reads
     /// different values
     fn build_eight_bytes() -> [u8; 8] {
         [10, 11, 12, 13, 14, 15, 16, 17]
@@ -51,7 +59,7 @@ mod tests {
         }
     }
 
-    /// Checks that reading as many bytes as the slice holds returns every byte
+    /// Checks that reading as many bytes as the slice contains returns every byte
     #[test]
     fn read_bytes_from_with_whole_slice_returns_every_byte() {
         let bytes = build_eight_bytes();
@@ -100,7 +108,7 @@ mod tests {
         }
     }
 
-    /// Checks that reading one byte more than the slice holds returns `Truncated`
+    /// Checks that reading one byte more than the slice contains returns `Truncated`
     #[test]
     fn read_bytes_from_with_length_longer_than_slice_returns_truncated() {
         let bytes = build_eight_bytes();

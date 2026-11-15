@@ -136,6 +136,6 @@ The hand would act on the world through telekinesis alone, with no collision sha
 
 - Good, because the hand would stay out of physics entirely.
 - Bad, because the hand would pass through trees and buildings.
-- Bad, because a flick or a slap would involve no contact. A scripted effect would move the struck
+- Bad, because a flick or a slap would not involve contact. A scripted effect would move the struck
   object, rather than the hit itself.
 - Bad, because the hand would lose the physical feel that makes it the centre of the game.

@@ -30,11 +30,11 @@
 //! those examples is therefore marked `ignore`. rustdoc then leaves it uncompiled, and reports it
 //! as ignored.
 
-mod error;
+mod camera;
 mod context;
+mod error;
 mod mesh;
 mod renderer;
-mod camera;
 mod uniform;
 
 pub use camera::{Camera, Ray};

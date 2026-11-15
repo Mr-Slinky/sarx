@@ -12,12 +12,17 @@
 //! Both live in the `gpu_context` module. This module holds the renderer, which draws each frame
 //! with them.
 
+use glam::{Mat4, Vec4};
+use hermes::MeshData;
 use std::fmt::Debug;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
-use glam::{Mat4, Vec4};
-use hermes::MeshData;
-use wgpu::{BindGroup, Buffer, Color, CommandEncoderDescriptor, CurrentSurfaceTexture, DisplayAndWindowHandle, IndexFormat, LoadOp, Operations, RenderPassColorAttachment, RenderPassDepthStencilAttachment, RenderPassDescriptor, RenderPipeline, StoreOp, TextureViewDescriptor};
+use wgpu::{
+    BindGroup, Buffer, Color, CommandEncoderDescriptor, CurrentSurfaceTexture,
+    DisplayAndWindowHandle, IndexFormat, LoadOp, Operations, RenderPassColorAttachment,
+    RenderPassDepthStencilAttachment, RenderPassDescriptor, RenderPipeline, StoreOp,
+    TextureViewDescriptor,
+};
 
 use crate::Camera;
 use crate::RendererError;
@@ -78,15 +83,15 @@ impl<W> RenderWindow for W where W: DisplayAndWindowHandle + Debug + 'static {}
 /// }
 /// ```
 pub struct Renderer {
-    gpu: GpuContext,              // the connection to the GPU, and the surface for the window
-    vertex_buffer: Buffer,        // the hand's vertices, in GPU memory
-    index_buffer: Buffer,         // the hand's triangle list, in GPU memory
-    index_count: u32,             // the number of entries in `index_buffer`, which each draw call needs
-    scene_buffer: Buffer,         // the camera's matrix and the light's direction
-    scene_bind_group: BindGroup,  // hands `scene_buffer` to the shader, at group 0
-    object_buffer: Buffer,        // the hand's model matrix
+    gpu: GpuContext,       // the connection to the GPU, and the surface for the window
+    vertex_buffer: Buffer, // the hand's vertices, in GPU memory
+    index_buffer: Buffer,  // the hand's triangle list, in GPU memory
+    index_count: u32,      // the number of entries in `index_buffer`, which each draw call needs
+    scene_buffer: Buffer,  // the camera's matrix and the light's direction
+    scene_bind_group: BindGroup, // hands `scene_buffer` to the shader, at group 0
+    object_buffer: Buffer, // the hand's model matrix
     object_bind_group: BindGroup, // hands `object_buffer` to the shader, at group 1
-    pipeline: RenderPipeline,     // the lit pipeline
+    pipeline: RenderPipeline, // the lit pipeline
 }
 
 impl Renderer {
@@ -130,7 +135,12 @@ impl Renderer {
     /// // Waits for the setup to finish, since `new` returns a future
     /// let renderer = block_on(renderer_setup)?;
     /// ```
-    pub async fn new<W>(window: Arc<W>, width: u32, height: u32, hand: MeshData) -> Result<Self, RendererError>
+    pub async fn new<W>(
+        window: Arc<W>,
+        width: u32,
+        height: u32,
+        hand: MeshData,
+    ) -> Result<Self, RendererError>
     where
         W: RenderWindow,
     {
@@ -143,13 +153,16 @@ impl Renderer {
         let index_buffer = gpu.create_index_buffer(&mesh);
 
         let scene_buffer = gpu.create_uniform_buffer("Scene uniforms", size_of::<SceneUniforms>());
-        let object_buffer = gpu.create_uniform_buffer("Object uniforms", size_of::<ObjectUniforms>());
+        let object_buffer =
+            gpu.create_uniform_buffer("Object uniforms", size_of::<ObjectUniforms>());
 
         let scene_layout = gpu.create_uniform_layout("Scene layout");
         let object_layout = gpu.create_uniform_layout("Object layout");
 
-        let scene_bind_group = gpu.create_uniform_bind_group("Scene bind group", &scene_layout, &scene_buffer);
-        let object_bind_group = gpu.create_uniform_bind_group("Object bind group", &object_layout, &object_buffer);
+        let scene_bind_group =
+            gpu.create_uniform_bind_group("Scene bind group", &scene_layout, &scene_buffer);
+        let object_bind_group =
+            gpu.create_uniform_bind_group("Object bind group", &object_layout, &object_buffer);
 
         let shader_source = include_str!("../shaders/lit.wgsl");
         let shader = gpu.create_shader("Lit shader", shader_source);
@@ -315,11 +328,15 @@ impl Renderer {
             view_projection: camera.build_view_projection(aspect_ratio),
             light_direction: Self::LIGHT_DIRECTION,
         };
-        self.gpu.queue.write_buffer(&self.scene_buffer, 0, bytemuck::bytes_of(&scene));
+        self.gpu
+            .queue
+            .write_buffer(&self.scene_buffer, 0, bytemuck::bytes_of(&scene));
         let object = ObjectUniforms {
             model: hand_transform,
         };
-        self.gpu.queue.write_buffer(&self.object_buffer, 0, bytemuck::bytes_of(&object));
+        self.gpu
+            .queue
+            .write_buffer(&self.object_buffer, 0, bytemuck::bytes_of(&object));
 
         // Creates the command encoder, which records this frame's commands for the GPU to run
         let encoder_descriptor = CommandEncoderDescriptor {

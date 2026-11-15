@@ -3,10 +3,10 @@
 //! A vertex is one corner of a shape. The GPU draws the shape from its vertices, joining every
 //! three of them into a triangle.
 
-use std::mem::offset_of;
 use bytemuck::{Pod, Zeroable};
-use wgpu::{BufferAddress, VertexAttribute, VertexBufferLayout, VertexFormat, VertexStepMode};
 use hermes::MeshData;
+use std::mem::offset_of;
+use wgpu::{BufferAddress, VertexAttribute, VertexBufferLayout, VertexFormat, VertexStepMode};
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
@@ -76,7 +76,8 @@ impl Mesh {
 
     pub(crate) fn from_mesh_data(data: MeshData) -> Self {
         // Pairs each position with the normal at the same index, and builds one vertex from each pair
-        let vertices = data.positions
+        let vertices = data
+            .positions
             .into_iter()
             .zip(data.normals)
             .map(|(position, normal)| Vertex { position, normal })

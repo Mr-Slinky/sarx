@@ -1,6 +1,6 @@
-use std::f32::consts::FRAC_PI_4;
-use glam::{Mat4, Vec2, Vec3};
 use glam::camera::rh::{proj, view};
+use glam::{Mat4, Vec2, Vec3};
+use std::f32::consts::FRAC_PI_4;
 
 pub struct Camera {
     eye: Vec3,    // where the camera is positioned, in world units
@@ -28,7 +28,8 @@ impl Camera {
     pub fn build_view_projection(&self, aspect_ratio: f32) -> Mat4 {
         let view_matrix = view::look_at_mat4(self.eye, self.target, Vec3::Y);
         // applies perspective and maps depth to 0 to 1
-        let proj_matrix = proj::directx::perspective(Self::FOV_Y, aspect_ratio, Self::NEAR, Self::FAR);
+        let proj_matrix =
+            proj::directx::perspective(Self::FOV_Y, aspect_ratio, Self::NEAR, Self::FAR);
 
         // applies the view first and the projection second
         proj_matrix * view_matrix
@@ -65,7 +66,6 @@ impl Camera {
             direction,
         })
     }
-
 }
 
 impl Ray {
@@ -80,5 +80,3 @@ impl Ray {
         Some(self.origin + self.direction * distance)
     }
 }
-
-

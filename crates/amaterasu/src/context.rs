@@ -32,9 +32,8 @@ use wgpu::{
     ColorWrites, CompareFunction, DepthBiasState, DepthStencilState, Device, DeviceDescriptor,
     DisplayAndWindowHandle, Extent3d, Face, FragmentState, Instance, InstanceDescriptor, Limits,
     MultisampleState, PipelineLayoutDescriptor, PowerPreference, PresentMode, PrimitiveState,
-    PrimitiveTopology,
-    Queue, RenderPipeline, RenderPipelineDescriptor, RequestAdapterOptions, ShaderModule,
-    ShaderModuleDescriptor, ShaderSource, ShaderStages, StencilState, Surface,
+    PrimitiveTopology, Queue, RenderPipeline, RenderPipelineDescriptor, RequestAdapterOptions,
+    ShaderModule, ShaderModuleDescriptor, ShaderSource, ShaderStages, StencilState, Surface,
     SurfaceConfiguration, TextureDescriptor, TextureDimension, TextureFormat, TextureUsages,
     TextureView, TextureViewDescriptor, VertexState,
 };
@@ -103,7 +102,11 @@ impl GpuContext {
     /// // Connects to a GPU, and configures the window's surface at 1280 by 720 pixels
     /// let gpu = GpuContext::new(window, 1280, 720).await?;
     /// ```
-    pub(crate) async fn new<W>(window: Arc<W>, width: u32, height: u32) -> Result<Self, RendererError>
+    pub(crate) async fn new<W>(
+        window: Arc<W>,
+        width: u32,
+        height: u32,
+    ) -> Result<Self, RendererError>
     where
         W: RenderWindow,
     {
@@ -286,7 +289,12 @@ impl GpuContext {
     /// // Creates a surface for the window at 1280 by 720 pixels
     /// gpu.resume(window, 1280, 720)?;
     /// ```
-    pub(crate) fn resume<W>(&mut self, window: Arc<W>, width: u32, height: u32) -> Result<(), RendererError>
+    pub(crate) fn resume<W>(
+        &mut self,
+        window: Arc<W>,
+        width: u32,
+        height: u32,
+    ) -> Result<(), RendererError>
     where
         W: RenderWindow,
     {
@@ -370,7 +378,12 @@ impl GpuContext {
         self.device.create_bind_group_layout(&descriptor)
     }
 
-    pub(crate) fn create_uniform_bind_group(&self, label: &str, layout: &BindGroupLayout, buffer: &Buffer) -> BindGroup {
+    pub(crate) fn create_uniform_bind_group(
+        &self,
+        label: &str,
+        layout: &BindGroupLayout,
+        buffer: &Buffer,
+    ) -> BindGroup {
         // Puts the whole buffer at binding 0
         let entry = BindGroupEntry {
             binding: 0,
@@ -431,7 +444,7 @@ impl GpuContext {
         &self,
         shader: &ShaderModule,
         scene_layout: &BindGroupLayout,
-        object_layout: &BindGroupLayout
+        object_layout: &BindGroupLayout,
     ) -> RenderPipeline {
         // Lists the bind group layouts in group order: the scene at group 0, the object at group 1
         let bind_group_layouts = [Some(scene_layout), Some(object_layout)];

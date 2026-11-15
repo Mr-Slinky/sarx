@@ -10,6 +10,6 @@ pub(crate) struct SceneUniforms {
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
-pub(crate) struct ObjectUnforms {
+pub(crate) struct ObjectUniforms {
     pub(crate) model: Mat4,
 }

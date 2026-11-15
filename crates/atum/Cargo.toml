@@ -6,4 +6,6 @@ publish.workspace = true
 
 [dependencies]
 amaterasu = { version = "0.1.0", path = "../amaterasu" }
+glam = "0.34.3"
+hermes = { version = "0.1.0", path = "../hermes" }
 winit = "0.30.13"

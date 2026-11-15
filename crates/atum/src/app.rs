@@ -9,7 +9,8 @@
 use std::error::Error;
 use std::sync::Arc;
 
-use amaterasu::Renderer;
+use amaterasu::{Camera, Renderer};
+use glam::{Mat4, Vec3};
 use winit::application::ApplicationHandler;
 use winit::event::WindowEvent;
 use winit::event_loop::ActiveEventLoop;
@@ -45,6 +46,13 @@ pub(crate) struct App {
 }
 
 impl App {
+    const HAND_MODEL: &[u8] =
+        include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/hand-model.glb"));
+
+    const CAMERA_EYE: Vec3 = Vec3::new(0.3, 4.0, 3.0);
+
+    const CAMERA_TARGET: Vec3 = Vec3::new(0.3, 0.0, -2.0);
+
     /// Prints `error` to standard error, followed by the error that caused it, where there is one.
     ///
     /// # Examples
@@ -99,9 +107,19 @@ impl ApplicationHandler for App {
                 .expect("Failed to create the window");
             let window = Arc::new(window);
 
+            // Reads the hand's mesh, or ends the program where the file cannot be read
+            let hand = match hermes::read_mesh(Self::HAND_MODEL) {
+                Ok(hand) => hand,
+                Err(error) => {
+                    Self::print_error(&error);
+                    event_loop.exit();
+                    return;
+                }
+            };
+
             // Creates the renderer for the window, or ends the program where the setup fails
             let size = window.inner_size();
-            let renderer_setup = Renderer::new(Arc::clone(&window), size.width, size.height);
+            let renderer_setup = Renderer::new(Arc::clone(&window), size.width, size.height, hand);
             match block_on(renderer_setup) {
                 Ok(renderer) => self.renderer = Some(renderer),
                 Err(error) => {
@@ -129,8 +147,10 @@ impl ApplicationHandler for App {
                 }
             }
             WindowEvent::RedrawRequested => {
+                // Draws the hand where the model places it (until it follows the cursor)
+                let camera = Camera::new(Self::CAMERA_EYE, Self::CAMERA_TARGET);
                 if let Some(renderer) = self.renderer.as_mut()
-                    && let Err(error) = renderer.render()
+                    && let Err(error) = renderer.render(&camera, Mat4::IDENTITY)
                 {
                     Self::print_error(&error);
                     event_loop.exit();

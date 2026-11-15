@@ -35,6 +35,8 @@ mod context;
 mod mesh;
 mod renderer;
 mod camera;
+mod uniform;
 
+pub use camera::{Camera, Ray};
 pub use error::RendererError;
 pub use renderer::{RenderWindow, Renderer};

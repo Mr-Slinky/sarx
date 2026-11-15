@@ -119,6 +119,8 @@ name = "atum"
 version = "0.1.0"
 dependencies = [
  "amaterasu",
+ "glam",
+ "hermes",
  "winit",
 ]
 

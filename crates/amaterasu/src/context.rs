@@ -26,13 +26,17 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use wgpu::util::{BufferInitDescriptor, DeviceExt};
 use wgpu::{
-    Adapter, BlendState, Buffer, BufferUsages, ColorTargetState, ColorWrites, Device,
-    DeviceDescriptor, DisplayAndWindowHandle, Extent3d, FragmentState, Instance,
-    InstanceDescriptor, Limits, MultisampleState, PresentMode, PrimitiveState, PrimitiveTopology,
+    Adapter, BindGroup, BindGroupDescriptor, BindGroupEntry, BindGroupLayout,
+    BindGroupLayoutDescriptor, BindGroupLayoutEntry, BindingType, BlendState, Buffer,
+    BufferAddress, BufferBindingType, BufferDescriptor, BufferUsages, ColorTargetState,
+    ColorWrites, CompareFunction, DepthBiasState, DepthStencilState, Device, DeviceDescriptor,
+    DisplayAndWindowHandle, Extent3d, Face, FragmentState, Instance, InstanceDescriptor, Limits,
+    MultisampleState, PipelineLayoutDescriptor, PowerPreference, PresentMode, PrimitiveState,
+    PrimitiveTopology,
     Queue, RenderPipeline, RenderPipelineDescriptor, RequestAdapterOptions, ShaderModule,
-    ShaderModuleDescriptor, ShaderSource, Surface, SurfaceConfiguration, TextureDescriptor,
-    TextureDimension, TextureFormat, TextureUsages, TextureView, TextureViewDescriptor,
-    VertexState,
+    ShaderModuleDescriptor, ShaderSource, ShaderStages, StencilState, Surface,
+    SurfaceConfiguration, TextureDescriptor, TextureDimension, TextureFormat, TextureUsages,
+    TextureView, TextureViewDescriptor, VertexState,
 };
 
 use crate::RendererError;
@@ -110,8 +114,10 @@ impl GpuContext {
         // Creates the surface, which keeps a third owner of the window
         let surface = instance.create_surface(Arc::clone(&window))?;
 
-        // Chooses a GPU that can draw to the surface
+        // Chooses a GPU that can draw to the surface, preferring a dedicated GPU over an integrated
+        // one where the machine has both
         let adapter_options = RequestAdapterOptions {
+            power_preference: PowerPreference::HighPerformance,
             compatible_surface: Some(&surface),
             ..Default::default()
         };
@@ -310,13 +316,74 @@ impl GpuContext {
     /// render_pass.set_vertex_buffer(0, vertex_buffer.slice(..));
     /// ```
     pub(crate) fn create_vertex_buffer(&self, mesh: &Mesh) -> Buffer {
-        let contents = mesh.to_bytes(); // flattens the mesh into a vector of bytes
+        // Describes a vertex buffer, filled with the mesh's vertices as bytes
         let descriptor = BufferInitDescriptor {
             label: Some("Mesh vertices"),
-            contents: &contents,
+            contents: mesh.cast_vertex_bytes(),
             usage: BufferUsages::VERTEX,
         };
+        // Creates the buffer, and copies the bytes into it
         self.device.create_buffer_init(&descriptor)
+    }
+
+    pub(crate) fn create_index_buffer(&self, mesh: &Mesh) -> Buffer {
+        // Describes an index buffer, filled with the mesh's triangle list as bytes
+        let descriptor = BufferInitDescriptor {
+            label: Some("Mesh indices"),
+            contents: mesh.cast_index_bytes(),
+            usage: BufferUsages::INDEX,
+        };
+        // Creates the buffer, and copies the bytes into it
+        self.device.create_buffer_init(&descriptor)
+    }
+
+    pub(crate) fn create_uniform_buffer(&self, label: &str, size: usize) -> Buffer {
+        // Describes an empty uniform buffer of `size` bytes, which `write_buffer` can copy into
+        let descriptor = BufferDescriptor {
+            label: Some(label),
+            size: size as BufferAddress,
+            usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        };
+        // Creates the buffer
+        self.device.create_buffer(&descriptor)
+    }
+
+    pub(crate) fn create_uniform_layout(&self, label: &str) -> BindGroupLayout {
+        // Describes binding 0 as one uniform buffer, which both the vertex and fragment shaders read
+        let entry = BindGroupLayoutEntry {
+            binding: 0,
+            visibility: ShaderStages::VERTEX_FRAGMENT,
+            ty: BindingType::Buffer {
+                ty: BufferBindingType::Uniform,
+                has_dynamic_offset: false,
+                min_binding_size: None,
+            },
+            count: None,
+        };
+        // Describes a layout with that one binding
+        let descriptor = BindGroupLayoutDescriptor {
+            label: Some(label),
+            entries: &[entry],
+        };
+        // Creates the layout
+        self.device.create_bind_group_layout(&descriptor)
+    }
+
+    pub(crate) fn create_uniform_bind_group(&self, label: &str, layout: &BindGroupLayout, buffer: &Buffer) -> BindGroup {
+        // Puts the whole buffer at binding 0
+        let entry = BindGroupEntry {
+            binding: 0,
+            resource: buffer.as_entire_binding(),
+        };
+        // Describes a bind group that follows `layout`
+        let descriptor = BindGroupDescriptor {
+            label: Some(label),
+            layout,
+            entries: &[entry],
+        };
+        // Creates the bind group
+        self.device.create_bind_group(&descriptor)
     }
 
     /// Compiles the WGSL code in `source` into a shader for the GPU.
@@ -360,7 +427,23 @@ impl GpuContext {
     /// let pipeline = gpu.create_pipeline(&shader);
     /// render_pass.set_pipeline(&pipeline);
     /// ```
-    pub(crate) fn create_pipeline(&self, shader: &ShaderModule) -> RenderPipeline {
+    pub(crate) fn create_pipeline(
+        &self,
+        shader: &ShaderModule,
+        scene_layout: &BindGroupLayout,
+        object_layout: &BindGroupLayout
+    ) -> RenderPipeline {
+        // Lists the bind group layouts in group order: the scene at group 0, the object at group 1
+        let bind_group_layouts = [Some(scene_layout), Some(object_layout)];
+        // Describes the pipeline layout from that list
+        let layout_descriptor = PipelineLayoutDescriptor {
+            label: Some("Lit pipeline layout"),
+            bind_group_layouts: &bind_group_layouts,
+            immediate_size: 0,
+        };
+        // Creates the pipeline layout
+        let pipeline_layout = self.device.create_pipeline_layout(&layout_descriptor);
+
         // Reads each vertex from buffer slot 0 through `Mesh::LAYOUT`, and passes it to `vs_main`
         let vertex_buffers = [Some(Mesh::LAYOUT)];
         let vertex = VertexState {
@@ -370,7 +453,7 @@ impl GpuContext {
             buffers: &vertex_buffers,
         };
 
-        // Colours each covered pixel with `fs_main`, replacing what was there
+        // Colours each covered sample with `fs_main`, replacing what was there
         let targets = [Some(ColorTargetState {
             format: self.format,
             blend: Some(BlendState::REPLACE),
@@ -383,18 +466,31 @@ impl GpuContext {
             targets: &targets,
         };
 
-        // Joins every three vertices into one filled triangle
+        // Joins every three indices into one filled triangle, and skips each triangle that faces
+        // away from the camera. A triangle faces the camera when its corners run anticlockwise on
+        // screen, the winding that glTF requires
         let primitive = PrimitiveState {
             topology: PrimitiveTopology::TriangleList,
+            cull_mode: Some(Face::Back),
             ..Default::default()
         };
 
+        // Keeps a sample only where it is nearer than the depth already stored, then stores its depth
+        let depth_stencil = DepthStencilState {
+            format: Self::DEPTH_FORMAT,
+            depth_write_enabled: Some(true),
+            depth_compare: Some(CompareFunction::Less),
+            stencil: StencilState::default(),
+            bias: DepthBiasState::default(),
+        };
+
+        // Describes the whole pipeline
         let descriptor = RenderPipelineDescriptor {
-            label: Some("Flat colour pipeline"),
-            layout: None,
+            label: Some("Lit pipeline"),
+            layout: Some(&pipeline_layout),
             vertex,
             primitive,
-            depth_stencil: None,
+            depth_stencil: Some(depth_stencil),
             multisample: MultisampleState {
                 count: Self::SAMPLE_COUNT,
                 ..Default::default()
@@ -403,6 +499,7 @@ impl GpuContext {
             multiview_mask: None,
             cache: None,
         };
+        // Creates the pipeline
         self.device.create_render_pipeline(&descriptor)
     }
 
@@ -457,7 +554,7 @@ impl GpuContext {
 pub(crate) struct SurfaceContext {
     window: Arc<dyn DisplayAndWindowHandle>,
     pub(crate) surface: Surface<'static>,
-    config: SurfaceConfiguration,
+    pub(crate) config: SurfaceConfiguration,
     pub(crate) msaa_view: TextureView,
     pub(crate) depth_view: TextureView,
 }

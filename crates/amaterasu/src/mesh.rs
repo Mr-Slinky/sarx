@@ -3,7 +3,17 @@
 //! A vertex is one corner of a shape. The GPU draws the shape from its vertices, joining every
 //! three of them into a triangle.
 
+use std::mem::offset_of;
+use bytemuck::{Pod, Zeroable};
 use wgpu::{BufferAddress, VertexAttribute, VertexBufferLayout, VertexFormat, VertexStepMode};
+use hermes::MeshData;
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+pub(crate) struct Vertex {
+    position: [f32; 3], // where the corner sits, in the model's own space
+    normal: [f32; 3],   // the direction that the surface faces at this corner
+}
 
 /// The vertices of one shape, each stored as an x, y and z coordinate in clip space.
 ///
@@ -33,8 +43,8 @@ use wgpu::{BufferAddress, VertexAttribute, VertexBufferLayout, VertexFormat, Ver
 /// render_pass.draw(0..mesh.vertex_count(), 0..1);
 /// ```
 pub(crate) struct Mesh {
-    /// The x, y and z coordinates of each vertex, in drawing order.
-    vertices: Vec<[f32; 3]>,
+    vertices: Vec<Vertex>, // every corner, each stored once
+    indices: Vec<u32>,     // three entries for each triangle, each one a position in `vertices`
 }
 
 impl Mesh {
@@ -43,75 +53,50 @@ impl Mesh {
     /// Each vertex takes 12 bytes. The vertex shader receives them at location 0, as three `f32`
     /// values.
     pub(crate) const LAYOUT: VertexBufferLayout<'static> = VertexBufferLayout {
-        array_stride: size_of::<[f32; 3]>() as BufferAddress,
+        // Steps 24 bytes from one vertex to the next
+        array_stride: size_of::<Vertex>() as BufferAddress,
+        // Moves to the next vertex for each vertex that the draw reads
         step_mode: VertexStepMode::Vertex,
-        attributes: &[VertexAttribute {
-            format: VertexFormat::Float32x3,
-            offset: 0,
-            shader_location: 0,
-        }],
+        // Describes the two attributes inside each vertex
+        attributes: &[
+            // Hands the position to the shader at location 0
+            VertexAttribute {
+                format: VertexFormat::Float32x3,
+                offset: offset_of!(Vertex, position) as BufferAddress,
+                shader_location: 0,
+            },
+            // Hands the normal to the shader at location 1
+            VertexAttribute {
+                format: VertexFormat::Float32x3,
+                offset: offset_of!(Vertex, normal) as BufferAddress,
+                shader_location: 1,
+            },
+        ],
     };
 
-    /// Returns a flat triangle in the centre of the window.
-    ///
-    /// The triangle has three vertices, one for each corner. It is half as wide as the window, and
-    /// half as tall.
-    ///
-    /// # Examples
-    ///
-    /// The triangle has one vertex for each of its three corners.
-    ///
-    /// ```ignore
-    /// let triangle = Mesh::build_triangle();
-    /// assert_eq!(triangle.vertex_count(), 3); // one vertex for each corner
-    /// ```
-    pub(crate) fn build_triangle() -> Self {
+    pub(crate) fn from_mesh_data(data: MeshData) -> Self {
+        // Pairs each position with the normal at the same index, and builds one vertex from each pair
+        let vertices = data.positions
+            .into_iter()
+            .zip(data.normals)
+            .map(|(position, normal)| Vertex { position, normal })
+            .collect();
+        // Keeps the triangle list as it is, moving it out of `data` rather than copying it
         Self {
-            vertices: vec![
-                [0.0, 0.5, 0.0],   // top corner
-                [-0.5, -0.5, 0.0], // bottom left corner
-                [0.5, -0.5, 0.0],  // bottom right corner
-            ],
+            vertices,
+            indices: data.indices,
         }
     }
 
-    /// Returns the number of vertices in the mesh.
-    ///
-    /// # Examples
-    ///
-    /// A triangle has three vertices.
-    ///
-    /// ```ignore
-    /// let triangle = Mesh::build_triangle();
-    /// assert_eq!(triangle.vertex_count(), 3);
-    /// ```
-    pub(crate) fn vertex_count(&self) -> u32 {
-        self.vertices.len() as u32
+    pub(crate) fn count_indices(&self) -> u32 {
+        self.indices.len() as u32
     }
 
-    /// Returns every coordinate of every vertex as bytes, in order.
-    ///
-    /// A caller copies these bytes into a vertex buffer. Each coordinate takes four bytes, in the
-    /// CPU's native byte order.
-    ///
-    /// # Examples
-    ///
-    /// The triangle comes to 36 bytes, starting with the x coordinate of its top corner.
-    ///
-    /// ```ignore
-    /// // Three vertices of three coordinates, at four bytes each
-    /// let bytes = Mesh::build_triangle().to_bytes();
-    /// assert_eq!(bytes.len(), 36);
-    ///
-    /// // The first four bytes are the x coordinate of the top corner
-    /// let top_x = 0.0_f32.to_ne_bytes();
-    /// assert_eq!(bytes[0..4], top_x);
-    /// ```
-    pub(crate) fn to_bytes(&self) -> Vec<u8> {
-        self.vertices
-            .iter()
-            .flatten()
-            .flat_map(|coordinate| coordinate.to_ne_bytes())
-            .collect()
+    pub(crate) fn cast_vertex_bytes(&self) -> &[u8] {
+        bytemuck::cast_slice(&self.vertices)
+    }
+
+    pub(crate) fn cast_index_bytes(&self) -> &[u8] {
+        bytemuck::cast_slice(&self.indices)
     }
 }

@@ -15,15 +15,15 @@
 use std::fmt::Debug;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
-use wgpu::{
-    Buffer, Color, CommandEncoderDescriptor, CurrentSurfaceTexture, DisplayAndWindowHandle, LoadOp,
-    Operations, RenderPassColorAttachment, RenderPassDescriptor, RenderPipeline, StoreOp,
-    TextureViewDescriptor,
-};
+use glam::{Mat4, Vec4};
+use hermes::MeshData;
+use wgpu::{BindGroup, Buffer, Color, CommandEncoderDescriptor, CurrentSurfaceTexture, DisplayAndWindowHandle, IndexFormat, LoadOp, Operations, RenderPassColorAttachment, RenderPassDepthStencilAttachment, RenderPassDescriptor, RenderPipeline, StoreOp, TextureViewDescriptor};
 
+use crate::Camera;
 use crate::RendererError;
 use crate::context::GpuContext;
 use crate::mesh::Mesh;
+use crate::uniform::{ObjectUniforms, SceneUniforms};
 
 /// A window that a [`Renderer`] can draw into.
 ///
@@ -78,16 +78,15 @@ impl<W> RenderWindow for W where W: DisplayAndWindowHandle + Debug + 'static {}
 /// }
 /// ```
 pub struct Renderer {
-    /// The connection to the GPU. It also stores the surface for the window.
-    gpu: GpuContext,
-    /// The vertices of the triangle, copied into GPU memory.
-    vertex_buffer: Buffer,
-    /// The number of vertices in `vertex_buffer`. `render` passes it to each draw call. `new`
-    /// copies it from the mesh before the mesh is dropped.
-    vertex_count: u32,
-    /// The pipeline that draws the triangle. A pipeline is the set of settings that the GPU follows
-    /// to draw, from reading each vertex to writing each pixel's colour.
-    pipeline: RenderPipeline,
+    gpu: GpuContext,              // the connection to the GPU, and the surface for the window
+    vertex_buffer: Buffer,        // the hand's vertices, in GPU memory
+    index_buffer: Buffer,         // the hand's triangle list, in GPU memory
+    index_count: u32,             // the number of entries in `index_buffer`, which each draw call needs
+    scene_buffer: Buffer,         // the camera's matrix and the light's direction
+    scene_bind_group: BindGroup,  // hands `scene_buffer` to the shader, at group 0
+    object_buffer: Buffer,        // the hand's model matrix
+    object_bind_group: BindGroup, // hands `object_buffer` to the shader, at group 1
+    pipeline: RenderPipeline,     // the lit pipeline
 }
 
 impl Renderer {
@@ -98,6 +97,9 @@ impl Renderer {
         b: 0.3,
         a: 1.0,
     };
+
+    // The direction that the light travels in: downwards, and a little to the left and away from the camera
+    const LIGHT_DIRECTION: Vec4 = Vec4::new(-0.3, -1.0, -0.5, 0.0);
 
     /// Creates a renderer that draws into `window`, at `width` by `height` pixels.
     ///
@@ -128,20 +130,39 @@ impl Renderer {
     /// // Waits for the setup to finish, since `new` returns a future
     /// let renderer = block_on(renderer_setup)?;
     /// ```
-    pub async fn new<W>(window: Arc<W>, width: u32, height: u32) -> Result<Self, RendererError>
+    pub async fn new<W>(window: Arc<W>, width: u32, height: u32, hand: MeshData) -> Result<Self, RendererError>
     where
         W: RenderWindow,
     {
+        // Connects to the GPU, and creates the window's surface
         let gpu = GpuContext::new(window, width, height).await?;
-        let mesh = Mesh::build_triangle();
+        // Interleaves the hand's positions and normals into vertices
+        let mesh = Mesh::from_mesh_data(hand);
+
         let vertex_buffer = gpu.create_vertex_buffer(&mesh);
-        let shader_source = include_str!("../shaders/flat_colour.wgsl");
-        let shader = gpu.create_shader("Flat colour shader", shader_source);
-        let pipeline = gpu.create_pipeline(&shader);
+        let index_buffer = gpu.create_index_buffer(&mesh);
+
+        let scene_buffer = gpu.create_uniform_buffer("Scene uniforms", size_of::<SceneUniforms>());
+        let object_buffer = gpu.create_uniform_buffer("Object uniforms", size_of::<ObjectUniforms>());
+
+        let scene_layout = gpu.create_uniform_layout("Scene layout");
+        let object_layout = gpu.create_uniform_layout("Object layout");
+
+        let scene_bind_group = gpu.create_uniform_bind_group("Scene bind group", &scene_layout, &scene_buffer);
+        let object_bind_group = gpu.create_uniform_bind_group("Object bind group", &object_layout, &object_buffer);
+
+        let shader_source = include_str!("../shaders/lit.wgsl");
+        let shader = gpu.create_shader("Lit shader", shader_source);
+        let pipeline = gpu.create_pipeline(&shader, &scene_layout, &object_layout);
         Ok(Self {
             gpu,
             vertex_buffer,
-            vertex_count: mesh.vertex_count(),
+            index_buffer,
+            index_count: mesh.count_indices(),
+            scene_buffer,
+            scene_bind_group,
+            object_buffer,
+            object_bind_group,
             pipeline,
         })
     }
@@ -260,7 +281,7 @@ impl Renderer {
     ///     event_loop.exit();
     /// }
     /// ```
-    pub fn render(&mut self) -> Result<(), RendererError> {
+    pub fn render(&mut self, camera: &Camera, hand_transform: Mat4) -> Result<(), RendererError> {
         // Returns at once while the app is suspended, since no surface exists then
         let Some(surface_context) = &self.gpu.surface_context else {
             return Ok(());
@@ -286,9 +307,19 @@ impl Renderer {
             // Returns an error rather than skipping the frame, since a skip would hide the bug
             CurrentSurfaceTexture::Validation => return Err(RendererError::Validation),
         };
-        // Creates a view of the frame's texture, which the pass resolves the multisampled texture
-        // into
         let view = frame.texture.create_view(&TextureViewDescriptor::default());
+
+        let config = &surface_context.config;
+        let aspect_ratio = config.width as f32 / config.height as f32;
+        let scene = SceneUniforms {
+            view_projection: camera.build_view_projection(aspect_ratio),
+            light_direction: Self::LIGHT_DIRECTION,
+        };
+        self.gpu.queue.write_buffer(&self.scene_buffer, 0, bytemuck::bytes_of(&scene));
+        let object = ObjectUniforms {
+            model: hand_transform,
+        };
+        self.gpu.queue.write_buffer(&self.object_buffer, 0, bytemuck::bytes_of(&object));
 
         // Creates the command encoder, which records this frame's commands for the GPU to run
         let encoder_descriptor = CommandEncoderDescriptor {
@@ -309,20 +340,30 @@ impl Renderer {
                 store: StoreOp::Discard,
             },
         };
+
+        // Points the pass at the depth buffer, and clears every depth to 1.0, the far edge of the view
+        let depth_attachment = RenderPassDepthStencilAttachment {
+            view: &surface_context.depth_view,
+            depth_ops: Some(Operations {
+                load: LoadOp::Clear(1.0),
+                // Discards the depths once the pass ends, since nothing reads them afterwards
+                store: StoreOp::Discard,
+            }),
+            stencil_ops: None,
+        };
         let pass_descriptor = RenderPassDescriptor {
-            label: Some("Triangle"),
+            label: Some("Hand"),
             color_attachments: &[Some(colour_attachment)],
+            depth_stencil_attachment: Some(depth_attachment),
             ..Default::default()
         };
-        // Records a render pass, which is one batch of draws into the colour attachment. This pass
-        // draws the triangle
         let mut render_pass = encoder.begin_render_pass(&pass_descriptor);
         render_pass.set_pipeline(&self.pipeline);
+        render_pass.set_bind_group(0, &self.scene_bind_group, &[]);
+        render_pass.set_bind_group(1, &self.object_bind_group, &[]);
         render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
-        // Runs the pipeline over every vertex in the buffer, drawing one copy of the mesh
-        render_pass.draw(0..self.vertex_count, 0..1);
-        // Ends the pass, which releases its borrow of the encoder. `finish` can then take the
-        // encoder
+        render_pass.set_index_buffer(self.index_buffer.slice(..), IndexFormat::Uint32);
+        render_pass.draw_indexed(0..self.index_count, 0, 0..1);
         drop(render_pass);
 
         // Sends the recorded commands to the GPU, then shows the frame's texture in the window

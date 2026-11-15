@@ -370,25 +370,29 @@ Improvements that come up along the way, and that no step below needs yet, go in
 - [x] Draw a triangle
 - [x] Rebuild the surface when the app suspends and resumes
 - [x] Recreate the surface when wgpu reports it lost
-- [ ] Draw the god's hand and move it with the cursor across a flat ground plane
+- [x] Draw the god's hand and move it with the cursor across a flat ground plane
 - [ ] Render lit heightmap terrain with a mouse and keyboard camera
 
-The hand step builds four layers at once. Each one is structure that later steps extend.
+The hand runs through four layers, and each one is structure that later steps extend.
 
-1. The game reads the mesh of the hand from `assets/hand-model.glb`, with the reader that ADR 0016
-   sets out. For this step, the reader must return the vertex positions, the vertex normals and the
-   indices. The skeleton and the poses wait for the hand to animate.
-2. `amaterasu` must draw the mesh in 3D. That needs five additions:
+1. `hermes` reads the mesh of the hand from `assets/hand-model.glb`, with the reader that ADR 0016
+   sets out. `atum` builds the file into the program when it compiles. The reader returns the vertex
+   positions, the vertex normals and the indices, and skips the skeleton and the poses, which the
+   hand needs only once it animates.
+2. `amaterasu` draws the mesh in 3D, with five parts:
    - a `Vertex` struct, with a position and a normal
    - an index buffer, since a glTF mesh lists each triangle as three indices into its vertices
-   - a camera, which gives the shader the matrices that turn world positions into screen positions
+   - a camera, which gives the shader the matrix that turns world positions into screen positions
    - a depth buffer, which lets the nearer surface hide the one behind it
    - a directional light, which shades each triangle by the angle between its normal and the light
-3. `zurvan` must advance the world in fixed steps, as ADR 0005 sets out. Two components, `Position`
-   and `Velocity`, give the hand its place and its movement.
-4. The hand moves across a flat plane at height zero, since the terrain does not exist yet. To place
-   the hand on that plane, the game follows a ray. A ray is a line from the camera, through the
-   cursor, into the world. The hand moves towards the point where the ray meets the plane.
+3. `zurvan` advances the world in fixed steps of one sixtieth of a second, as set out in ADR 0005.
+   The hand is an entity with four components: `Position`, `Velocity`, `Target` and `Speed`. On each
+   step, `steering` sets the velocity that carries the hand towards its target, capped at its speed.
+   `movement` then moves the hand by that velocity.
+4. The hand moves above a flat plane at height zero, since the terrain does not exist yet. To aim
+   the hand, `atum` follows a ray, a line from the camera, through the cursor, into the world. The
+   point where the ray meets the plane, raised to the height at which the hand hovers, becomes the
+   hand's target.
 
 The hand appears in its rest pose. Bending its fingers needs skinning, in which each vertex moves
 with the bones of the skeleton. The hand item under Later Work covers it.

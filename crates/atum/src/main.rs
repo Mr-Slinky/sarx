@@ -21,6 +21,6 @@ use app::App;
 /// Panics where winit cannot create the event loop, or where the event loop fails while it runs.
 fn main() {
     let event_loop = EventLoop::new().expect("Failed to create the event loop");
-    let mut app = App::default();
+    let mut app = App::new();
     event_loop.run_app(&mut app).expect("The event loop failed");
 }

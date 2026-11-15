@@ -6,22 +6,22 @@
 //! The `App` owns the window, together with the [`Renderer`] that draws into it. Each method passes
 //! its event on to the renderer, prints it, or ends the program.
 
+use crate::executor::block_on;
+use amaterasu::{Camera, Renderer};
+use glam::{Mat4, Vec2, Vec3};
 use std::error::Error;
 use std::sync::Arc;
-
-use amaterasu::{Camera, Renderer};
-use glam::{Mat4, Vec3};
+use std::time::{Duration, Instant};
 use winit::application::ApplicationHandler;
 use winit::event::WindowEvent;
 use winit::event_loop::ActiveEventLoop;
 use winit::window::{Window, WindowId};
-
-use crate::executor::block_on;
+use zurvan::Simulation;
 
 /// Owns the window and the renderer, and defines the methods that winit calls for each event.
 ///
-/// `App::default()` sets both fields to `None`, and the first call to `resumed` then creates the
-/// window and the renderer.
+/// `App::new()` builds the camera and the simulation, and leaves the window and the renderer as
+/// `None`. The first call to `resumed` then creates both.
 ///
 /// # Examples
 ///
@@ -29,29 +29,79 @@ use crate::executor::block_on;
 /// until the program ends.
 ///
 /// ```ignore
-/// // Creates the event loop, then hands it a new `App` with both fields set to `None`
+/// // Creates the event loop, then hands it a new `App` with no window or renderer yet
 /// let event_loop = EventLoop::new()?;
-/// let mut app = App::default();
+/// let mut app = App::new();
 /// event_loop.run_app(&mut app)?;
 /// ```
-#[derive(Default)]
 pub(crate) struct App {
-    /// The window, or `None` before the first `resumed`.
-    ///
-    /// An `Arc` counts its owners, and drops the window once the last one is gone. The app and the
-    /// renderer's surface are both owners, sharing the one window.
-    window: Option<Arc<Window>>,
-    /// The renderer, or `None` before the first `resumed`. It stays `None` where the setup fails.
-    renderer: Option<Renderer>,
+    window: Option<Arc<Window>>, // the window, or `None` before the first `resumed`
+    renderer: Option<Renderer>,  // the renderer, or `None` before the first `resumed`
+    simulation: Simulation,      // the world, and the fixed steps that move it
+    camera: Camera,              // where the view is drawn from
+    cursor: Option<Vec2>, // the cursor's last position in pixels, or `None` before it first moves over the window
+    last_frame: Option<Instant>, // when the last frame started, or `None` before the first frame
 }
 
 impl App {
-    const HAND_MODEL: &[u8] =
-        include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/hand-model.glb"));
-
+    const HAND_MODEL: &[u8] = include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../assets/hand-model.glb"
+    ));
+    // Where the camera stands, tuned so that the whole hand fits on screen
     const CAMERA_EYE: Vec3 = Vec3::new(0.3, 4.0, 3.0);
-
+    // The point the camera looks at, tuned to the middle of the hand
     const CAMERA_TARGET: Vec3 = Vec3::new(0.3, 0.0, -2.0);
+
+    pub(crate) fn new() -> Self {
+        // Points the camera at `CAMERA_TARGET` from `CAMERA_EYE`
+        let camera = Camera::new(Self::CAMERA_EYE, Self::CAMERA_TARGET);
+        Self {
+            window: None,
+            renderer: None,
+            cursor: None,
+            last_frame: None,
+            simulation: Simulation::new(),
+            camera,
+        }
+    }
+
+    fn draw_frame(&mut self, event_loop: &ActiveEventLoop) {
+        // Returns until both the window and the renderer exist
+        let (Some(window), Some(renderer)) = (&self.window, self.renderer.as_mut()) else {
+            return;
+        };
+
+        let now = Instant::now();
+        // Measures the time since the last frame, or zero on the first frame
+        let elapsed = self.last_frame.map_or(Duration::ZERO, |last| now - last);
+        // Records this frame's start for the next one
+        self.last_frame = Some(now);
+
+        let size = window.inner_size();
+        // Converts the window size to floats for the camera's maths
+        let window_size = Vec2::new(size.width as f32, size.height as f32);
+        // Aims the hand at the ground under the cursor, where the cursor has moved over the window and its ray reaches the ground
+        if let Some(cursor) = self.cursor
+            && let Some(ray) = self.camera.cast_ray(cursor, window_size)
+            && let Some(ground_point) = ray.meet_ground()
+        {
+            self.simulation.set_hand_target(ground_point);
+        }
+
+        self.simulation.advance(elapsed);
+        let hand_position = self.simulation.find_hand_position();
+        let hand_transform = Mat4::from_translation(hand_position);
+
+        // Draws the frame, and ends the program where the renderer cannot carry on
+        if let Err(error) = renderer.render(&self.camera, hand_transform) {
+            Self::print_error(&error);
+            event_loop.exit();
+            return;
+        }
+        // Asks winit for the next frame at once, which keeps the simulation and the drawing running
+        window.request_redraw();
+    }
 
     /// Prints `error` to standard error, followed by the error that caused it, where there is one.
     ///
@@ -146,15 +196,11 @@ impl ApplicationHandler for App {
                     renderer.resize(size.width, size.height);
                 }
             }
-            WindowEvent::RedrawRequested => {
-                // Draws the hand where the model places it (until it follows the cursor)
-                let camera = Camera::new(Self::CAMERA_EYE, Self::CAMERA_TARGET);
-                if let Some(renderer) = self.renderer.as_mut()
-                    && let Err(error) = renderer.render(&camera, Mat4::IDENTITY)
-                {
-                    Self::print_error(&error);
-                    event_loop.exit();
-                }
+            // Draws one frame, and asks for the next
+            WindowEvent::RedrawRequested => self.draw_frame(event_loop),
+            // Stores where the cursor is, in pixels from the window's top-left corner
+            WindowEvent::CursorMoved { position, .. } => {
+                self.cursor = Some(Vec2::new(position.x as f32, position.y as f32));
             }
             other => println!("{other:?}"),
             // TODO: the match must pass each `KeyboardInput` to the input system, as in

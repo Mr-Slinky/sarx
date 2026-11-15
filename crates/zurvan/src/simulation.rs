@@ -41,22 +41,18 @@ impl Simulation {
     pub fn set_hand_target(&mut self, ground_point: Vec3) {
         // Lifts the point on the ground to the hover height
         let hover_point = ground_point + Vec3::Y * Self::HOVER_HEIGHT;
-        // Finds the hand's target, which `new` gives it
         let target = self
             .world
             .get_mut::<Target>(self.hand)
             .expect("the hand always has a target");
-        // Moves the target to the point above the ground
         target.0 = hover_point;
     }
 
     pub fn find_hand_position(&self) -> Vec3 {
-        // Reads the hand's position, which `new` gives it and nothing removes
         let position = self
             .world
             .get::<Position>(self.hand)
             .expect("the hand always has a position");
-        // Returns a copy of the vector inside it
         position.0
     }
 

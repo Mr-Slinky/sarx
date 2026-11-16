@@ -8,7 +8,7 @@ decision-makers: Kheagen Haskins
 
 ## Context and Problem Statement
 
-ADR 0009 settles that the developer writes the ECS by hand, in the `enki` crate. That record
+ADR 0005 settles that the developer writes the ECS by hand, in the `enki` crate. That record
 leaves one question open: how the ECS stores its components. This record settles it.
 
 The layout of the components in memory decides how fast the systems run. The reason lies in how the
@@ -32,7 +32,7 @@ and the physics engine are two of them. Each of these systems reads several comp
 entity together. The physics engine, for example, reads a position, a velocity, a mass and a
 collider.
 
-Entities also gain and lose components while the game runs. The central AI, which ADR 0006 sets
+Entities also gain and lose components while the game runs. The central AI, which ADR 0016 sets
 out, gives a villager a task and later takes it away. A villager becomes hungry, then eats.
 
 How does the ECS lay out its components in memory?

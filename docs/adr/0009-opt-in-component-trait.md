@@ -55,7 +55,7 @@ How does `enki` decide which types are components?
 - The ECS is structure that other code builds on. Its first version follows the design that Sarx
   keeps. Later work extends that design rather than replacing it.
 - The developer must discuss any library that the decision brings in before Sarx takes it on,
-  against the questions that the README sets out.
+  against the questions that the [Libraries](../repo-conventions.md#libraries) convention sets out.
 
 ## Considered Options
 

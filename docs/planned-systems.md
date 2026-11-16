@@ -10,21 +10,21 @@ the design against the systems that it must serve.
 
 Two systems exist so far, in a first form. `steering` and `movement` in `zurvan` move the god's hand
 towards the cursor, through the `Position`, `Velocity`, `Target` and `Speed` components. Every other
-component name below, such as `Needs` or `Task`, is a working guess. The counts come from the limits that [ADR 0019](adr/0019-scale-target.md) sets:
+component name below, such as `Needs` or `Task`, is a working guess. The counts come from the limits that [ADR 0021](adr/0021-scale-target.md) sets:
 50,000 villagers, 500,000 entities, and 15,000 villagers on screen at once.
 
 ## Keeping the List Current
 
 A new planned feature adds its systems to the tables below. Where a feature changes, the rows for its
 systems change with it. Each section opens with the sources that its systems come from, such as
-the README, the TODO list, an ADR or the developer's own notes.
+the [feature list](feature-list.md), the TODO list, an ADR or the developer's own notes.
 
 ## Systems by Feature
 
 ### The God's Hand
 
-The hand comes from the TODO list, [ADR 0014](adr/0014-hand-poses-as-target-keyframes.md) and
-[ADR 0021](adr/0021-telekinetic-hand.md).
+The hand comes from the TODO list, [ADR 0020](adr/0020-hand-poses-as-target-keyframes.md) and
+[ADR 0022](adr/0022-telekinetic-hand.md).
 
 | System | Work on each step                                                                       | Reads and writes                                                                    | Entities                      |
 |--------|-----------------------------------------------------------------------------------------|-------------------------------------------------------------------------------------|-------------------------------|
@@ -36,8 +36,8 @@ The hand comes from the TODO list, [ADR 0014](adr/0014-hand-poses-as-target-keyf
 
 ### Physics
 
-Physics comes from [ADR 0010](adr/0010-hand-built-physics.md),
-[ADR 0012](adr/0012-stylised-art.md) and [ADR 0021](adr/0021-telekinetic-hand.md).
+Physics comes from [ADR 0006](adr/0006-hand-built-physics.md),
+[ADR 0019](adr/0019-stylised-art.md) and [ADR 0022](adr/0022-telekinetic-hand.md).
 
 | System        | Work on each step                                     | Reads and writes                                                              | Entities                                    |
 |---------------|-------------------------------------------------------|-------------------------------------------------------------------------------|---------------------------------------------|
@@ -49,8 +49,8 @@ Physics comes from [ADR 0010](adr/0010-hand-built-physics.md),
 
 ### Villagers
 
-Villagers come from [ADR 0006](adr/0006-central-ai.md), [ADR 0012](adr/0012-stylised-art.md) and
-[ADR 0019](adr/0019-scale-target.md).
+Villagers come from [ADR 0016](adr/0016-central-ai.md), [ADR 0019](adr/0019-stylised-art.md) and
+[ADR 0021](adr/0021-scale-target.md).
 
 | System          | Work on each step                                                   | Reads and writes                                                           | Entities                                   |
 |-----------------|---------------------------------------------------------------------|----------------------------------------------------------------------------|--------------------------------------------|
@@ -63,7 +63,7 @@ Villagers come from [ADR 0006](adr/0006-central-ai.md), [ADR 0012](adr/0012-styl
 
 ### Combat
 
-Combat comes from the Planned Features in the README, and from [ADR 0012](adr/0012-stylised-art.md).
+Combat comes from the [feature list](feature-list.md), and from [ADR 0019](adr/0019-stylised-art.md).
 
 | System    | Work on each step                                        | Reads and writes                                         | Entities                |
 |-----------|----------------------------------------------------------|----------------------------------------------------------|-------------------------|
@@ -73,7 +73,7 @@ Combat comes from the Planned Features in the README, and from [ADR 0012](adr/00
 
 ### The Creature
 
-The creature comes from [ADR 0022](adr/0022-rigid-creature-that-places-its-feet.md) and the
+The creature comes from [ADR 0023](adr/0023-rigid-creature-that-places-its-feet.md) and the
 developer's own notes.
 
 | System      | Work on each step                                                                         | Reads and writes                          | Entities                  |
@@ -84,8 +84,8 @@ developer's own notes.
 
 ### Civilisation, Factions and Levels
 
-These systems come from the Planned Features in the README,
-[ADR 0007](adr/0007-one-gate-for-every-change.md) and [ADR 0008](adr/0008-one-level-format.md).
+These systems come from the [feature list](feature-list.md),
+[ADR 0017](adr/0017-one-gate-for-every-change.md) and [ADR 0018](adr/0018-one-level-format.md).
 
 | System     | Work on each step                                                              | Reads and writes                                     | Entities                          |
 |------------|--------------------------------------------------------------------------------|------------------------------------------------------|-----------------------------------|
@@ -97,8 +97,8 @@ These systems come from the Planned Features in the README,
 
 ### Handing the State to the Renderer
 
-The renderer comes from [ADR 0005](adr/0005-simulation-apart-from-rendering.md),
-[ADR 0019](adr/0019-scale-target.md) and [ADR 0020](adr/0020-change-detection.md).
+The renderer comes from [ADR 0004](adr/0004-simulation-apart-from-rendering.md),
+[ADR 0021](adr/0021-scale-target.md) and [ADR 0013](adr/0013-change-detection.md).
 
 | System  | Work on each frame                                   | Reads and writes     | Entities                  |
 |---------|------------------------------------------------------|----------------------|---------------------------|
@@ -125,9 +125,9 @@ puts the first one ahead of the others, since most of the time in a step goes th
 
 The list raises questions that a design for the ECS must answer.
 
-- A villager has about 6 rigid parts, under ADR 0012, and the design must decide whether each part
+- A villager has about 6 rigid parts, under ADR 0019, and the design must decide whether each part
   is an entity. Were each part an entity of its own, 50,000 villagers would need 300,000 entities
   for their parts alone. With the villagers themselves, that comes to 350,000 of the 500,000
-  entities that ADR 0019 allows, which leaves 150,000 for every tree, rock, building and thrown
+  entities that ADR 0021 allows, which leaves 150,000 for every tree, rock, building and thrown
   object. The TODO list already asks how the tables store the hierarchy of a figure built from
   parts.

@@ -8,7 +8,7 @@
 //! becomes a component by implementing [`Component`].
 //!
 //! A [`World`] stores every entity and every component. It keeps the entities that have one exact
-//! set of component types together in one table, with one column for each type, as ADR 0011 sets
+//! set of component types together in one table, with one column for each type, as ADR 0007 sets
 //! out.
 //!
 //! A system is a function that updates every entity with a given set of component types, such as

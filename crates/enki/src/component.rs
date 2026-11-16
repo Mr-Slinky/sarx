@@ -10,7 +10,7 @@
 //! in a column are also neighbours in memory. The components of one row, however, lie in separate
 //! blocks, one block per column.
 //!
-//! A table learns its component types at run time, as ADR 0011 sets out. A generic `Vec<T>` needs
+//! A table learns its component types at run time, as ADR 0007 sets out. A generic `Vec<T>` needs
 //! its type at compile time, meaning it cannot serve as a column. Therefore, a [`ComponentVec`]
 //! stores its components as raw bytes.
 //!
@@ -199,7 +199,7 @@ use std::{mem, ptr, slice};
 ///
 /// The game makes a type a component by implementing this trait for it, with one empty `impl`.
 /// Every other type stays outside the world. As a result, a tuple passed to
-/// `World::add_component` by mistake fails to compile, as ADR 0015 sets out.
+/// `World::add_component` by mistake fails to compile, as ADR 0009 sets out.
 ///
 /// The trait requires three other traits of every component type:
 ///

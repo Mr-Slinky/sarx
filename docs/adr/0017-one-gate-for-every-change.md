@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: proposed
 date: 2026-10-18
 decision-makers: Kheagen Haskins
 ---
@@ -33,7 +33,7 @@ check?
   player breaks the rule as surely as an attack by the player on a faction.
 - One rule can cover several kinds of change. Cosy mode ends on a hostile action, a trade or an
   approach to a possible ally.
-- The rules of the level will grow. The README lists two ways to stop a player from exploiting cosy
+- The rules of the level will grow. The [feature list](../feature-list.md) gives two ways to stop a player from exploiting cosy
   mode, and the choice between them remains open. One way fixes cosy mode for the whole level. The
   other allows only the actions that keep the civilisation going. Either one adds a rule for the code
   to enforce.

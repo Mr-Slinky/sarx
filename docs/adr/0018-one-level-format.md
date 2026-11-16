@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: proposed
 date: 2026-10-18
 decision-makers: Kheagen Haskins
 ---
@@ -48,7 +48,7 @@ person can also refine a generated level.
 
 The format itself remains open. Three questions about it wait for later: whether it is text or
 binary, how it is serialised, and which library reads and writes it. Any library for it goes through
-the discussion that the Libraries section of the README sets out. The outcome of that discussion
+the discussion that the [Libraries](../repo-conventions.md#libraries) convention sets out. The outcome of that discussion
 gets an ADR of its own.
 
 ### Consequences

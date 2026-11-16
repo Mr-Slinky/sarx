@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: proposed
 date: 2026-11-11
 decision-makers: Kheagen Haskins
 ---
@@ -36,7 +36,7 @@ that one pass over every villager takes.
 | 50,000    | 10 MB   | about the size of L3          | about 0.5 to 1 ms |
 | 500,000   | 100 MB  | main memory                   | about 5 to 10 ms  |
 
-ADR 0005 proposes a rate of 60 steps per second. At that rate, each step lasts 16.7 ms.
+ADR 0004 proposes a rate of 60 steps per second. At that rate, each step lasts 16.7 ms.
 
 How many entities must Sarx handle, on what hardware?
 
@@ -44,7 +44,7 @@ How many entities must Sarx handle, on what hardware?
 
 - Sarx aims to simulate an order of magnitude more villagers than games like it.
 - ADR 0003 sets the target hardware as a mid-level laptop.
-- Each step lasts 16.7 ms, at the rate that ADR 0005 proposes.
+- Each step lasts 16.7 ms, at the rate that ADR 0004 proposes.
 - The number of villagers on screen at once sets the work of the renderer, rather than that of the
   simulation.
 - Trees, rocks and other static things far outnumber villagers on a large map. The systems that
@@ -79,7 +79,7 @@ Particle effects, such as rain, smoke and sparks, must stay outside the ECS. Eac
 second or two, many thousands exist at once, and none of them affects the game. As an entity, each
 one would need a table operation when it spawns, and another when it despawns. The renderer must
 store them instead, in an array of its own or on the GPU. The simulation must start an effect by
-sending an event, such as "a storm starts here". This follows ADR 0005, which keeps the simulation
+sending an event, such as "a storm starts here". This follows ADR 0004, which keeps the simulation
 apart from the renderer.
 
 The test that separates an entity from a particle effect is whether the thing affects the game. An
@@ -128,4 +128,4 @@ A reader also checks that no type for a particle effect implements `Component`.
 - Bad, because a step would have room for one or two full passes, at most.
 - Bad, because the AI could not plan for every villager on every step. It would need to update most
   villagers rarely.
-- Bad, because the ECS would need tables split into fixed-size chunks. That would change ADR 0011.
+- Bad, because the ECS would need tables split into fixed-size chunks. That would change ADR 0007.

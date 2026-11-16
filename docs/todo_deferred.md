@@ -3,7 +3,7 @@
 This file lists work that the developer has noted and put off, with no date set for it. An entry
 stays here until the work is done, and then comes out.
 
-The TODO section of the README sets the order in which Sarx is built. The entries below fall outside
+The developer's TODO list, in `docs/local/todo.md`, sets the order in which Sarx is built. The entries below fall outside
 that order. Each one is an improvement that came up along the way, such as in a review or an audit,
 and that no step on the TODO list needs yet.
 
@@ -38,11 +38,12 @@ to table N, or that removing it leads to table M. A move would read the edge fro
 and would look up `indices` only the first time that it follows a new edge.
 
 A faster hasher for both maps is a separate, smaller option. It would come either from a library or
-from a hasher written by hand. A library goes to discussion first, as the README sets out.
+from a hasher written by hand. A library goes to discussion first, as the
+[Libraries](repo-conventions.md#libraries) convention sets out.
 
 #### Why it waits
 
-ADR 0011 estimates that the ECS moves around 33 entities on each step. At that rate, the two
+ADR 0007 estimates that the ECS moves around 33 entities on each step. At that rate, the two
 lookups for each move take a negligible share of a step.
 
 #### When to revisit
@@ -58,7 +59,7 @@ A `ComponentMask` stores one bit for each component type, in a `u64`. A world th
 64 component types. `ComponentRegistry::find_or_assign_bit` panics when it meets a 65th type. The
 test `find_or_assign_bit_with_65th_type_panics` checks the panic.
 
-Under ADR 0011, each state of an entity is a marker component, such as `Hungry`. Each marker type
+Under ADR 0007, each state of an entity is a marker component, such as `Hungry`. Each marker type
 takes a bit. Physics, AI, rendering and the states of villagers will together come close to 64.
 
 #### The change

@@ -32,8 +32,8 @@ a library?
 - The developer builds every layer below the gameplay by hand, the entity system included, to learn
   how each one works.
 - A library comes into Sarx only where it leaves the design of Sarx alone. It also must not hide
-  anything that the developer wants to learn and control. The section of the README on libraries sets
-  out these questions.
+  anything that the developer wants to learn and control. The [Libraries](../repo-conventions.md#libraries)
+  convention sets out these questions.
 - The physics engine runs on the ECS. Its data, such as velocity and mass, is stored in components.
   Each step of the physics is a system.
 - The ECS is structure that other code builds on. Its first version follows the design that Sarx
@@ -57,7 +57,7 @@ The developer writes the ECS in the `enki` crate. Its first version moves the tr
 fixed-step simulation. That version is built on the design that Sarx keeps, and later work adds to
 that design rather than replacing it.
 
-How the ECS stores its data is a separate decision. ADR 0011 records it.
+How the ECS stores its data is a separate decision. ADR 0007 records it.
 
 ### Consequences
 
@@ -130,7 +130,7 @@ would have the fields that its kind needs.
 - Bad, because a new kind of object needs its own struct. It also needs a change to every function
   that walks the objects.
 - Bad, because the physics engine needs an ECS. It stores its data in components and runs each of
-  its steps as a system, as ADR 0010 records.
+  its steps as a system, as ADR 0006 records.
 
 ## More Information
 

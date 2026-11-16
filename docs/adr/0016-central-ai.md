@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: proposed
 date: 2026-10-17
 decision-makers: Kheagen Haskins
 ---
@@ -64,8 +64,8 @@ Three points remain open. The developer settles them once the planner is built:
 
 ### Confirmation
 
-The AI has yet to be written. The TODO in the README lists the central AI planner under the
-simulation work, after the foundation.
+The AI has yet to be written. The central AI planner comes with the simulation work, after the
+foundation.
 
 Once that code exists, a reader confirms this decision with two checks:
 

@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: proposed
 date: 2026-11-14
 decision-makers: Kheagen Haskins
 ---
@@ -8,25 +8,26 @@ decision-makers: Kheagen Haskins
 
 ## Context and Problem Statement
 
-The README sets out how a level ends. A player wins once their faction is the last one standing,
-either by allying with every other faction or by conquering them all. That is the win condition. It
+The [feature list](../feature-list.md) sets out how a level ends. A player wins once they have
+defeated every rival faction, either by besieging it or by building a city impressive enough that
+its people immigrate. That is the win condition. It
 leaves open what the player does from the start of a level until then.
 
 A game loop is the cycle of actions that a player repeats throughout a level. Each pass through the
 loop leaves the player a little stronger, and gives them a reason to start the next one. Sarx needs
 a game loop that leads the player towards the win condition.
 
-ADR 0012 gives Sarx a stylised look, with bright colours and simple forms, and builds each villager
+ADR 0019 gives Sarx a stylised look, with bright colours and simple forms, and builds each villager
 from separate rigid parts. It also leaves open what makes that look belong to Sarx alone.
 
-The first reference images that the developer generated from ADR 0012 came back as generic vinyl
+The first reference images that the developer generated from ADR 0019 came back as generic vinyl
 toys: rounded, smooth and cheerful, with a large face. An image model produces that figure whenever
 a prompt asks for "cute" and "simple" and nothing more, since it is the average of every mascot that
 the model has seen. Players forget a look that any studio could produce from the same words.
 
 The camera also constrains the look. The god's camera mostly looks down on villagers from above,
 hundreds at a time. During a battle, the player can possess a character and see it from behind in
-third person, as the Planned Features in the README set out. A villager must therefore be easy to
+third person, as the feature list sets out. A villager must therefore be easy to
 recognise from above and from behind, and the face matters less than the top of the head, the
 shoulders and the back.
 
@@ -45,14 +46,14 @@ look of their own?
 - The idea behind the look must reach beyond the model, into combat, physics, sound and the story.
   A rule that shapes only the villager gives a style to that one asset alone.
 - A villager must be easy to recognise from above, from behind and close up.
-- Every source of models that ADR 0012 lists must be able to produce the look: code, Blender
+- Every source of models that ADR 0019 lists must be able to produce the look: code, Blender
   scripts and AI generators.
 - The developer must build one complete slice of the game before widening it.
 
 ## Considered Options
 
 - Tiered materials, with people shaped from them
-- Tiered materials, with one look for every villager, as ADR 0012 stands
+- Tiered materials, with one look for every villager, as ADR 0019 stands
 - A body editor, as in Spore
 
 ## Decision Outcome
@@ -100,7 +101,7 @@ proportions that make it cute, such as a large head on a short body. The cute lo
 from the proportions, rather than from rounding every surface.
 
 The material also decides what happens when a figure breaks. Combat is comic, and a blow can knock
-off a head or a limb, as ADR 0012 sets out. The break shows the material, thereby giving Sarx a faux
+off a head or a limb, as ADR 0019 sets out. The break shows the material, thereby giving Sarx a faux
 gore of its own. The table below sets out how each material breaks when struck:
 
 | Material | When struck                           |
@@ -209,7 +210,7 @@ Five points remain open. The developer will settle each one as the work reaches 
 - Good, because flat facets suit every source of models. Code and Blender scripts build flat faces
   easily, and the uneven triangles that an AI generator produces look like deliberate facets on clay.
 - Good, because rigid parts suit the faux gore. A clay or wooden part breaks off cleanly, with no
-  seam to hide, as ADR 0012 already notes.
+  seam to hide, as ADR 0019 already notes.
 - Bad, because the developer must balance every tier against the others, for the people, the
   buildings and the creature alike.
 - Bad, because each material needs its own surface, its own break effect and its own sounds. Every
@@ -217,7 +218,7 @@ Five points remain open. The developer will settle each one as the work reaches 
 - Bad, because models from several sources must still match one another within each material. A
   generated clay figure that ignores the shared colours and facets stands out among the rest.
 - Bad, because the simulation must track each material as a resource, and a village that runs out
-  of a material cannot make people from it. The planner of ADR 0006 must weigh that supply when it
+  of a material cannot make people from it. The planner of ADR 0016 must weigh that supply when it
   decides what a village gathers.
 - Bad, because the ceremony is a sequence of its own, outside a normal level. The developer must
   build it, and the game must play it before the first village exists.
@@ -251,7 +252,7 @@ that they are made of in their surface, their break and their sound.
   rigid parts.
 - Bad, because each material multiplies the art and effects work.
 
-### Tiered Materials, with One Look for Every Villager, as ADR 0012 Stands
+### Tiered Materials, with One Look for Every Villager, as ADR 0019 Stands
 
 The player would gather the same tiered materials, but every villager would share one stylised
 look, with bright colours and simple forms.

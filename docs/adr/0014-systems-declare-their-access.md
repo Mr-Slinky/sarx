@@ -31,7 +31,7 @@ or `Write`. These lists are the read set and the write set of the query.
 None of this says what a system is, or how a system receives its data. The answer fixes the shape
 of every system, and resources, commands and events will follow the same shape.
 
-ADR 0019 sets the scale target at 50,000 villagers. A step of 16.7 ms then has room for about a
+ADR 0021 sets the scale target at 50,000 villagers. A step of 16.7 ms then has room for about a
 dozen full passes over every villager on one core. The shape of a system decides how much of a
 mid-level laptop's other cores those passes can use.
 
@@ -39,8 +39,8 @@ How does a system receive its data, and how do systems run alongside one another
 
 ## Decision Drivers
 
-- ADR 0019 needs many passes over 50,000 villagers in each step, which calls for every core.
-- ADR 0007 already sends every change to the world through one gate, as a request.
+- ADR 0021 needs many passes over 50,000 villagers in each step, which calls for every core.
+- ADR 0017 already sends every change to the world through one gate, as a request.
 - The ECS is structure that the rest of the game builds on. Changing the shape of a system later
   would change every system written by then.
 - The `Permission` lists in `enki` already record what each query reads and writes.
@@ -58,7 +58,7 @@ every kind of parallelism that the other options use, and adds systems running s
 
 Parallelism can come from two places:
 
-- Within one system, the system splits the rows of its tables across the cores, as ADR 0011 already
+- Within one system, the system splits the rows of its tables across the cores, as ADR 0007 already
   allows.
 - Between systems, two systems run on different cores at the same time.
 
@@ -69,7 +69,7 @@ split its own work across the cores.
 
 A system does not receive `&mut World`. Rather, it changes the structure of the world through
 commands. Spawning, despawning, adding a component and removing one are all changes to that
-structure. The commands reach the world through the gate that ADR 0007 sets out.
+structure. The commands reach the world through the gate that ADR 0017 sets out.
 
 A system can declare several queries. Its queries MUST NOT conflict with each other. The rule is the
 one that `check_permissions` applies inside one query, applied across all the queries of the
@@ -87,7 +87,7 @@ waits for them. Its systems must be written under the scheduler from the start, 
 Several points remain open, for the discussions that design each piece:
 
 - the design of commands and events
-- a separate world for the renderer, under ADR 0005, which the next section sets out
+- a separate world for the renderer, under ADR 0004, which the next section sets out
 
 ### A Separate World for the Renderer
 
@@ -95,7 +95,7 @@ The simulation keeps one world. Splitting it by entity would break the handles o
 cross the split, and splitting it by component would leave each villager in several worlds, as the
 pros and cons below set out.
 
-The boundary between simulation and rendering is another matter, since ADR 0005 already draws it.
+The boundary between simulation and rendering is another matter, since ADR 0004 already draws it.
 The renderer could keep a world of its own, copied from the simulation after each step. The simulation would then run its
 next step while the renderer draws the last one. That remains open as a later addition.
 
@@ -250,7 +250,7 @@ homes were considered:
 - Good, because the `Permission` lists that `enki` already builds are the declarations that the
   scheduler compares.
 - Good, because a system that changes the structure of the world goes through commands, which
-  ADR 0007 already requires.
+  ADR 0017 already requires.
 - Good, because the developer learns how a scheduler works out which systems can run together.
 - Bad, because a system cannot reach the whole world at will. It can use only what it declares.
 - Bad, because two systems that touch the same component type still run one after the other. The

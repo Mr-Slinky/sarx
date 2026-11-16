@@ -20,14 +20,14 @@ entry, for example, states that the vertex positions are 13,192 groups of three 
 at a given byte offset.
 
 Sarx needs four things from the file. They are the vertices of the mesh, the bone that each vertex
-follows, the skeleton, and the poses that ADR 0014 stores as one-keyframe animations.
+follows, the skeleton, and the poses that ADR 0020 stores as one-keyframe animations.
 
 How does Sarx read a glTF file?
 
 ## Decision Drivers
 
-- Under the second goal in the README, the developer builds layers by hand to understand the
-  graphics pipeline.
+- The developer builds layers by hand to understand the graphics pipeline, as the
+  [Built by Hand](../../README.md#built-by-hand) section of the README sets out.
 - Reading the block of bytes follows the same rules as a vertex buffer in wgpu. Both state a
   byte offset, a stride and a number type for each attribute.
 - Sarx reads only the files that its own Blender export writes. The reader therefore has to handle
@@ -60,8 +60,8 @@ along with the value at that time. It also states how the value moves from one k
 
 The reader returns every channel in the file, and the code that uses an animation picks the channels
 that it needs. The pose code for the hand takes a one-keyframe animation, keeps its rotation
-channels, and builds the target pose that ADR 0014 sets out. Villagers, built from rigid parts under
-ADR 0012, move whole parts through time. Their code must play every channel over the length of a
+channels, and builds the target pose that ADR 0020 sets out. Villagers, built from rigid parts under
+ADR 0019, move whole parts through time. Their code must play every channel over the length of a
 clip, positions and scales included.
 
 Each new kind of animation then adds code on top of the reader. The form of what the reader returns

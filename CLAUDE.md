@@ -3,18 +3,20 @@
 This file guides AI agents in this repository, adding the instructions that apply to agents alone.
 It builds on the README, which an agent reads at the start of every session.
 
-The README describes what Sarx is and how to build it, and sets out the conventions that every
-developer follows, agents included. Its Design Decisions section lists every decision record, and
-each decision is stated only in its own record.
+The README describes what Sarx is and how to build it. Its Decision Records section lists every
+decision record, and each decision is stated only in its own record. The conventions that every
+developer follows, agents included, are in [docs/repo-conventions.md](docs/repo-conventions.md),
+which an agent reads alongside the README. The planned features are in
+[docs/feature-list.md](docs/feature-list.md).
 
 A global CLAUDE.md applies here as well. It applies in full, apart from the parts that concern only
 Java, Maven or Log4j2. Where one of its Maven practices has a Cargo counterpart, an agent follows
 the counterpart.
 
 The global file and a more local file can disagree. Where they do, the more local file wins, in the
-way that a more specific CSS rule overrides a general one. This file and the README are both more
-local than the global file, and therefore take precedence over it. For example, the test
-conventions in the README take the place of the JUnit mechanics in the global file.
+way that a more specific CSS rule overrides a general one. This file, the README and the conventions
+are all more local than the global file, and therefore take precedence over it. For example, the
+test conventions take the place of the JUnit mechanics in the global file.
 
 ---
 
@@ -38,20 +40,28 @@ everything under `docs/local/`, so the diary exists on the developer's machine a
 
 ---
 
-## The Two Goals
+## The Game and Understanding
 
-Sarx has two goals, which the README sets out at its opening and the developer weighs equally. The
-first is the game itself, and the second is learning through the layers that the developer builds
-by hand.
+The game is the goal of Sarx, and it comes first. The developer, however, cannot build what they do
+not understand. Understanding is therefore a requirement of the game rather than a goal of its own.
+It matters as much as the game for that reason alone.
 
-Through the hand-built layers, the developer means to understand the whole graphics pipeline, along
-with the architecture of a game engine.
+The game sets out to innovate within its genre, and innovation depends on that understanding. An
+engine such as Bevy opts Sarx into abstractions that other developers built, and the developer cannot
+change what a layer does without understanding what it abstracts over. The developer therefore
+builds the layers below the gameplay by hand. Through them, the developer means to understand the
+whole graphics pipeline, along with the architecture of a game engine. The Built by Hand section of
+the README sets out the same reasoning for every reader.
 
-Three rules for agents follow from the second goal.
+The use of AI in Sarx is a deliberate choice. Without it, the developer could not reach the
+understanding that the game needs. Agents serve the game by helping the developer understand each
+layer, as Working with the Developer sets out below.
+
+Three rules for agents follow from that requirement.
 
 - **Libraries go to discussion first.** An agent raises a library with the developer before
   suggesting that Sarx take it on. In that discussion, the agent weighs the library against the
-  questions in the README.
+  questions in the Libraries convention.
 - **Difficulty is never a con.** The agent never raises how hard something is as a reason against
   building it by hand.
 - **Build properly from the start.** The agent never proposes a version of a piece that is meant to
@@ -184,7 +194,7 @@ The review exists to improve the developer's Rust and graphics code.
 ### Tests
 
 An agent writes a test only when the developer asks for one. The test follows the test conventions
-in the README.
+in [docs/repo-conventions.md](docs/repo-conventions.md#tests).
 
 ### Decision Records
 
@@ -199,17 +209,40 @@ A decision that stays inside one module takes no ADR. The code and its doc comme
 such a decision, and a later change can reverse it without breaking any other code. Sealing a trait
 is one example. Where the agent is unsure which kind a decision is, it asks the developer.
 
-Once a discussion that needs an ADR closes, the agent writes the ADR in the format that the README
-sets out. The agent then adds a row for it to the table in the Design Decisions section of the
-README. The developer reviews the ADR and the row, as with any other
-change that an agent makes.
+Once a discussion that needs an ADR closes, the agent writes the ADR in the format that the
+conventions set out. The agent then adds a row for it to the table in the Decision Records section
+of the README. The developer reviews the ADR and the row, as with any other change that an agent
+makes.
 
 Before proposing or reviewing work, the agent reads the ADRs that the work touches. A proposal that
 conflicts with an ADR goes to the developer as a discussion about changing that ADR.
 
+An ADR records a decision and argues for it in the open, so that it can be challenged. It is not a
+law. The agent MUST bring an ADR into discussion with the developer in any of three cases:
+
+- Code that exists, or that the agent is about to propose, takes on a poor design or an antipattern
+  only to satisfy the ADR.
+- The ADR works against the goals of the project.
+- The reasoning of the ADR no longer holds, for example because it rests on a fact that has changed,
+  or on an amount of work that the developer underestimated.
+
+The agent never bends code to fit an ADR in silence. It states why it thinks the ADR works against
+the project, and the developer decides.
+
+The test is whether the work that an ADR causes serves the goals of the project, never how hard that
+work is. Suppose that an ADR set Sarx to look hyper-realistic, as Red Dead Redemption 2 does. Sarx
+never set out to be realistic, so years of work on the renderer would serve no goal of the project,
+and the agent would raise the ADR. ADRs 0005 and 0006 also cause large pieces of work, in the
+hand-built ECS and physics engine. That work serves performance on a mid-level laptop and the
+developer's understanding of those systems, so both ADRs stand.
+
+A proposed ADR costs little to change, and the developer expects to revisit it once the work reaches
+it. An accepted ADR holds more firmly the further it has spread through the code, but it stays open
+to the same challenge.
+
 ### Build Order
 
-The agent proposes work in the order of the TODO section in the README. Each step that it proposes is
+The agent proposes work in the order of the developer's TODO list, in `docs/local/todo.md`. Each step that it proposes is
 small enough to end in something visible. With each proposal, the agent also says what the developer
 will understand once that step is done.
 
@@ -265,13 +298,13 @@ signs in to a work account by default. The points below set out how an agent wor
   ```
 
 - An agent brings `main` up to date only when the developer asks. It follows the process in the
-  README, under Branches.
+  conventions, under Branches.
 
 ---
 
 ## Commits
 
-Agents write commit messages in the format that the README sets out, following the
+Agents write commit messages in the format that the conventions set out, following the
 `prose` skill.
 
 On `dev`, the developer's work and an agent's work go in separate commits. The git author field on
@@ -283,7 +316,7 @@ each commit records whose work it contains:
 | An agent's      | `Claude <noreply@anthropic.com>`       |
 
 A commit on `main` is the exception. The developer is the author of every commit on `main`, as the
-README sets out under Branches.
+conventions set out under Branches.
 
 An agent commits its own changes only after the developer has reviewed them and says to commit.
 Until then, the agent reports that the change is ready for review, and stops.

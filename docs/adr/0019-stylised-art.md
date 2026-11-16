@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: proposed
 date: 2026-11-11
 decision-makers: Kheagen Haskins
 ---
@@ -33,7 +33,7 @@ Those games win players over with timing, feedback and playful mechanics, rather
 realistic detail.
 
 That comparison applies to Sarx directly, because during a battle the player can possess a
-character and control it in third person, as the Planned Features in the README set out.
+character and control it in third person, as the [feature list](../feature-list.md) sets out.
 
 What does Sarx look like, and how does it build its characters?
 
@@ -89,11 +89,11 @@ separate decision.
 - Good, because simple models and plain surfaces keep the GPU work within what a mid-level laptop
   can do.
 - Good, because a villager loses a part in combat by letting go of it. The part becomes an object of
-  its own, which the physics engine of ADR 0010 then throws. A rigid part has no seam to hide where
+  its own, which the physics engine of ADR 0006 then throws. A rigid part has no seam to hide where
   it joined the body. Knocking off a head therefore does not need extra modelling or extra animation.
 - Bad, because a figure built from parts is a hierarchy. The position of a hand depends on the
   position of the body. The position of the body depends in turn on the position of the villager.
-  ADR 0011 settles how the ECS stores components, and a hierarchy needs a design of its own within
+  ADR 0007 settles how the ECS stores components, and a hierarchy needs a design of its own within
   that storage.
 - Bad, because models from several sources have to match one another in colour and proportion. A
   generated model that ignores the palette stands out among the rest.

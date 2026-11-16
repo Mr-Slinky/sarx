@@ -39,15 +39,15 @@ How does Sarx learn which components changed?
 
 ## Decision Drivers
 
-- ADR 0019 sets the target at 50,000 villagers. A full pass over their components reads about
+- ADR 0021 sets the target at 50,000 villagers. A full pass over their components reads about
   10 MB, and takes about 0.5 to 1 ms.
 - Systems that write every villager on every step, such as movement, needs and animation, take most
   of each step.
 - Some reactions are sparse. In a sparse reaction, a few villagers out of thousands change, and the
   work for each change is large. Such reactions will be common in a large game.
-- Under ADR 0011, each table stores its components as whole columns, and a system can work on one
+- Under ADR 0007, each table stores its components as whole columns, and a system can work on one
   column at a time.
-- Under ADR 0011, a state is also a marker component, such as `Hungry`. A change of state moves the
+- Under ADR 0007, a state is also a marker component, such as `Hungry`. A change of state moves the
   entity to another table, and a query for the marker finds it there.
 
 ## Considered Options
@@ -72,7 +72,7 @@ kind.
 |--------------------------------------------------|----------------------------------------------------------|
 | Every row, on every step, such as movement       | none; the reader processes every row, as it would anyway |
 | A few rows, and the writer knows which           | an event, or a list of changed entities, from the writer |
-| A change of state, such as becoming `Hungry`     | a marker component, under ADR 0011                       |
+| A change of state, such as becoming `Hungry`     | a marker component, under ADR 0007                       |
 
 Events do not exist yet. Their design is a later decision.
 

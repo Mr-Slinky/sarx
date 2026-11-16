@@ -7,7 +7,7 @@
 //!
 //! # Tables
 //!
-//! The world stores its entities in tables, as ADR 0011 sets out. Each table is an [`Archetype`].
+//! The world stores its entities in tables, as ADR 0007 sets out. Each table is an [`Archetype`].
 //! A table stores every entity that has one exact set of component types, with one column for each
 //! type. The world stores every entity with a `Position` and a `Health`, for example, in the same
 //! table. It stores every entity with a `Position`, a `Health` and a `Velocity` in another table.

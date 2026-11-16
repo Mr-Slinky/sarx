@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: proposed
 date: 2026-11-05
 decision-makers: Kheagen Haskins
 ---
@@ -9,7 +9,7 @@ decision-makers: Kheagen Haskins
 ## Context and Problem Statement
 
 The god's hand is a skinned mesh. A skinned mesh is one mesh that wraps round a skeleton of bones.
-Each vertex follows up to four of those bones, and blends their movements by weight. ADR 0012 leaves
+Each vertex follows up to four of those bones, and blends their movements by weight. ADR 0019 leaves
 the animation of the hand to a separate decision. This ADR records that decision.
 
 The hand moves between poses, such as open, fist and pointing. A pose gives each bone of the hand a
@@ -57,7 +57,7 @@ To change the hand's goal, Sarx changes the target pose. Each bone then starts i
 rotation at that moment. A hand part-way into one pose therefore turns smoothly towards the next.
 
 A further decision must set how far a bone turns on each update. Another must choose whether the
-update runs in the simulation step or in the renderer, and that decision must agree with ADR 0005.
+update runs in the simulation step or in the renderer, and that decision must agree with ADR 0004.
 
 ### Consequences
 
@@ -68,10 +68,10 @@ update runs in the simulation step or in the renderer, and that decision must ag
 - Good, because different bones can follow different poses. The thumb could follow `fist` while the
   index finger follows `point`.
 - Bad, because the shader has to skin the hand. For each vertex, the shader blends up to four bone
-  transforms by weight. Villagers do not need skinning, because ADR 0012 builds them from rigid
+  transforms by weight. Villagers do not need skinning, because ADR 0019 builds them from rigid
   parts.
 - Bad, because Sarx has to read the animations section of a glTF file, as well as its meshes and its
-  skin. ADR 0016 sets out how Sarx reads the file.
+  skin. ADR 0010 sets out how Sarx reads the file.
 - Bad, because a pose stores only where the hand ends up. A move along a set path, such as a wave,
   needs more than one keyframe. It also needs a different way to play the move back.
 

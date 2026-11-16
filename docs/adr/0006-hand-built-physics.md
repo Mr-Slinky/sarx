@@ -11,11 +11,10 @@ decision-makers: Kheagen Haskins
 Sarx needs physics. A physics engine moves objects under forces such as gravity. It also detects
 collisions between objects, and resolves them.
 
-The god's hand shows why. The TODO in the README lists the hand, which grabs objects and throws them
-across the terrain. A thrown object then has to fall under gravity. It comes to rest against the
+The god's hand shows why. The hand grabs objects and throws them across the terrain. A thrown object then has to fall under gravity. It comes to rest against the
 ground or against other objects.
 
-Sarx represents the objects in its world through its own entity component system (ECS), as ADR 0009
+Sarx represents the objects in its world through its own entity component system (ECS), as ADR 0005
 records. Each object is an entity, its data is stored in components, and systems update those
 components on every step of the simulation.
 
@@ -63,7 +62,7 @@ resolving a collision is another.
 - Bad, because the developer builds and debugs the physics engine before any gameplay can depend on
   it. A library such as Rapier provides joints and handles fast-moving objects from the first day.
 - Bad, because the physics engine depends on the ECS. Its design therefore has to fit the component
-  storage that ADR 0011 settles.
+  storage that ADR 0007 settles.
 
 ### Confirmation
 
@@ -112,7 +111,7 @@ crates.
 
 ## More Information
 
-ADR 0011 settles how the ECS stores its components.
+ADR 0007 settles how the ECS stores its components.
 
 Two questions remain open. The developer settles each one in its own discussion:
 

@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: proposed
 date: 2026-11-11
 decision-makers: Kheagen Haskins
 ---
@@ -12,7 +12,7 @@ The god's hand is the centre of Sarx, and the player acts on the world through i
 villagers and objects, carries them and throws them. It also strikes things, flicking a villager far
 across the land or slapping the creature.
 
-The hand moves between poses, such as open, fist and pointing. ADR 0014 stores each pose as a fixed
+The hand moves between poses, such as open, fist and pointing. ADR 0020 stores each pose as a fixed
 target, which the bones of the hand turn towards. A pose keeps the same shape whatever the hand
 holds.
 
@@ -20,7 +20,7 @@ Objects in the world vary widely in shape and size. A villager, a rock, a tree a
 meet the same hand.
 
 Every change that the hand makes to the world arrives as a request. One gate checks each request
-against the rules of the level, as ADR 0007 sets out. The physics engine of ADR 0010 moves objects
+against the rules of the level, as ADR 0017 sets out. The physics engine of ADR 0006 moves objects
 under forces and resolves their collisions. A thrown object falls under gravity, and comes to rest
 against the ground.
 
@@ -30,7 +30,7 @@ How does the hand act on the objects in the world?
 
 - The hand is the centre of the game. Its actions must feel physical. A flicked villager must fly,
   and a slapped creature must reel.
-- Each pose is a fixed target, as ADR 0014 sets out. A fist has one shape, whether it holds a
+- Each pose is a fixed target, as ADR 0020 sets out. A fist has one shape, whether it holds a
   villager, a rock or a tree.
 - The hand never passes through an object. It moves over villages and forests, always above whatever
   lies beneath it.
@@ -53,7 +53,7 @@ follows that point while the hand carries it. The telekinesis in Destroy All Hum
 the same way.
 
 When the hand lets go, the object keeps the velocity that it had at that moment. From then on, it
-moves under the physics engine of ADR 0010. An object that the hand flings therefore flies on, falls
+moves under the physics engine of ADR 0006. An object that the hand flings therefore flies on, falls
 under gravity and lands.
 
 The hand has a collision shape at all times, and uses it in two ways.
@@ -65,9 +65,9 @@ the hand never touches an object outside a strike, and never passes through one.
 A strike is an action such as a flick or a slap. During a strike, the hand stops rising over
 objects. The physics engine then pushes away any object that the hand meets.
 
-Each action of the hand combines a pose with an effect on the world. The pose comes from ADR 0014.
+Each action of the hand combines a pose with an effect on the world. The pose comes from ADR 0020.
 The effect, such as lifting a villager or striking the creature, reaches the world as a request
-through the gate of ADR 0007.
+through the gate of ADR 0017.
 
 Five points remain open. The developer settles each one once the hand acts on the world:
 

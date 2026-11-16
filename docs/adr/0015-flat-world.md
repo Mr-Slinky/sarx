@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: proposed
 date: 2026-10-17
 decision-makers: Kheagen Haskins
 ---
@@ -66,7 +66,7 @@ each point of the grid. The grid lies flat. Each height lifts the ground at its 
 Nothing in the code embodies this decision yet. The ray from the cursor meets a flat ground plane at
 height zero, and no crate stores terrain heights.
 
-The foundation work in the README ends with lit heightmap terrain on screen. Once that step is done,
+The foundation work ends with lit heightmap terrain on screen. Once that step is done,
 a reader can confirm the decision. They check that the terrain stores one height for each point of a
 flat grid.
 

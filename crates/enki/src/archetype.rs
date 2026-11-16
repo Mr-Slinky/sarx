@@ -2,7 +2,7 @@
 //! column-major order.
 //!
 //! An archetype is one set of component types, such as `{Position, Velocity}`. An [`Archetype`] is
-//! the table for one such set, as ADR 0011 sets out. The table has a list of entities, and one
+//! the table for one such set, as ADR 0007 sets out. The table has a list of entities, and one
 //! column for each component type. Each column is a [`ComponentVec`].
 //!
 //! # Rows

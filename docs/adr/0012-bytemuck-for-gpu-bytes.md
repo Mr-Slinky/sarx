@@ -29,11 +29,11 @@ How does Sarx turn vertices and uniforms into bytes?
 
 ## Decision Drivers
 
-- The README asks of every library whether it brings its own architecture, what it hides, and how
-  much work it does.
+- The [Libraries](../repo-conventions.md#libraries) convention asks of every library whether it
+  brings its own architecture, what it hides, and how much work it does.
 - A cast of a type with padding is undefined behaviour, and undefined behaviour can pass every test.
   The check for padding must therefore happen at compile time.
-- Under ADR 0013, the tests for `unsafe` code also run under Miri. Each `unsafe` cast that Sarx
+- Under ADR 0008, the tests for `unsafe` code also run under Miri. Each `unsafe` cast that Sarx
   writes itself adds to that work.
 - `Vertex`, the uniforms and later instance data all need the same conversion.
 
@@ -59,7 +59,7 @@ slice, such as every vertex of a mesh. `bytemuck::bytes_of` returns a `&[u8]` ov
 the uniforms of the camera.
 
 Sarx adds bytemuck with its `derive` feature. Sarx also turns on the `bytemuck` feature of glam,
-which ADR 0017 sets out. A `Mat4` field then counts as `Pod` inside a uniform struct.
+which ADR 0011 sets out. A `Mat4` field then counts as `Pod` inside a uniform struct.
 
 ### Consequences
 
@@ -105,4 +105,4 @@ Sarx would call `std::slice::from_raw_parts` over the memory of each slice.
 - Good, because the developer would write the cast, and see how a struct lies in memory.
 - Bad, because nothing checks for padding. A struct with a gap compiles, and the cast is then
   undefined behaviour.
-- Bad, because the tests for every such cast must also run under Miri, as ADR 0013 sets out.
+- Bad, because the tests for every such cast must also run under Miri, as ADR 0008 sets out.

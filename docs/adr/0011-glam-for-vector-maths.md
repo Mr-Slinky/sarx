@@ -23,18 +23,18 @@ The light also needs vectors. The shader compares the normal of each triangle wi
 the light.
 
 The Rust standard library has no vector or matrix types. Later layers add to the need: skinning
-blends bone matrices, the poses in ADR 0014 turn each bone by slerp, and the physics engine in ADR
-0010 moves bodies through space.
+blends bone matrices, the poses in ADR 0020 turn each bone by slerp, and the physics engine in ADR
+0006 moves bodies through space.
 
 Where does Sarx get its vector and matrix maths?
 
 ## Decision Drivers
 
-- The README asks of every library whether it brings its own architecture, what it hides, and how
-  much work it does.
-- Under the second goal in the README, the developer means to understand the graphics pipeline. The
-  lesson of the camera lies in which matrices it builds, and in the order that the shader applies
-  them.
+- The [Libraries](../repo-conventions.md#libraries) convention asks of every library whether it
+  brings its own architecture, what it hides, and how much work it does.
+- The developer means to understand the graphics pipeline, as the
+  [Built by Hand](../../README.md#built-by-hand) section of the README sets out. The lesson of the
+  camera lies in which matrices it builds, and in the order that the shader applies them.
 - Every layer from the hand step onwards uses this maths. The camera, the ray, skinning, the poses
   and the physics engine all depend on it.
 - WGSL, the shader language, stores a 4×4 matrix as four columns of four `f32` values. A matrix that
@@ -48,12 +48,12 @@ Where does Sarx get its vector and matrix maths?
 
 ## Decision Outcome
 
-Chosen option: "glam", because it answers all three questions in the README in its favour. It does
+Chosen option: "glam", because it answers all three questions about libraries in its favour. It does
 not bring an architecture of its own, it hides only arithmetic, and it saves work in every layer
 that follows.
 
 glam supplies the types that the hand step uses: `Vec3` for points, directions and normals, `Mat4`
-for the camera, and `Quat` for the rotations that ADR 0014 turns by slerp.
+for the camera, and `Quat` for the rotations that ADR 0020 turns by slerp.
 
 The developer still builds each matrix, and decides what it contains. For example, the camera calls
 `Mat4::look_at_rh` for the view matrix and `Mat4::perspective_rh` for the projection matrix. The
@@ -71,7 +71,7 @@ must use the version without `_gl`.
 - Good, because the camera, the ray, skinning, the poses and the physics engine all share one set of
   types.
 - Good, because glam offers a `bytemuck` feature. With that feature, a `Mat4` turns into bytes for a
-  GPU buffer in the way that ADR 0018 sets out.
+  GPU buffer in the way that ADR 0012 sets out.
 - Bad, because glam hides the arithmetic inside each operation, such as how a matrix is inverted.
 - Bad, because glam is below version 1.0. A change in its second version number can break the API,
   as with winit. An agent therefore checks the glam source for the version that `Cargo.lock`

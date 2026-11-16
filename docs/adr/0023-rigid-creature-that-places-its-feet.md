@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: proposed
 date: 2026-11-11
 decision-makers: Kheagen Haskins
 ---
@@ -11,7 +11,7 @@ decision-makers: Kheagen Haskins
 The creature is one of three parts of Sarx that the developer means to stand out, alongside the
 hand and combat. The player trains the creature, and can possess it during a battle.
 
-ADR 0012 gives Sarx a stylised look, and builds each villager from rigid parts. It leaves the
+ADR 0019 gives Sarx a stylised look, and builds each villager from rigid parts. It leaves the
 building and animation of the creature to a separate decision. This ADR records that decision.
 
 Black & White 2 gave its creatures the forms of real animals, such as a lion and a cow, covered in
@@ -19,14 +19,14 @@ fur. The developer builds models in code and through Blender scripts, and has li
 sculpting.
 
 The creature walks through a world that the player has built. The player lays roads and paths.
-Villages pack their buildings close together. The land is a heightmap, as ADR 0004 sets out, which
+Villages pack their buildings close together. The land is a heightmap, as ADR 0015 sets out, which
 means that the ground beneath each foot can lie at a different height.
 
 How does Sarx build the creature, and how does the creature move through the world?
 
 ## Decision Drivers
 
-- The creature follows the stylised look of ADR 0012.
+- The creature follows the stylised look of ADR 0019.
 - The developer builds models in code and through Blender scripts, rather than by sculpting.
 - The creature must move through the world sensibly. It must follow the roads and paths that the
   player builds. It must pass through a dense group of buildings, such as a cluster of hovels,
@@ -86,7 +86,7 @@ Five points remain open. The developer settles each one when the creature is bui
   tunes the weight and timing of each step through numbers.
 - Bad, because the creature needs a route planner that knows where every road and building lies.
   The planner must also fit the whole body of the creature through each gap.
-- Bad, because each leg is a hierarchy of parts. ADR 0012 notes that a hierarchy needs a design of
+- Bad, because each leg is a hierarchy of parts. ADR 0019 notes that a hierarchy needs a design of
   its own within the component storage of the ECS.
 - Bad, because the creature can never take a furred form, such as the lion of Black & White 2. That
   rules out a whole family of animal designs.
@@ -131,7 +131,7 @@ The creature would be one mesh wrapped round a skeleton, shaped like a real anim
 fur.
 
 - Good, because it would match the creatures that players remember from Black & White 2.
-- Bad, because a realistic animal would stand apart from the stylised look of ADR 0012.
+- Bad, because a realistic animal would stand apart from the stylised look of ADR 0019.
 - Bad, because a realistic animal needs the skill of a sculptor, which code and Blender scripts fall
   short of.
 - Bad, because a furred animal needs the renderer to draw fur.

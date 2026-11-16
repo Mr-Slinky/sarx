@@ -17,22 +17,12 @@ impl Simulation {
     pub const STEP: Duration = Duration::from_nanos(16_666_667);
     // Defines the most elapsed time that one call to `advance` adds to `unsimulated`.
     const MAX_ELAPSED: Duration = Duration::from_millis(250);
-    const HOVER_HEIGHT: f32 = 1.0;
+    const HOVER_HEIGHT: f32 = 5.0;
     const HAND_SPEED: f32 = 20.0;
 
     pub fn new() -> Self {
         let mut world = World::new();
-        let hand = world.spawn_empty();
-        let start = Vec3::new(0.0, Self::HOVER_HEIGHT, 0.0);
-        let components = (
-            Position(start),
-            Velocity(Vec3::ZERO),
-            Target(start),
-            Speed(Self::HAND_SPEED),
-        );
-        world
-            .add_components(hand, components)
-            .expect("the hand should exist");
+        let hand = Self::init_hand(&mut world);
         Self {
             world,
             hand,
@@ -71,6 +61,24 @@ impl Simulation {
         steering(&mut self.world, step_seconds);
         movement(&mut self.world, step_seconds);
     }
+
+    fn init_hand(world: &mut World) -> Entity {
+        let hand = world.spawn_empty();
+        let start = Vec3::new(0.0, Self::HOVER_HEIGHT, 0.0);
+        let components = (
+            Position(start),
+            Velocity(Vec3::ZERO),
+            Target(start),
+            Speed(Self::HAND_SPEED),
+        );
+
+        world
+            .add_components(hand, components)
+            .expect("the hand should exist");
+
+        hand
+    }
+
 }
 
 impl Default for Simulation {

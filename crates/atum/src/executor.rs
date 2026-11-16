@@ -76,3 +76,109 @@ impl Wake for ThreadWaker {
         self.0.unpark();
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::pin::Pin;
+    use std::sync::Mutex;
+    use std::time::Duration;
+
+    // A future that returns `Poll::Pending` on its first poll, after waking its own task
+    struct SelfWakingFuture {
+        polled: bool, // whether the future has been polled before
+    }
+
+    impl Future for SelfWakingFuture {
+        type Output = u32;
+
+        fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<u32> {
+            if self.polled {
+                return Poll::Ready(42);
+            }
+            self.polled = true;
+            cx.waker().wake_by_ref();
+            Poll::Pending
+        }
+    }
+
+    // The state that a `ThreadWokenFuture` shares with the thread that finishes it
+    #[derive(Default)]
+    struct SharedState {
+        done: bool,           // whether the other thread has finished
+        waker: Option<Waker>, // the waker that the future stored on its last poll
+    }
+
+    // A future that waits until another thread sets `done`, then wakes it through the stored waker
+    struct ThreadWokenFuture {
+        state: Arc<Mutex<SharedState>>,
+        started: bool, // whether the other thread has been spawned
+    }
+
+    impl Future for ThreadWokenFuture {
+        type Output = u32;
+
+        fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<u32> {
+            let mut state = self.state.lock().unwrap();
+            if state.done {
+                return Poll::Ready(7);
+            }
+            state.waker = Some(cx.waker().clone());
+            drop(state);
+
+            if !self.started {
+                self.started = true;
+                let shared = Arc::clone(&self.state);
+                thread::spawn(move || {
+                    // Waits long enough for `block_on` to park the thread first
+                    thread::sleep(Duration::from_millis(50));
+                    let mut state = shared.lock().unwrap();
+                    state.done = true;
+                    if let Some(waker) = state.waker.take() {
+                        waker.wake();
+                    }
+                });
+            }
+            Poll::Pending
+        }
+    }
+
+    #[test]
+    fn block_on_with_ready_future_returns_output() {
+        let future = async { 6 * 7 };
+
+        let output = block_on(future);
+
+        assert_eq!(output, 42);
+    }
+
+    #[test]
+    fn block_on_with_ready_non_copy_output_returns_output() {
+        let future = async { String::from("hand") };
+
+        let output = block_on(future);
+
+        assert_eq!(output, "hand");
+    }
+
+    #[test]
+    fn block_on_with_self_waking_future_returns_output() {
+        let future = SelfWakingFuture { polled: false };
+
+        let output = block_on(future);
+
+        assert_eq!(output, 42);
+    }
+
+    #[test]
+    fn block_on_with_future_woken_from_another_thread_returns_output() {
+        let future = ThreadWokenFuture {
+            state: Arc::default(),
+            started: false,
+        };
+
+        let output = block_on(future);
+
+        assert_eq!(output, 7);
+    }
+}

@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: proposed
 date: 2026-10-17
 decision-makers: Kheagen Haskins
 ---
@@ -14,9 +14,8 @@ the world with the god's hand, and competes with rival factions for territory.
 Every one of these activities takes place on the terrain. The terrain is the ground that villagers
 walk on and that buildings stand on.
 
-The shape of the world decides three things about the terrain. It decides how the game stores the
-terrain, and how the renderer draws it. It also decides how the hand finds the point on the ground
-below the cursor.
+The shape of the world decides how the game stores the terrain, how the renderer draws it, and how
+the hand finds the point on the ground below the cursor.
 
 Sarx draws on three older games. It takes the creature and the god's hand from Black & White 2. It
 takes a civilisation that advances on its own from Universim and Spore. Both Universim and Spore set
@@ -64,10 +63,10 @@ each point of the grid. The grid lies flat. Each height lifts the ground at its 
 
 ### Confirmation
 
-Nothing in the code embodies this decision yet. `amaterasu` draws a single triangle. `zurvan`
-contains only the `add` function that `cargo new` generates.
+Nothing in the code embodies this decision yet. The ray from the cursor meets a flat ground plane at
+height zero, and no crate stores terrain heights.
 
-The foundation work in the README ends with lit heightmap terrain on screen. Once that step is done,
+The foundation work ends with lit heightmap terrain on screen. Once that step is done,
 a reader can confirm the decision. They check that the terrain stores one height for each point of a
 flat grid.
 

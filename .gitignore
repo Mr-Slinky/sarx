@@ -186,6 +186,7 @@ logs/
 *.tmp
 *.temp
 *.bak
+*.blend1
 *.orig
 *.rej
 local/

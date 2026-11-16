@@ -8,8 +8,8 @@ decision-makers: Kheagen Haskins
 
 ## Context and Problem Statement
 
-Sarx draws its world on the GPU. To do that, the renderer sends its commands to the GPU through a graphics
-API.
+Sarx draws its world on the GPU. To do that, the renderer sends its commands to the GPU through a
+graphics API.
 
 Sarx is built and tested on Windows, as ADR 0003 records. Windows offers two modern graphics APIs,
 DirectX 12 and Vulkan. It also offers OpenGL, which is older. The renderer can call one of these APIs
@@ -57,7 +57,7 @@ call with a readable message, and teaches the concepts that DirectX 12 and Vulka
   each upgrade. They also check the real definitions in the crate source, for the version that
   `Cargo.lock` records.
 - Bad, because shaders are written in WGSL, the shading language of WebGPU. WGSL has fewer tutorials
-  than two older shading languages. Those are GLSL, for OpenGL and Vulkan, and HLSL, for DirectX.
+  than the two older shading languages, GLSL for OpenGL and Vulkan, and HLSL for DirectX.
 
 ### Confirmation
 

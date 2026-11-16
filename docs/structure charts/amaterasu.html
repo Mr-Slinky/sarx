@@ -162,7 +162,7 @@ footer { border-top: 1px solid var(--rule); padding-top: 16px; color: var(--mute
   <p class="lede">This page shows how the functions in the <code>amaterasu</code> crate call one another. The crate
   draws each frame on the GPU, through the wgpu library. The page shows the calls with structure charts, a kind of diagram
   from Yourdon and Constantine&rsquo;s book <em>Structured Design</em>. A structure chart shows which modules call
-  which. It also shows the values that pass between them on each call. The order of the statements inside a module
+  which, and the values that pass between them on each call. The order of the statements inside a module
   stays off the chart. The crate has twenty-seven functions and methods, and one closure, in
   <code>Mesh::to_bytes</code>. Ten charts cover them. Most charts cover one job that another crate asks the renderer to
   do, such as drawing a frame. Each of the others covers one step that is too large to fit on the chart of its

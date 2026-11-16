@@ -19,7 +19,7 @@ use wgpu::{CreateSurfaceError, RequestAdapterError, RequestDeviceError};
 /// The example prints the failure, then the wgpu error behind it, where there is one.
 ///
 /// ```ignore
-/// if let Err(error) = renderer.render() {
+/// if let Err(error) = renderer.render(&camera, hand_transform) {
 ///     // Prints the failure
 ///     eprintln!("Error: {error}");
 ///
@@ -42,8 +42,8 @@ pub enum RendererError {
     ///
     /// The renderer returns it in two cases:
     ///
-    /// - The GPU offers no pixel format or no present mode for the surface. A present mode sets
-    ///   when each finished frame appears in the window.
+    /// - The GPU does not offer a pixel format or a present mode for the surface. A present mode
+    ///   sets when each finished frame appears in the window.
     /// - A new surface lacks the pixel format that the pipeline was built for.
     UnsupportedSurface,
     /// The GPU cannot anti-alias in the surface's pixel format.
@@ -52,7 +52,13 @@ pub enum RendererError {
     /// for each pixel. In the surface's pixel format, this GPU cannot take the number of samples
     /// that the renderer asks for.
     UnsupportedSampleCount,
+    /// The connection to the GPU has died, for example after a driver reset.
+    ///
+    /// From then on, `Renderer::render` returns this error on every call made while a surface
+    /// exists, since nothing made from the dead connection works again.
     DeviceLost,
+    /// wgpu rejected a call as invalid while handing out the texture for a frame. This points to a
+    /// bug in the renderer.
     Validation,
 }
 
@@ -171,5 +177,95 @@ impl From<RequestDeviceError> for RendererError {
     /// ```
     fn from(error: RequestDeviceError) -> Self {
         Self::Device(error)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Returns each variant that wraps no wgpu error, with its name
+    fn build_own_errors() -> [(&'static str, RendererError); 4] {
+        [
+            ("UnsupportedSurface", RendererError::UnsupportedSurface),
+            (
+                "UnsupportedSampleCount",
+                RendererError::UnsupportedSampleCount,
+            ),
+            ("DeviceLost", RendererError::DeviceLost),
+            ("Validation", RendererError::Validation),
+        ]
+    }
+
+    /// Checks that every description is one non-empty line, starting in lower case. `Adapter`
+    /// stands in for the variants that wrap a wgpu error, being the only one of them that code
+    /// outside wgpu can build
+    #[test]
+    fn fmt_with_every_buildable_variant_writes_one_lower_case_line() {
+        let mut cases = Vec::from(build_own_errors());
+        cases.push((
+            "Adapter",
+            RendererError::Adapter(RequestAdapterError::EnvNotSet),
+        ));
+
+        for (name, error) in cases {
+            let message = error.to_string();
+
+            let starts_lower_case = message.chars().next().is_some_and(char::is_lowercase);
+            assert!(
+                !message.is_empty(),
+                "description of {name} should not be empty"
+            );
+            assert!(
+                starts_lower_case,
+                "description of {name} should start in lower case"
+            );
+            assert!(
+                !message.contains('\n'),
+                "description of {name} should be one line"
+            );
+        }
+    }
+
+    /// Checks that a failure that the renderer detects itself has no wgpu error behind it
+    #[test]
+    fn source_with_own_errors_returns_none() {
+        let cases = build_own_errors();
+
+        for (name, error) in cases {
+            let source = error.source();
+
+            assert!(source.is_none(), "source of {name}");
+        }
+    }
+
+    /// Checks that `Adapter` returns the wgpu error that it wraps
+    #[test]
+    fn source_with_adapter_error_returns_wgpu_error() {
+        let error = RendererError::Adapter(RequestAdapterError::EnvNotSet);
+
+        let source = error.source();
+
+        let wrapped = source.and_then(|source| source.downcast_ref::<RequestAdapterError>());
+        assert!(
+            matches!(wrapped, Some(RequestAdapterError::EnvNotSet)),
+            "source of Adapter"
+        );
+    }
+
+    /// Checks that the `?` operator turns a `RequestAdapterError` into the `Adapter` variant
+    #[test]
+    fn from_with_request_adapter_error_returns_adapter() {
+        let wgpu_error = RequestAdapterError::EnvNotSet;
+
+        let error = RendererError::from(wgpu_error);
+
+        assert!(
+            matches!(
+                error,
+                RendererError::Adapter(RequestAdapterError::EnvNotSet)
+            ),
+            "variant for a `RequestAdapterError`"
+        );
     }
 }

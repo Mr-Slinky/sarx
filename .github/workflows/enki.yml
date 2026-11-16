@@ -23,7 +23,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-      # ADR 0013: Miri runs on nightly, as the one exception to the stable-only practice.
+      # ADR 0008: Miri runs on nightly, as the one exception to the stable-only practice.
       - uses: dtolnay/rust-toolchain@nightly
         with:
           components: miri

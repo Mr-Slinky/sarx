@@ -16,8 +16,8 @@ Undefined behaviour does not always produce a visible symptom. A test that runs 
 `cargo test` can therefore pass despite it.
 
 Miri is a Rust tool that runs a test program in an interpreter. The interpreter checks each memory
-access. It stops the test at the first fault that it detects. Miri runs only on the nightly
-toolchain. Sarx otherwise uses stable releases only.
+access, and stops the test at the first fault that it detects. Miri runs only on the nightly
+toolchain, whereas Sarx otherwise uses stable releases only.
 
 Do the tests for `unsafe` code also run under Miri?
 
@@ -39,9 +39,9 @@ Do the tests for `unsafe` code also run under Miri?
 Chosen option: "Plain `cargo test` plus Miri on the nightly toolchain", because a passing test can
 hide a fault in `unsafe` code, and Miri detects that fault.
 
-The nightly toolchain is an exception to the stable-only practice. The exception applies to the Miri
-check alone. Miri runs only the `enki` tests. `rust-toolchain.toml` selects stable as the
-toolchain that builds and runs Sarx.
+The nightly toolchain is an exception to the stable-only practice. It applies to the Miri check
+alone, which runs only the `enki` tests. `rust-toolchain.toml` selects stable as the toolchain that
+builds and runs Sarx.
 
 ### Consequences
 

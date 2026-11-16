@@ -1,35 +1,28 @@
-//! Defines [`Component`], the trait that marks a type as a component, and the vector that stores
-//! the components of one type.
+//! Defines [`Component`], the trait that marks a type as a component, and [`ComponentVec`], the
+//! vector that stores the components of one type.
 //!
-//! An archetype is one set of component types. Each archetype has a table, which stores its
-//! entities. The table has one column for each component type. A [`ComponentVec`] is one such
-//! column. An entity takes the same row in every column. Row 5 of every column, for example,
-//! belongs to the same entity.
+//! An archetype is one set of component types, modelled as a table with one row for each entity
+//! and one column for each component type. [`ComponentVec`] represents a column in this
+//! **archetype table**.
 //!
 //! A [`ComponentVec`] stores its components next to each other, in one block of memory. A table
-//! built from these vectors therefore has column-major order. Column-major order means that
-//! neighbouring components in a column are also neighbours in memory. The components of one row lie
-//! in separate blocks, one block per column.
+//! built from these vectors therefore has column-major order, meaning that neighbouring components
+//! in a column are also neighbours in memory. The components of one row, however, lie in separate
+//! blocks, one block per column.
 //!
-//! Where a component type contains a pointer, such as a `String` or a `Vec`, the block stores the
-//! pointer, and the data that it points to lies elsewhere on the heap.
-//!
-//! A table learns its component types at run time, as ADR 0011 sets out. A generic `Vec<T>` needs
-//! its type at compile time, meaning it cannot serve as a column. A [`ComponentVec`] therefore
+//! A table learns its component types at run time, as ADR 0007 sets out. A generic `Vec<T>` needs
+//! its type at compile time, meaning it cannot serve as a column. Therefore, a [`ComponentVec`]
 //! stores its components as raw bytes.
 //!
-//! A [`ComponentInfo`] describes those bytes to the vector. It stores the layout of the component
-//! type, which is its size and alignment. It also stores a function that runs the clean-up code for
-//! that type. It stores the identity of the type as well, which the typed methods check. The name
-//! of the type is stored too, and the panic message of those methods reports it.
+//! A [`ComponentInfo`] describes those bytes to [`ComponentVec`]. It stores the memory layout, the
+//! name, the identity and the drop function of one [`Component`] type. It also stores the bit that
+//! the world gives that component type. Each table combines the bits of its types into a mask,
+//! which the [`archetype`](crate::archetype) module describes in more detail.
 //!
-//! A [`ComponentInfo`] also stores one bit, which stands for its component type. A table has a
-//! mask, which is a [`ComponentMask`] with one set bit for each component type that the table
-//! stores. The table builds its mask from these bits. A [`ComponentVec`] never reads the bit.
-//!
-//! The compiler cannot check the type of those bytes. As a result, each `unsafe` method has a
-//! Safety section that lists what its caller MUST guarantee. One of those guarantees is that the
-//! bytes belong to the component type that the vector stores.
+//! The compiler cannot check the type of a [`ComponentVec`]'s bytes. As a result,
+//! [`ComponentVec::push`], the one `unsafe` method, takes raw bytes and has a Safety section that
+//! lists what its caller MUST guarantee. One of those guarantees is that the bytes belong to the
+//! component type that the vector stores.
 //!
 //! # Typed and raw access
 //!
@@ -37,10 +30,9 @@
 //! knows the component type at compile time.
 //!
 //! A caller that knows the type uses [`ComponentVec::as_slice`] or [`ComponentVec::as_mut_slice`].
-//! Each method panics where that type differs from the type that the vector stores. Indexing the
-//! returned slice panics where the index is out of range. The slice also borrows the vector,
-//! meaning the compiler rejects a push while the slice is in use. This is the safe way to reach a
-//! component.
+//! Both methods panic when given a type that differs from the one the vector stores. The slice
+//! also borrows the vector, meaning the compiler rejects a push while the slice is in use.
+//! This is the safe way to reach a component.
 //!
 //! A caller that has only a [`ComponentInfo`], such as a table that learns its column types at run
 //! time, cannot name the type that those methods require. That caller uses
@@ -55,70 +47,141 @@
 //! valid when the vector grows its block, even where the block stays at the same address. Using the
 //! pointer after that point is undefined behaviour.
 //!
-//! The vector grows where [`ComponentVec::push_typed`] finds the block full.
-//! [`ComponentVec::move_component`] pushes onto its target, meaning it can grow the target too.
+//! The vector grows where [`ComponentVec::push_typed`] finds the block full, and where
+//! [`ComponentVec::reserve`] needs more room than the block has. [`ComponentVec::move_component`]
+//! pushes onto its target, meaning it can grow the target too.
 //!
 //! Dropping the vector frees its block. Every pointer into that block then stops being valid, and
 //! using one is undefined behaviour.
 //!
-//! [`ComponentVec::move_component`] also changes what the addresses in `self` contain, although it
-//! does not free anything. The address of the old last component now contains a stale copy of that
-//! component. Where a caller drops the component through that address, the component gets dropped
-//! twice, which is undefined behaviour. Where the moved index is not the last index, a pointer to it
-//! now reaches a different component, namely the one that was last.
+//! [`ComponentVec::move_component`] changes what some addresses contain. For example, a vector that
+//! stores four components, `A`, `B`, `C` and `D`, at indices 0 to 3, and moves `B` out from index 1
+//! to some other [`ComponentVec`] target, then copies `D` into index 1, and the length drops to 3.
 //!
-//! [`ComponentVec::swap_remove`] changes the addresses in `self` in the same way. It also drops the
-//! removed component, and the address of the old last component then contains a dropped value.
+//! Two pointers taken before the move would now mislead their caller. A pointer to index 1 used to
+//! reach `B`, and now reaches `D`. A pointer to index 3 still reaches a copy of `D`, but that copy
+//! lies past the end of the vector, and the vector no longer counts it as a component. Dropping `D`
+//! through that pointer drops it twice: once there, and again when the vector drops the `D` at
+//! index 1. A double drop is undefined behaviour.
 //!
-//! A lifetime is the annotation that lets the compiler tie a reference to the value that it
-//! borrows. A raw pointer has no lifetime, meaning the compiler accepts code that keeps one across
-//! a push, a move, a removal or the drop of the vector. A push can grow the block. The caller
-//! therefore MUST guarantee that it does not use any pointer from before a push, a move, a removal
-//! or the drop. To reach a component again, the caller requests a new pointer by index. Components
-//! keep their indices when the vector grows. After a move or a removal from an index other than the
-//! last, the component that was last is stored at that index.
+//! [`ComponentVec::swap_remove`] leaves the same two pointers behind. It drops `B` instead of moving
+//! it, then copies `D` into index 1 in the same way.
+//!
+//! A raw pointer has no lifetime, meaning the compiler accepts code that keeps one across
+//! a push, a reserve, a move, a removal or the drop of the vector. A push or a reserve can grow the
+//! block. The caller therefore MUST guarantee that it does not use any pointer from before a push,
+//! a reserve, a move, a removal or the drop. To reach a component again, the caller requests a new
+//! pointer by index. Components keep their indices when the vector grows. After a move or a removal
+//! from an index other than the last, the component that was last is stored at that index.
 //!
 //! # Examples
 //!
-//! The example moves one `Position` component from one vector to another, as the ECS does when an
-//! entity changes table. Each vector drops its components and frees its block when it goes out of
-//! scope.
+//! Each example below comes from a method in `enki` that uses a [`ComponentVec`], cut down to the
+//! lines that touch the vector.
+//!
+//! ## Creating the columns of a table
+//!
+//! `Archetype::new` receives one [`ComponentInfo`] for each component type in the table, and
+//! creates an empty column from each one. It then sorts the columns by type, reading each type
+//! back through [`ComponentVec::info`].
 //!
 //! ```ignore
-//! // Defines the component type that the two vectors store
-//! #[derive(Debug, PartialEq)]
-//! struct Position {
-//!     x: f32,
-//!     y: f32,
+//! // Creates one empty column for each entry in `infos`
+//! let mut components: Vec<ComponentVec> =
+//!     infos.iter().map(|info| ComponentVec::new(*info)).collect();
+//! // Sorts the columns by `TypeId`, which the binary search for a column requires
+//! components.sort_by_key(|components| components.info().type_id());
+//! ```
+//!
+//! ## Reading and changing one component
+//!
+//! `World::get` and `World::get_mut` know the component type `T` at compile time, and therefore
+//! use the typed methods. Each one borrows the column as a slice of `T`, then indexes the slice
+//! with the row of the entity.
+//!
+//! ```ignore
+//! // Returns the entity's `T`, or `None` where the row lies past the end of the column
+//! components.as_slice::<T>().get(location.row())
+//!
+//! // Returns the same component, for the caller to change
+//! components.as_mut_slice::<T>().get_mut(location.row())
+//! ```
+//!
+//! ## Adding or replacing a component
+//!
+//! `push_or_replace`, in the `set` module, gives an entity a component of type `T`. Where the
+//! entity already has a `T`, the function swaps the new component into its row and returns the
+//! old one. Otherwise it pushes the new component onto the end of the column.
+//!
+//! ```ignore
+//! let bit = column.info().bit();
+//! if existing.contains_any(bit) {
+//!     // Puts `value` in place of the old component, and returns the old one to the caller
+//!     let slot = &mut column.as_mut_slice::<T>()[row];
+//!     return Some(mem::replace(slot, value));
 //! }
+//! // Moves `value` onto the end of the column, which then owns it
+//! column.push_typed(value);
+//! None
+//! ```
 //!
-//! // Creates two empty vectors for `Position` components, with the bit at position 0 for that type
-//! let info = ComponentInfo::of::<Position>(ComponentMask::single(0));
-//! let mut source = ComponentVec::new(info);
-//! let mut target = ComponentVec::new(source.info());
+//! ## Moving an entity to another table
 //!
-//! // Pushes three components, which the vector then owns
-//! let positions = [
-//!     Position { x: 1.0, y: 1.0 },
-//!     Position { x: 2.0, y: 2.0 },
-//!     Position { x: 3.0, y: 3.0 },
-//! ];
-//! for position in positions {
-//!     source.push_typed(position);
+//! `Archetype::move_entity` visits each column in the entity's old table. Where the target table
+//! has a column of the same type, [`ComponentVec::move_component`] moves the component across.
+//! Otherwise the column goes to the closure `take`, which removes the component.
+//!
+//! ```ignore
+//! for components in &mut self.components {
+//!     let type_id = components.info().type_id();
+//!     match target.components_of_mut(type_id) {
+//!         // Moves the component to the end of the target's column for the same type
+//!         Some(target_components) => components.move_component(row, target_components),
+//!         // Lets `take` remove the component, since the target has no column for its type
+//!         None => take(components, row),
+//!     }
 //! }
+//! ```
 //!
-//! // Moves the component at index 0 to `target`, and fills index 0 with the last component
-//! // SAFETY: `move_component` requires an index below the length and a target of the same type.
-//! // Index 0 is below the length of 3, and `target` uses the same `ComponentInfo`
-//! unsafe { source.move_component(0, &mut target) };
+//! The caller of the move decides what `take` does with the component. `World::remove_component`
+//! keeps it as a value, through [`ComponentVec::swap_remove_typed`], and returns it.
+//! `World::add_components` passes [`ComponentVec::swap_remove`] itself, which drops it.
 //!
-//! // Borrows the components as slices of `Position`. The vectors keep ownership of them
-//! let remaining = source.as_slice::<Position>();
-//! let moved = target.as_slice::<Position>();
+//! ```ignore
+//! // Takes the entity's `T` out of the column, and keeps it to return to the caller
+//! |components, row| removed = Some(components.swap_remove_typed::<T>(row))
+//! ```
 //!
-//! assert_eq!(remaining[0], Position { x: 3.0, y: 3.0 });
-//! assert_eq!(remaining[1], Position { x: 2.0, y: 2.0 });
-//! assert_eq!(moved[0], Position { x: 1.0, y: 1.0 });
+//! ## Removing an entity
+//!
+//! `Archetype::remove_entity` calls [`ComponentVec::swap_remove`] on every column. Each call drops
+//! the entity's component, and the last component in the column fills `row`. The entity list then
+//! does the same, meaning the last entity and all of its components end up in `row` together.
+//!
+//! ```ignore
+//! for components in &mut self.components {
+//!     // Drops the entity's component, and fills `row` with the last component in the column
+//!     components.swap_remove(row);
+//! }
+//! // Removes the entity from the list in the same way, filling `row` with the last entity
+//! self.entities.swap_remove(row);
+//! ```
+//!
+//! ## Reaching a column through its raw pointer
+//!
+//! A `&mut T` query receives the table through a shared reference, yet hands out a `&mut T` for
+//! each component. It cannot call [`ComponentVec::as_mut_slice`], which needs a
+//! `&mut ComponentVec`. Instead, its `find_columns` builds the slice from
+//! [`ComponentVec::data`] and [`ComponentVec::len`].
+//!
+//! ```ignore
+//! let components = archetype.components_of(TypeId::of::<T>())?;
+//! let start = components.data().cast::<T>();
+//! let len = components.len();
+//! // SAFETY: `components_of` found the column for `T`, and every index below `len` stores a live
+//! // component. The caller of `find_columns` MUST guarantee that nothing else reaches these
+//! // components while the slice is in use
+//! Some(unsafe { slice::from_raw_parts_mut(start.as_ptr(), len) })
 //! ```
 
 use crate::mask::ComponentMask;
@@ -136,7 +199,7 @@ use std::{mem, ptr, slice};
 ///
 /// The game makes a type a component by implementing this trait for it, with one empty `impl`.
 /// Every other type stays outside the world. As a result, a tuple passed to
-/// `World::add_component` by mistake fails to compile, as ADR 0016 sets out.
+/// `World::add_component` by mistake fails to compile, as ADR 0009 sets out.
 ///
 /// The trait requires three other traits of every component type:
 ///
@@ -152,17 +215,37 @@ use std::{mem, ptr, slice};
 /// ```
 /// use enki::{Component, World};
 ///
+/// #[derive(Debug)]
 /// struct Health(u32);
 ///
 /// // Marks `Health` as a component
 /// impl Component for Health {}
 ///
 /// let mut world = World::new();
-/// let player = world.spawn_empty_ent();
-/// world.add_component(player, Health(100));
+/// let player = world.spawn_empty();
+/// world.add_component(player, Health(100)).expect("the player should be alive");
 ///
 /// let health = world.get::<Health>(player).map(|health| health.0);
 /// assert_eq!(health, Some(100));
+/// ```
+///
+/// The compiler rejects a type that does not implement the trait. The example passes a tuple to
+/// `add_component` by mistake, in place of `add_components`, and fails to compile.
+///
+/// ```compile_fail
+/// use enki::World;
+/// # use enki::Component;
+///
+/// struct Position(f32, f32);
+/// struct Health(u32);
+/// # impl Component for Position {}
+/// # impl Component for Health {}
+///
+/// let mut world = World::new();
+/// let player = world.spawn_empty();
+///
+/// // Fails to compile, since the tuple `(Position, Health)` does not implement `Component`
+/// world.add_component(player, (Position(0.0, 0.0), Health(100)));
 /// ```
 pub trait Component: Send + Sync + 'static {}
 
@@ -178,22 +261,10 @@ pub trait Component: Send + Sync + 'static {}
 ///
 /// # Examples
 ///
-/// The example creates a vector for `f32`, pushes one component, borrows it, then changes it.
-///
-/// ```ignore
-/// // Creates an empty vector for `f32` components, with the bit at position 0 for that type
-/// let mut components = ComponentVec::new(ComponentInfo::of::<f32>(ComponentMask::single(0)));
-///
-/// // Pushes one component, which the vector then owns
-/// components.push_typed(1.5_f32);
-///
-/// // Borrows index 0 as an `f32`. `as_slice` checks the type, and the slice checks the index
-/// let stored = &components.as_slice::<f32>()[0];
-/// assert_eq!(*stored, 1.5);
-///
-/// // Changes index 0, through a slice that allows changes
-/// components.as_mut_slice::<f32>()[0] = 2.5;
-/// ```
+/// The [module examples](self#examples) show the vector as tables and the world use it: creating
+/// columns, reading, pushing, moving and removing components. The test
+/// `as_mut_slice_with_changed_value_updates_only_that_component` changes one component through
+/// `as_mut_slice`.
 pub(crate) struct ComponentVec {
     info: ComponentInfo, // describes the component type that the vector stores
     data: NonNull<u8>,   // points at the start of the block
@@ -202,13 +273,20 @@ pub(crate) struct ComponentVec {
 }
 
 impl ComponentVec {
+    // ========================================================================================== \\
+    //                                        Constructors                                        \\
+    // ========================================================================================== \\
+
     /// Returns an empty vector for the component type that `info` describes.
     ///
-    /// The first call to [`grow`](Self::grow) allocates the block. A push, or a move into this
-    /// vector, leads to that call where the vector has no block yet. A vector for a type of size
-    /// zero starts with a capacity of `usize::MAX`, and never allocates.
+    /// The vector allocates its block on the first push, move into this vector, or call to
+    /// [`reserve`](Self::reserve) that needs room. A vector for a type of size zero starts with a
+    /// capacity of `usize::MAX`, and never allocates.
+    ///
+    /// The [module example](self#creating-the-columns-of-a-table) creates one column for each
+    /// component type in a table with this method.
     pub(crate) fn new(info: ComponentInfo) -> Self {
-        // Points `data` at an aligned address, which stands in until `grow` allocates a block
+        // Points `data` at an aligned address, which stands in until the vector allocates a block
         let alignment = info.layout.align();
         let data = NonNull::new(ptr::without_provenance_mut(alignment))
             .expect("the alignment should be above zero, which `Layout` guarantees");
@@ -229,7 +307,14 @@ impl ComponentVec {
         }
     }
 
+    // ========================================================================================== \\
+    //                                          Getters                                           \\
+    // ========================================================================================== \\
+
     /// Returns the [`ComponentInfo`] that describes the component type in the vector.
+    ///
+    /// The [module example](self#creating-the-columns-of-a-table) reads the type of each column
+    /// through this method, to sort the columns of a table.
     pub(crate) fn info(&self) -> ComponentInfo {
         self.info
     }
@@ -243,14 +328,42 @@ impl ComponentVec {
     /// pointer does not point at any memory. The pointer stops being valid when the vector grows its
     /// block or is dropped. The Pointer validity section in the module documentation sets out every
     /// rule.
+    ///
+    /// # Examples
+    ///
+    /// For a vector with at least one component, `data` returns the same address as `ptr_at(0)`.
+    /// The test `data_with_pushed_components_returns_address_of_first_component` checks it.
     pub(crate) fn data(&self) -> NonNull<u8> {
         self.data
     }
 
     /// Returns the number of components in the vector.
+    ///
+    /// # Examples
+    ///
+    /// After three pushes, `len` returns 3. The test
+    /// `len_with_varying_counts_returns_number_of_components` checks several counts.
     pub(crate) fn len(&self) -> usize {
         self.len
     }
+
+    /// Returns the number of components that the block has room for before the vector next grows.
+    ///
+    /// A vector for a type of size zero returns `usize::MAX`. Only tests read the capacity, which
+    /// shows whether a block grew without comparing addresses, since a block can grow in place.
+    ///
+    /// # Examples
+    ///
+    /// After one push onto an empty vector of `u32`, `capacity` returns 4. The test
+    /// `reserve_with_varying_additional_rows_fits_rows_without_growing` in `archetype.rs` reads it.
+    #[cfg(test)]
+    pub(crate) fn capacity(&self) -> usize {
+        self.capacity
+    }
+
+    // ========================================================================================== \\
+    //                                        API Methods                                         \\
+    // ========================================================================================== \\
 
     /// Returns a pointer to the start of the component at `index`.
     ///
@@ -259,49 +372,24 @@ impl ComponentVec {
     /// pointer stops being valid when the vector grows its block or is dropped. The Pointer validity
     /// section in the module documentation sets out every rule.
     ///
-    /// A caller looks at a component by borrowing it through the pointer. The pointer method `read`
-    /// makes a bitwise copy, and the vector still owns the original. The caller MUST guarantee that
-    /// it never drops such a copy where the type has clean-up code. The vector later drops the
-    /// original as well, which makes that a double drop, and a double drop is undefined behaviour.
+    /// A caller that only looks at a component borrows it through the pointer. Calling `read` on
+    /// the pointer instead makes a bitwise copy, while the vector still owns the original. The
+    /// caller MUST guarantee that it never drops such a copy where the type has clean-up code,
+    /// since the vector later drops the original as well, and a double drop is undefined behaviour.
     ///
     /// # Panics
     ///
     /// A debug build panics where `index` times the component size overflows `usize`. A release
     /// build wraps around instead, meaning the pointer can land inside the block.
+    ///
+    /// # Examples
+    ///
+    /// For a vector of `f32`, `ptr_at(1)` returns the address 4 bytes past `data`, since each `f32`
+    /// takes 4 bytes. The test `ptr_at_with_standard_and_extreme_indices_returns_offset_address`
+    /// checks other indices.
     pub(crate) fn ptr_at(&self, index: usize) -> *mut u8 {
         let offset = index * self.info.layout.size();
         self.data.as_ptr().wrapping_add(offset)
-    }
-
-    /// Copies one component from `value` onto the end of the vector.
-    ///
-    /// The vector grows its block where the block is full. It then owns the component.
-    ///
-    /// # Panics
-    ///
-    /// Panics where the vector is full and a larger block would exceed `isize::MAX` bytes. A vector
-    /// for a type of size zero panics once it stores `usize::MAX` components. The program aborts
-    /// where the allocator cannot supply the larger block.
-    ///
-    /// # Safety
-    ///
-    /// The caller MUST guarantee three things:
-    ///
-    /// - `value` points at a live component of the type that the vector stores.
-    /// - `value` points outside the block of this vector, since growing can free the block.
-    /// - Nothing drops the original afterwards, and nothing uses it unless its type is `Copy`.
-    unsafe fn push(&mut self, value: *const u8) {
-        if self.len == self.capacity {
-            self.grow();
-        }
-
-        let end = self.ptr_at(self.len); // points just past the last component
-        // SAFETY: `copy_nonoverlapping` requires two valid ranges that do not overlap. The caller
-        // MUST guarantee that `value` is valid and lies outside the block, as the Safety section
-        // above sets out. `end` has room for one component, since the check above grows a full
-        // block. For a type of size zero, the copy covers zero bytes and does not touch any memory
-        unsafe { ptr::copy_nonoverlapping(value, end, self.info.layout.size()) }
-        self.len += 1;
     }
 
     /// Moves `value` onto the end of the vector, which then owns it.
@@ -314,6 +402,11 @@ impl ComponentVec {
     /// and a larger block would exceed `isize::MAX` bytes. A vector for a type of size zero panics
     /// once it stores `usize::MAX` components. The program aborts where the allocator cannot supply
     /// the larger block.
+    ///
+    /// After such a panic, nothing drops `value`, and it leaks.
+    ///
+    /// The [module example](self#adding-or-replacing-a-component) pushes a new component onto the
+    /// end of a column with this method.
     #[track_caller]
     pub(crate) fn push_typed<T: 'static>(&mut self, value: T) {
         self.assert_stores::<T>();
@@ -334,6 +427,9 @@ impl ComponentVec {
     /// # Panics
     ///
     /// Panics where `T` differs from the type that the vector stores.
+    ///
+    /// The [module example](self#reading-and-changing-one-component) borrows a column with this
+    /// method, to read the component of one entity.
     #[track_caller]
     pub(crate) fn as_slice<T: 'static>(&self) -> &[T] {
         self.assert_stores::<T>();
@@ -357,6 +453,11 @@ impl ComponentVec {
     /// # Panics
     ///
     /// Panics where `T` differs from the type that the vector stores.
+    ///
+    /// # Examples
+    ///
+    /// The test `as_mut_slice_with_changed_value_updates_only_that_component` changes one component
+    /// through the slice, and checks that the others keep their values.
     #[track_caller]
     pub(crate) fn as_mut_slice<T: 'static>(&mut self) -> &mut [T] {
         self.assert_stores::<T>();
@@ -370,10 +471,10 @@ impl ComponentVec {
     /// Moves the component at `index` onto the end of `target`, then fills `index` with the last
     /// component in `self`.
     ///
-    /// `self` ends up one component shorter. `target` owns the moved component. The component that
-    /// was last is now stored at `index`. The caller then updates the location that it records for
-    /// the entity that owns that component. Where `index` is the last index, no other component
-    /// moves, and the caller does not update any other entity.
+    /// `self` ends up one component shorter, `target` owns the moved component, and the component
+    /// that was last is now stored at `index`. The caller MUST then update the location that it
+    /// records for the entity that owns that component. Where `index` is the last index, no other
+    /// component moves, and the caller does not update any other entity.
     ///
     /// # Panics
     ///
@@ -384,15 +485,9 @@ impl ComponentVec {
     /// target for a type of size zero panics once it stores `usize::MAX` components. The program
     /// aborts where the allocator cannot supply a larger block for `target`.
     ///
-    /// # Safety
-    ///
-    /// The caller MUST guarantee two things:
-    ///
-    /// - `index` is below the length of `self`.
-    /// - `target` stores the same component type as `self`.
-    ///
-    /// Every build checks both, and panics where either fails, as the Panics section sets out.
-    pub(crate) unsafe fn move_component(&mut self, index: usize, target: &mut ComponentVec) {
+    /// The [module example](self#moving-an-entity-to-another-table) moves each component of an
+    /// entity to its new table with this method.
+    pub(crate) fn move_component(&mut self, index: usize, target: &mut ComponentVec) {
         // Panics before anything changes, where `index` lies past the last component. A stale row
         // from a caller would otherwise copy the bytes of a component that is already dropped
         assert!(index < self.len, "the index must be below the length");
@@ -429,9 +524,9 @@ impl ComponentVec {
 
     /// Drops the component at `index`, then fills `index` with the component that was last.
     ///
-    /// `self` ends up one component shorter. The caller then updates the location that it records
-    /// for the entity that owns the component now at `index`. Where `index` is the last index, no
-    /// other component moves, and the caller does not update any other entity.
+    /// `self` ends up one component shorter. The caller MUST then update the location that it
+    /// records for the entity that owns the component now at `index`. Where `index` is the last
+    /// index, no other component moves, and the caller does not update any other entity.
     ///
     /// # Panics
     ///
@@ -439,11 +534,16 @@ impl ComponentVec {
     ///
     /// Also panics where the `Drop` implementation of the component panics. The vector is already
     /// one component shorter at that point, and stays safe to use.
+    ///
+    /// # Examples
+    ///
+    /// For a vector of `"Ada"`, `"Bo"` and `"Cy"`, `swap_remove(0)` drops `"Ada"` and moves `"Cy"`
+    /// into index 0, which leaves `["Cy", "Bo"]`. The test
+    /// `swap_remove_with_non_last_index_fills_gap_with_last_component` checks it.
     pub(crate) fn swap_remove(&mut self, index: usize) {
         // Panics before anything changes, where `index` lies past the last component
         assert!(index < self.len, "the index must be below the length");
 
-        // Finds the index of the last component
         let last_idx = self.len - 1;
         // Swaps the removed component with the last one, where the two differ
         if index != last_idx {
@@ -467,6 +567,49 @@ impl ComponentVec {
             // meaning the vector never reaches that component again
             unsafe { drop_component(self.ptr_at(last_idx)) };
         }
+    }
+
+    /// Moves the component at `index` out of the vector and returns it, then fills `index` with the
+    /// component that was last.
+    ///
+    /// The method works as [`swap_remove`](Self::swap_remove) does, apart from the end. Where
+    /// `swap_remove` drops the component, this method hands it to the caller, which then owns it.
+    ///
+    /// # Panics
+    ///
+    /// Panics where `T` differs from the type that the vector stores, or where `index` is not below
+    /// the length. Both checks run before anything changes.
+    ///
+    /// # Examples
+    ///
+    /// For a vector of `"Ada"`, `"Bo"` and `"Cy"`, `swap_remove_typed::<String>(0)` returns `"Ada"`
+    /// and moves `"Cy"` into index 0, which leaves `["Cy", "Bo"]`.
+    #[track_caller]
+    pub(crate) fn swap_remove_typed<T: 'static>(&mut self, index: usize) -> T {
+        self.assert_stores::<T>();
+        // Panics before anything changes, where `index` lies past the last component
+        assert!(index < self.len, "the index must be below the length");
+
+        let last_idx = self.len - 1;
+        // Swaps the removed component with the last one, where the two differ
+        if index != last_idx {
+            let size = self.info.layout.size();
+            // SAFETY: `swap_nonoverlapping` requires two valid ranges that do not overlap. `index`
+            // and `last_idx` are different indices below the length, meaning each range lies
+            // inside the block, apart from the other. For a type of size zero, each range covers
+            // zero bytes
+            unsafe { ptr::swap_nonoverlapping(self.ptr_at(index), self.ptr_at(last_idx), size) };
+        }
+        // Shortens the vector by one, which puts the removed component, now at `last_idx`, out of
+        // reach
+        self.len = last_idx;
+
+        // SAFETY: `read` requires an aligned pointer to a live `T`, and makes a bitwise copy.
+        // `assert_stores` confirms the type. The address at `last_idx` stores the live component
+        // from `index`, and is aligned like the address at every other index. The length now
+        // excludes `last_idx`, meaning the vector never reaches or drops the original, and the
+        // copy is the only owner
+        unsafe { self.ptr_at(last_idx).cast::<T>().read() }
     }
 
     /// Makes room for at least `additional` more components.
@@ -499,6 +642,50 @@ impl ComponentVec {
         self.increase_capacity(required.max(doubled));
     }
 
+    // ========================================================================================== \\
+    //                                       Helper Methods                                       \\
+    // ========================================================================================== \\
+
+    /// Copies one component from `value` onto the end of the vector.
+    ///
+    /// The vector grows its block where the block is full. It then owns the component.
+    ///
+    /// # Panics
+    ///
+    /// Panics where the vector is full and a larger block would exceed `isize::MAX` bytes. A vector
+    /// for a type of size zero panics once it stores `usize::MAX` components. The program aborts
+    /// where the allocator cannot supply the larger block.
+    ///
+    /// After such a panic, the vector does not own the component. The third guarantee below still
+    /// binds the caller, meaning nothing drops the original, and the component leaks.
+    ///
+    /// # Safety
+    ///
+    /// The caller MUST guarantee three things:
+    ///
+    /// - `value` points at a live component of the type that the vector stores.
+    /// - `value` points outside the block of this vector, since growing can free the block.
+    /// - Nothing drops the original afterwards, and nothing uses it unless its type is `Copy`.
+    ///
+    /// # Examples
+    ///
+    /// `push_typed` shows a call, along with the SAFETY comment that the call needs. The test
+    /// `push_with_manually_dropped_string_stores_value_for_as_slice` pushes a `String` that
+    /// `ManuallyDrop` keeps from being dropped twice.
+    unsafe fn push(&mut self, value: *const u8) {
+        if self.len == self.capacity {
+            self.grow();
+        }
+
+        let end = self.ptr_at(self.len); // points just past the last component
+        // SAFETY: `copy_nonoverlapping` requires two valid ranges that do not overlap. The caller
+        // MUST guarantee that `value` is valid and lies outside the block, as the Safety section
+        // above sets out. `end` has room for one component, since the check above grows a full
+        // block. For a type of size zero, the copy covers zero bytes and does not touch any memory
+        unsafe { ptr::copy_nonoverlapping(value, end, self.info.layout.size()) }
+        self.len += 1;
+    }
+
     /// Doubles the capacity, or sets it to 4 components where the capacity is 0.
     ///
     /// The components keep their indices. Every pointer that [`data`](Self::data) and
@@ -509,6 +696,12 @@ impl ComponentVec {
     ///
     /// Panics where the component type has a size of zero, or where the new block would exceed
     /// `isize::MAX` bytes. The program aborts where the allocator cannot supply the block.
+    ///
+    /// # Examples
+    ///
+    /// An empty vector of `u32` grows to a capacity of 4 on the first call, and to 8 on the second.
+    /// The test `push_typed_with_increasing_counts_returns_expected_capacity` checks the capacity
+    /// as the vector fills.
     fn grow(&mut self) {
         // Keeps a type of size zero away from the allocator, which requires a size above zero
         self.assert_non_zero();
@@ -536,6 +729,13 @@ impl ComponentVec {
     ///
     /// Panics where the component type has a size of zero, or where the new block would exceed
     /// `isize::MAX` bytes. The program aborts where the allocator cannot supply the block.
+    ///
+    /// # Examples
+    ///
+    /// For an empty vector of `u32`, `increase_capacity(10)` allocates a block of 40 bytes, sets
+    /// the capacity to 10, and leaves the length at 0. The test
+    /// `reserve_with_standard_and_extreme_amounts_returns_expected_capacity` reaches it through
+    /// `reserve`.
     fn increase_capacity(&mut self, new_capacity: usize) {
         // Panics in a debug build where the caller does not ask for more room than the block has
         debug_assert!(
@@ -577,6 +777,11 @@ impl ComponentVec {
     ///
     /// Panics where `T` differs from the stored type. The message contains both type names, and the
     /// panic reports the line that called the outermost `#[track_caller]` method.
+    ///
+    /// # Examples
+    ///
+    /// For a vector of `f32`, `assert_stores::<f32>()` returns, and `assert_stores::<u32>()`
+    /// panics. The test `push_typed_with_wrong_type_panics` reaches the panic through `push_typed`.
     #[track_caller]
     fn assert_stores<T: 'static>(&self) {
         assert_eq!(
@@ -596,6 +801,12 @@ impl ComponentVec {
     /// # Panics
     ///
     /// Panics where the component type has a size of zero.
+    ///
+    /// # Examples
+    ///
+    /// For a vector of `f32`, which takes 4 bytes, the method returns. For a vector of `()`, a type
+    /// of size zero, it panics. The test `push_typed_with_full_zero_size_vector_panics` reaches the
+    /// panic through `push_typed`.
     fn assert_non_zero(&self) {
         assert_ne!(
             self.info.layout.size(),
@@ -609,9 +820,15 @@ impl Drop for ComponentVec {
     /// Drops every component in the vector, then frees the block.
     ///
     /// Where the clean-up code of a component panics, the method stops at that component. The
-    /// components after it never get dropped, and the block never gets freed. This is a memory leak
-    /// rather than undefined behaviour. Accepting the leak is a decision. A panicking clean-up is
-    /// a bug in the component, and an uncaught panic on the main thread ends the program.
+    /// components after it never get dropped, and the block never gets freed. The result is a
+    /// memory leak rather than undefined behaviour. Accepting the leak is a decision, taken because
+    /// a panicking clean-up is a bug in the component, and an uncaught panic on the main thread
+    /// ends the program.
+    ///
+    /// # Examples
+    ///
+    /// The test `drop_with_varying_counts_drops_each_component_once` drops vectors of several
+    /// lengths, and counts one drop for each component.
     fn drop(&mut self) {
         if let Some(drop_component) = self.info.drop {
             for index in 0..self.len {
@@ -644,9 +861,16 @@ impl Drop for ComponentVec {
 
 // SAFETY: `ComponentInfo::of` is the only way to build a `ComponentInfo`, and it requires
 // `T: Send + Sync`. Every component in the vector can therefore move between threads, and be read
-// from several threads at the same time. Changing a component or the vector requires `&mut`, or an
-// `unsafe` write through a raw pointer, whose caller MUST guarantee that nothing else accesses that
-// component
+// from several threads at the same time.
+//
+// Changing a component or the vector requires `&mut`, or an `unsafe` write through a raw pointer,
+// whose caller MUST guarantee that nothing else accesses that component. `Query::find_columns` for
+// `&mut T` makes such a write possible through a shared `&Archetype`, by building a mutable slice
+// from the raw pointer `data`. `Sync` therefore also relies on `&mut T` never implementing
+// `ReadOnlyQuery`, which the seal on that trait ensures. `World::query` and
+// `World::query_archetype` take `&World`, which other threads can share, and they accept only a
+// `ReadOnlyQuery`. A `&mut T` that implemented `ReadOnlyQuery` would let two threads build mutable
+// slices of one column at once, which is undefined behaviour
 unsafe impl Send for ComponentVec {}
 // SAFETY: the comment on `Send` above covers `Sync` as well
 unsafe impl Sync for ComponentVec {}
@@ -658,24 +882,35 @@ unsafe impl Sync for ComponentVec {}
 ///
 /// # Examples
 ///
-/// The example builds the `ComponentInfo` for `f32`, with the bit at position 0 for that type.
-///
-/// ```ignore
-/// // Builds the `ComponentInfo` for `f32`, a type with no clean-up code
-/// let info = ComponentInfo::of::<f32>(ComponentMask::single(0));
-/// ```
+/// `ComponentInfo::of::<f32>(ComponentMask::single(0))` builds the `ComponentInfo` for `f32`, with
+/// the bit at position 0. The test
+/// `of_with_standard_and_extreme_types_returns_layout_and_drop_function` builds one for several
+/// types.
 #[derive(Clone, Copy, Debug)]
 pub struct ComponentInfo {
     /// Identifies the component type.
+    ///
+    /// For the `ComponentInfo` in the [`ComponentInfo`] example, the field equals
+    /// `TypeId::of::<f32>()`.
     type_id: TypeId,
     /// Stores the name of the component type, which a panic message reports.
+    ///
+    /// For the `ComponentInfo` in the [`ComponentInfo`] example, the field equals `"f32"`.
     type_name: &'static str,
     /// Defines the size and alignment of one component.
+    ///
+    /// For the `ComponentInfo` in the [`ComponentInfo`] example, the field has a size of 4 bytes and
+    /// an alignment of 4.
     layout: Layout,
     /// Stores the function that runs the clean-up code of the component at the given address. The
     /// field is `None` where the type has no clean-up code.
+    ///
+    /// The field is `Some` for `String`, which frees its text, and `None` for `f32`.
     drop: Option<unsafe fn(*mut u8)>,
     /// Stores the mask with the one bit that stands for the component type, within one world.
+    ///
+    /// For the `ComponentInfo` in the [`ComponentInfo`] example, the field equals
+    /// `ComponentMask::single(0)`.
     bit: ComponentMask,
 }
 
@@ -687,10 +922,13 @@ impl ComponentInfo {
     /// and a different bit for each component type in one world. The method stores `bit` without
     /// checking it. A wrong bit gives a table a wrong mask, and queries then match the wrong tables.
     ///
-    /// The bound `T: 'static` means that `T` does not contain a borrowed reference that could expire. A
-    /// vector can then keep a `T` for as long as it needs. `TypeId::of` requires the same bound.
+    /// The bound `T: 'static` means that `T` does not contain a borrowed reference that could
+    /// expire. A vector can then keep a `T` for as long as it needs. `TypeId::of` requires the same
+    /// bound.
     ///
     /// The bound `T: Send + Sync` lets a vector move its components between threads, and share them.
+    ///
+    /// The [`ComponentInfo`] example builds the `ComponentInfo` for `f32` with this method.
     pub(crate) fn of<T: Send + Sync + 'static>(bit: ComponentMask) -> Self {
         let drop = if mem::needs_drop::<T>() {
             Some(drop_value::<T> as unsafe fn(*mut u8))
@@ -708,11 +946,22 @@ impl ComponentInfo {
     }
 
     /// Returns the [`TypeId`] that identifies the component type.
+    ///
+    /// # Examples
+    ///
+    /// For the `ComponentInfo` of `f32`, `type_id` returns `TypeId::of::<f32>()`. The test
+    /// `type_id_with_standard_and_extreme_types_returns_type_id_of_type` checks several types.
     pub(crate) fn type_id(self) -> TypeId {
         self.type_id
     }
 
     /// Returns the mask with the one bit that stands for the component type.
+    ///
+    /// # Examples
+    ///
+    /// For `ComponentInfo::of::<f32>(ComponentMask::single(2))`, `bit` returns
+    /// `ComponentMask::single(2)`. The test
+    /// `bit_with_standard_and_extreme_positions_returns_mask_from_of` checks several positions.
     pub(crate) fn bit(self) -> ComponentMask {
         self.bit
     }
@@ -729,6 +978,13 @@ impl ComponentInfo {
 ///
 /// - `pointer` points at a live `T`, at an address that is correctly aligned for `T`.
 /// - Nothing uses or drops that `T` afterwards, since its clean-up code has already run.
+///
+/// # Examples
+///
+/// Given a pointer to the bytes of a `String`, `drop_value::<String>` runs the clean-up code of
+/// `String`, which frees its text. `ComponentInfo::of` stores it as the drop function for each type
+/// with clean-up code. The test `drop_with_varying_counts_drops_each_component_once` reaches it
+/// through the drop of a `ComponentVec`.
 unsafe fn drop_value<T>(pointer: *mut u8) {
     // SAFETY: `drop_in_place` requires a pointer to a live `T`, at an address that is correctly
     // aligned for `T`. The caller MUST guarantee both, under the Safety section above. The caller
@@ -741,6 +997,12 @@ unsafe fn drop_value<T>(pointer: *mut u8) {
 /// # Panics
 ///
 /// Panics where the block would exceed `isize::MAX` bytes.
+///
+/// # Examples
+///
+/// For 3 components of 8 bytes, each aligned to 4, `array_layout` returns a layout of 24 bytes,
+/// aligned to 4. The test `array_layout_with_standard_and_extreme_counts_returns_block_layout`
+/// checks other counts.
 fn array_layout(item: Layout, count: usize) -> Layout {
     let size = item
         .size()
@@ -864,23 +1126,72 @@ mod tests {
         assert_ne!(health.type_id, armour.type_id, "type IDs should differ");
     }
 
-    /// Checks the starting state that a vector has before it allocates any memory
+    /// Checks the starting state that a vector has before it allocates any memory, from one-byte
+    /// alignment up to 64, and for a type of size zero
     #[test]
-    fn new_with_standard_types_returns_empty_vector_with_aligned_pointer() {
+    fn new_with_standard_and_extreme_types_returns_empty_vector_with_aligned_pointer() {
+        #[allow(dead_code)]
+        #[repr(align(64))]
+        struct Aligned(u8);
+
+        #[repr(align(64))]
+        struct AlignedTag;
+
+        // Lists each type with the alignment and the starting capacity that it should give
         let cases = [
-            ("u8", ComponentInfo::of::<u8>(ComponentMask::single(0))),
-            ("f32", ComponentInfo::of::<f32>(ComponentMask::single(0))),
-            ("u64", ComponentInfo::of::<u64>(ComponentMask::single(0))),
+            (
+                "u8",
+                ComponentInfo::of::<u8>(ComponentMask::single(0)),
+                1,
+                0,
+            ),
+            (
+                "f32",
+                ComponentInfo::of::<f32>(ComponentMask::single(0)),
+                4,
+                0,
+            ),
+            (
+                "u64",
+                ComponentInfo::of::<u64>(ComponentMask::single(0)),
+                8,
+                0,
+            ),
+            (
+                "Aligned",
+                ComponentInfo::of::<Aligned>(ComponentMask::single(0)),
+                64,
+                0,
+            ),
+            (
+                "()",
+                ComponentInfo::of::<()>(ComponentMask::single(0)),
+                1,
+                usize::MAX,
+            ),
+            (
+                "AlignedTag",
+                ComponentInfo::of::<AlignedTag>(ComponentMask::single(0)),
+                64,
+                usize::MAX,
+            ),
         ];
 
-        for (name, info) in cases {
+        let found = cases.map(|(name, info, alignment, capacity)| {
             let components = ComponentVec::new(info);
+            let remainder = components.data().as_ptr().addr() % alignment;
+            (
+                name,
+                components.len,
+                components.capacity,
+                remainder,
+                capacity,
+            )
+        });
 
-            let address = components.data().as_ptr().addr();
-            let remainder = address % info.layout.align();
-
-            assert_eq!(components.len, 0, "length for {name}");
-            assert_eq!(components.capacity, 0, "capacity for {name}");
+        for (name, len, capacity, remainder, expected_capacity) in found {
+            assert_eq!(len, 0, "length for {name}");
+            assert_eq!(capacity, expected_capacity, "capacity for {name}");
             assert_eq!(remainder, 0, "pointer alignment for {name}");
         }
     }
@@ -925,14 +1236,32 @@ mod tests {
         let components = ComponentVec::new(ComponentInfo::of::<u32>(ComponentMask::single(0)));
         let start = components.data().as_ptr().addr();
 
-        // Pairs each index with its expected distance in bytes from the start of the block
-        let cases = [(0, 0), (1, 4), (5, 20)];
+        // Pairs each index with its expected distance in bytes from the start of the block. The
+        // last index is the largest whose offset still fits in a `usize`
+        let largest = usize::MAX / 4;
+        let cases = [(0, 0), (1, 4), (5, 20), (largest, largest * 4)];
 
-        for (index, offset) in cases {
-            let address = components.ptr_at(index).addr();
+        // Measures each distance with wrapping arithmetic, since the largest offset carries the
+        // address past `usize::MAX`
+        let distances = cases.map(|(index, offset)| {
+            let distance = components.ptr_at(index).addr().wrapping_sub(start);
+            (index, distance, offset)
+        });
 
-            assert_eq!(address, start + offset, "address at index {index}");
+        for (index, distance, offset) in distances {
+            assert_eq!(distance, offset, "distance at index {index}");
         }
+    }
+
+    /// Checks that a debug build catches an index whose offset in bytes overflows a `usize`
+    #[test]
+    #[cfg(debug_assertions)]
+    #[should_panic]
+    fn ptr_at_with_overflowing_offset_panics() {
+        let components = ComponentVec::new(ComponentInfo::of::<u32>(ComponentMask::single(0)));
+        let index = usize::MAX / 4 + 1;
+
+        components.ptr_at(index);
     }
 
     /// Checks that a change reaches the stored component, and leaves its neighbours alone
@@ -1050,9 +1379,7 @@ mod tests {
 
         let mut target = ComponentVec::new(source.info());
 
-        // SAFETY: `move_component` requires an index below the length and a target of the same
-        // type. Index 1 is below the length of 4, and `target` uses the same `ComponentInfo`
-        unsafe { source.move_component(1, &mut target) };
+        source.move_component(1, &mut target);
 
         assert_eq!(
             source.as_slice::<u32>(),
@@ -1085,9 +1412,7 @@ mod tests {
 
             let mut target = ComponentVec::new(source.info());
 
-            // SAFETY: `move_component` requires an index below the length and a target of the same
-            // type. Each case gives its last index, and `target` uses the same `ComponentInfo`
-            unsafe { source.move_component(index, &mut target) };
+            source.move_component(index, &mut target);
 
             assert_eq!(source.as_slice::<u32>(), remaining, "source for {values:?}");
             assert_eq!(
@@ -1109,9 +1434,7 @@ mod tests {
             target.push_typed(value);
         }
 
-        // SAFETY: `move_component` requires an index below the length and a target of the same
-        // type. Index 0 is below the length of 1, and `target` uses the same `ComponentInfo`
-        unsafe { source.move_component(0, &mut target) };
+        source.move_component(0, &mut target);
 
         assert_eq!(target.capacity, 8, "target capacity after the move");
         assert_eq!(
@@ -1135,13 +1458,8 @@ mod tests {
 
         let mut target = ComponentVec::new(source.info());
 
-        // SAFETY: `move_component` requires an index below the length and a target of the same
-        // type. Index 1 is below the length of 5, index 3 is below the length of 4, and `target`
-        // uses the same `ComponentInfo`
-        unsafe {
-            source.move_component(1, &mut target); // fills the gap with the last component
-            source.move_component(3, &mut target); // moves the last component, which does not leave a gap
-        }
+        source.move_component(1, &mut target); // fills the gap with the last component
+        source.move_component(3, &mut target); // moves the last component, which does not leave a gap
         let drops_after_moves = drops.load(Ordering::Relaxed);
 
         drop(source);
@@ -1210,6 +1528,51 @@ mod tests {
         assert_eq!(DROPS.load(Ordering::Relaxed), 3);
     }
 
+    /// Checks that a panic in the clean-up code of one component stops the drop at that component,
+    /// and leaks every component after it, along with the block
+    ///
+    /// Miri reports every block that a test leaves allocated. The components here own no memory of
+    /// their own, and the test frees the leaked block itself once it has counted the drops. Miri
+    /// therefore runs the test with its usual leak check.
+    #[test]
+    fn drop_with_panicking_drop_leaks_later_components() {
+        // Counts the drops outside the type, which leaves the component with no memory to leak
+        static DROPS: AtomicUsize = AtomicUsize::new(0);
+
+        // Defines a component whose clean-up code counts the drop, then panics where `panics` is set
+        struct Fragile {
+            panics: bool,
+        }
+
+        impl Drop for Fragile {
+            fn drop(&mut self) {
+                DROPS.fetch_add(1, Ordering::Relaxed);
+                assert!(!self.panics, "the clean-up code of the component panicked");
+            }
+        }
+
+        let mut components =
+            ComponentVec::new(ComponentInfo::of::<Fragile>(ComponentMask::single(0)));
+        for panics in [false, true, false, false] {
+            components.push_typed(Fragile { panics });
+        }
+        // Records the block before the drop, which is all the test needs to free it afterwards
+        let block = components.data;
+        let block_layout = array_layout(components.info.layout, components.capacity);
+
+        let result = panic::catch_unwind(AssertUnwindSafe(|| drop(components)));
+        let drops_after_panic = DROPS.load(Ordering::Relaxed);
+
+        // SAFETY: `dealloc` requires a block from the global allocator, along with its layout. The
+        // vector allocated `block` with `block_layout`, and the panic stopped its drop before the
+        // drop freed it. Nothing reaches the vector after the panic, and the two components left in
+        // the block own no memory, meaning freeing the block without dropping them leaks nothing
+        unsafe { alloc::dealloc(block.as_ptr(), block_layout) };
+
+        assert!(result.is_err(), "drop should pass the panic on");
+        assert_eq!(drops_after_panic, 2, "drops up to the panicking component");
+    }
+
     /// Checks that a type of size zero moves by count alone, and is cleaned up once per
     /// component
     #[test]
@@ -1231,9 +1594,7 @@ mod tests {
 
         let mut target = ComponentVec::new(source.info());
 
-        // SAFETY: `move_component` requires an index below the length and a target of the same
-        // type. Index 0 is below the length of 3, and `target` uses the same `ComponentInfo`
-        unsafe { source.move_component(0, &mut target) };
+        source.move_component(0, &mut target);
 
         let source_len = source.as_slice::<Marker>().len();
         let target_len = target.as_slice::<Marker>().len();
@@ -1247,6 +1608,46 @@ mod tests {
         assert_eq!(target_len, 1, "components in the target");
         assert_eq!(drops_after_move, 0, "drops caused by the move");
         assert_eq!(drops_after_vectors, 3, "drops after both vectors are gone");
+    }
+
+    /// Checks that a type with a large alignment stays aligned at every index of the target, after
+    /// a move into a full target that has to grow
+    #[test]
+    fn move_component_with_large_alignment_keeps_every_component_aligned() {
+        #[repr(align(64))]
+        struct Aligned(u8);
+
+        let mut source = ComponentVec::new(ComponentInfo::of::<Aligned>(ComponentMask::single(0)));
+        for value in 0..3_u8 {
+            source.push_typed(Aligned(value));
+        }
+        let mut target = ComponentVec::new(source.info());
+        for value in 10..14_u8 {
+            target.push_typed(Aligned(value));
+        }
+
+        // Moves the middle component into the full target, which makes the target grow from 4 to 8
+        source.move_component(1, &mut target);
+
+        let remainders: Vec<usize> = (0..target.len())
+            .map(|index| target.ptr_at(index).addr() % 64)
+            .collect();
+        let source_values: Vec<u8> = source
+            .as_slice::<Aligned>()
+            .iter()
+            .map(|component| component.0)
+            .collect();
+        let target_values: Vec<u8> = target
+            .as_slice::<Aligned>()
+            .iter()
+            .map(|component| component.0)
+            .collect();
+        assert_eq!(
+            remainders, [0; 5],
+            "remainder of each target address divided by 64"
+        );
+        assert_eq!(source_values, [0, 2], "values left in the source");
+        assert_eq!(target_values, [10, 11, 12, 13, 1], "values in the target");
     }
 
     /// Checks that a vector for a type of size zero stops at its limit, rather than allocating
@@ -1327,9 +1728,7 @@ mod tests {
 
         let mut target = ComponentVec::new(source.info());
 
-        // SAFETY: this call breaks the index requirement on purpose. The `assert` in
-        // `move_component` panics before any memory is read
-        unsafe { source.move_component(1, &mut target) };
+        source.move_component(1, &mut target);
     }
 
     /// Checks that every build catches a move between columns of different types
@@ -1341,9 +1740,7 @@ mod tests {
 
         let mut target = ComponentVec::new(ComponentInfo::of::<f32>(ComponentMask::single(0)));
 
-        // SAFETY: this call breaks the type requirement on purpose. The `assert_eq` in
-        // `move_component` panics before any memory is read
-        unsafe { source.move_component(0, &mut target) };
+        source.move_component(0, &mut target);
     }
 
     /// Checks the size calculation for an ordinary block, and for the largest block allowed
@@ -1420,12 +1817,8 @@ mod tests {
         let mut target_health = ComponentVec::new(source_health.info());
         let mut target_names = ComponentVec::new(source_names.info());
 
-        // SAFETY: `move_component` requires an index below the length and a target of the same
-        // type. Index 0 is below the length of 3, and each target uses its source's `ComponentInfo`
-        unsafe {
-            source_health.move_component(0, &mut target_health);
-            source_names.move_component(0, &mut target_names);
-        }
+        source_health.move_component(0, &mut target_health);
+        source_names.move_component(0, &mut target_names);
 
         assert_eq!(source_health.as_slice::<u32>(), [30, 20], "source health");
         assert_eq!(
@@ -1736,6 +2129,156 @@ mod tests {
         components.swap_remove(0);
     }
 
+    /// Checks that a type with a large alignment stays aligned at every index, after a removal that
+    /// fills the gap with the last component
+    #[test]
+    fn swap_remove_with_large_alignment_keeps_every_component_aligned() {
+        #[repr(align(64))]
+        struct Aligned(u8);
+
+        let mut components =
+            ComponentVec::new(ComponentInfo::of::<Aligned>(ComponentMask::single(0)));
+        for value in 0..5_u8 {
+            components.push_typed(Aligned(value));
+        }
+
+        components.swap_remove(1);
+
+        let remainders: Vec<usize> = (0..components.len())
+            .map(|index| components.ptr_at(index).addr() % 64)
+            .collect();
+        let values: Vec<u8> = components
+            .as_slice::<Aligned>()
+            .iter()
+            .map(|component| component.0)
+            .collect();
+        assert_eq!(
+            remainders, [0; 4],
+            "remainder of each address divided by 64"
+        );
+        assert_eq!(values, [0, 4, 2, 3], "values left in the vector");
+    }
+
+    /// Checks that a removal hands back the component at the index, and fills the gap with the last
+    /// component, for the first, a middle and the last index, and for the only component
+    #[test]
+    fn swap_remove_typed_with_varying_indices_returns_component_and_fills_gap() {
+        // Lists the starting names, the index to remove, and the names that should remain
+        let cases: [(&[&str], usize, &[&str]); 4] = [
+            (&["Ada", "Bo", "Cy", "Dee"], 0, &["Dee", "Bo", "Cy"]),
+            (&["Ada", "Bo", "Cy", "Dee"], 1, &["Ada", "Dee", "Cy"]),
+            (&["Ada", "Bo", "Cy", "Dee"], 3, &["Ada", "Bo", "Cy"]),
+            (&["Ada"], 0, &[]),
+        ];
+
+        for (names, index, remaining) in cases {
+            let mut components =
+                ComponentVec::new(ComponentInfo::of::<String>(ComponentMask::single(0)));
+            for name in names {
+                components.push_typed(String::from(*name));
+            }
+
+            let removed = components.swap_remove_typed::<String>(index);
+
+            assert_eq!(
+                removed, names[index],
+                "removed name at index {index} of {names:?}"
+            );
+            assert_eq!(
+                components.as_slice::<String>(),
+                remaining,
+                "names left after removing index {index} of {names:?}"
+            );
+        }
+    }
+
+    /// Checks that a removal runs no clean-up code, since the caller owns the returned component,
+    /// and that the caller and the vector then drop each component once
+    #[test]
+    fn swap_remove_typed_with_drop_logs_hands_ownership_to_caller() {
+        let log = Arc::new(Mutex::new(Vec::new()));
+        let mut components =
+            ComponentVec::new(ComponentInfo::of::<DropLog>(ComponentMask::single(0)));
+        for id in 0..5 {
+            components.push_typed(DropLog {
+                id,
+                log: Arc::clone(&log),
+            });
+        }
+
+        let removed = components.swap_remove_typed::<DropLog>(1);
+        let dropped_by_removal = log.lock().unwrap().clone();
+        let removed_id = removed.id;
+        let remaining: Vec<u32> = components
+            .as_slice::<DropLog>()
+            .iter()
+            .map(|component| component.id)
+            .collect();
+
+        drop(removed);
+        let dropped_by_caller = log.lock().unwrap().clone();
+        drop(components);
+        let drops_after_vector = log.lock().unwrap().len();
+
+        assert!(dropped_by_removal.is_empty(), "IDs dropped by the removal");
+        assert_eq!(removed_id, 1, "ID of the returned component");
+        assert_eq!(remaining, [0, 4, 2, 3], "IDs left in the vector");
+        assert_eq!(dropped_by_caller, [1], "IDs dropped by the caller");
+        assert_eq!(drops_after_vector, 5, "drops after the vector is gone");
+    }
+
+    /// Checks that a type with a large alignment comes back whole, and leaves every remaining
+    /// component aligned
+    #[test]
+    fn swap_remove_typed_with_large_alignment_returns_component_and_keeps_alignment() {
+        #[repr(align(64))]
+        struct Aligned(u8);
+
+        let mut components =
+            ComponentVec::new(ComponentInfo::of::<Aligned>(ComponentMask::single(0)));
+        for value in 0..5_u8 {
+            components.push_typed(Aligned(value));
+        }
+
+        let removed = components.swap_remove_typed::<Aligned>(1);
+
+        let remainders: Vec<usize> = (0..components.len())
+            .map(|index| components.ptr_at(index).addr() % 64)
+            .collect();
+        let values: Vec<u8> = components
+            .as_slice::<Aligned>()
+            .iter()
+            .map(|component| component.0)
+            .collect();
+        assert_eq!(removed.0, 1, "value of the returned component");
+        assert_eq!(
+            remainders, [0; 4],
+            "remainder of each address divided by 64"
+        );
+        assert_eq!(values, [0, 4, 2, 3], "values left in the vector");
+    }
+
+    /// Checks that taking the stored bytes out as another type panics, even at the same size
+    #[test]
+    #[should_panic]
+    fn swap_remove_typed_with_wrong_type_panics() {
+        let mut components = ComponentVec::new(ComponentInfo::of::<u32>(ComponentMask::single(0)));
+        components.push_typed(10_u32);
+
+        components.swap_remove_typed::<f32>(0);
+    }
+
+    /// Checks that every build catches an index that would take a component past the last one
+    #[test]
+    #[should_panic]
+    fn swap_remove_typed_with_out_of_range_index_panics() {
+        let mut components =
+            ComponentVec::new(ComponentInfo::of::<String>(ComponentMask::single(0)));
+        components.push_typed(String::from("Ada"));
+
+        components.swap_remove_typed::<String>(1);
+    }
+
     /// Checks that the new capacity is the larger of the capacity needed and double the old one, and
     /// that a block with room already stays the same size
     #[test]
@@ -1767,31 +2310,33 @@ mod tests {
         }
     }
 
-    /// Checks that a reserve within the room that the block has keeps the block at its address
+    /// Checks that a reserve within the room that the block has leaves the capacity as it was,
+    /// meaning the block does not grow
     #[test]
-    fn reserve_with_room_available_keeps_block() {
+    fn reserve_with_room_available_keeps_capacity() {
         let mut components = ComponentVec::new(ComponentInfo::of::<u32>(ComponentMask::single(0)));
         components.push_typed(1_u32);
-        let start = components.data();
+        let capacity_before = components.capacity;
 
         components.reserve(3);
 
-        assert_eq!(components.data(), start, "pointer to the block");
+        assert_eq!(capacity_before, 4, "capacity before the reserve");
+        assert_eq!(components.capacity, 4, "capacity after the reserve");
     }
 
-    /// Checks that the pushes that a reserve makes room for fit in the block without moving it
+    /// Checks that the pushes that a reserve makes room for fit in the block without growing it
     #[test]
-    fn reserve_with_later_pushes_keeps_block_in_place() {
+    fn reserve_with_later_pushes_keeps_capacity() {
         let mut components = ComponentVec::new(ComponentInfo::of::<u32>(ComponentMask::single(0)));
         components.reserve(10);
-        let start = components.data();
+        let reserved_capacity = components.capacity;
 
         for value in 0..10_u32 {
             components.push_typed(value);
         }
 
+        assert_eq!(reserved_capacity, 10, "capacity after the reserve");
         assert_eq!(components.capacity, 10, "capacity after the pushes");
-        assert_eq!(components.data(), start, "pointer to the block");
     }
 
     /// Checks that heap memory owned by a component stays reachable after a reserve moves the block
@@ -1868,9 +2413,7 @@ mod tests {
             target.push_typed(String::from(name));
         }
 
-        // SAFETY: `move_component` requires an index below the length and a target of the same
-        // type. Index 0 is below the length of 3, and `target` uses the same `ComponentInfo`
-        unsafe { source.move_component(0, &mut target) };
+        source.move_component(0, &mut target);
 
         assert_eq!(source.as_slice::<String>(), ["Cy", "Bo"], "source");
         assert_eq!(
@@ -1896,13 +2439,8 @@ mod tests {
             });
         }
         source.swap_remove(2);
-        // SAFETY: `move_component` requires an index below the length and a target of the same
-        // type. Index 0 is below the length of 6, index 4 is below the length of 5, and `target`
-        // uses the same `ComponentInfo`
-        unsafe {
-            source.move_component(0, &mut target);
-            source.move_component(4, &mut target);
-        }
+        source.move_component(0, &mut target);
+        source.move_component(4, &mut target);
         target.reserve(10);
         let drops_before_vectors = drops.load(Ordering::Relaxed);
         let lengths = (source.len(), target.len());

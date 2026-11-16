@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: proposed
 date: 2026-10-18
 decision-makers: Kheagen Haskins
 ---
@@ -48,7 +48,7 @@ person can also refine a generated level.
 
 The format itself remains open. Three questions about it wait for later: whether it is text or
 binary, how it is serialised, and which library reads and writes it. Any library for it goes through
-the discussion that the Libraries section of the README sets out. The outcome of that discussion
+the discussion that the [Libraries](../repo-conventions.md#libraries) convention sets out. The outcome of that discussion
 gets an ADR of its own.
 
 ### Consequences
@@ -105,7 +105,8 @@ second loader reads a hand-built level from a file.
 A pre-made level is stored as a fixed set of settings and a seed. The game runs the generator on
 them whenever the level loads.
 
-- Good, because a pre-made level is stored as a few values. Every level also passes through the generator.
+- Good, because a pre-made level is stored as a few values. Every level also passes through the
+  generator.
 - Bad, because a person shapes a level only through the settings of the generator. A hill or a
   village placed by hand lies outside what the settings can express.
 - Bad, because any change to the generator changes every pre-made level built on it.

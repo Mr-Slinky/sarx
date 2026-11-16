@@ -1,0 +1,663 @@
+//! Defines the structs that serde parses the JSON chunk of a GLB file into.
+//!
+//! The structs model only the fields that the reader uses, and serde skips the rest. The JSON
+//! chunk of the hand model looks like the text below, with its long lists cut short.
+//!
+//! ```json
+//! {
+//!   "asset": { "generator": "Khronos glTF Blender I/O v5.0.21", "version": "2.0" },
+//!   "scene": 0,
+//!
+//!   "meshes": [
+//!     {
+//!       "name": "Hand  - Realistic",
+//!       "primitives": [
+//!         {
+//!           "attributes": {
+//!             "POSITION": 0,
+//!             "NORMAL": 1,
+//!             "TEXCOORD_0": 2,
+//!             "JOINTS_0": 3,
+//!             "WEIGHTS_0": 4
+//!           },
+//!           "indices": 5
+//!         }
+//!       ]
+//!     }
+//!   ],
+//!
+//!   "accessors": [
+//!     { "bufferView": 0, "componentType": 5126, "count": 3558, "type": "VEC3",
+//!       "min": [-0.780, -0.293, -3.998], "max": [1.356, 0.487, 0.012] },
+//!     { "bufferView": 1, "componentType": 5126, "count": 3558,  "type": "VEC3" },
+//!     { "bufferView": 2, "componentType": 5126, "count": 3558,  "type": "VEC2" },
+//!     { "bufferView": 3, "componentType": 5121, "count": 3558,  "type": "VEC4" },
+//!     { "bufferView": 4, "componentType": 5126, "count": 3558,  "type": "VEC4" },
+//!     { "bufferView": 5, "componentType": 5123, "count": 19788, "type": "SCALAR" }
+//!     // ... 109 more, used by the animations
+//!   ],
+//!
+//!   "bufferViews": [
+//!     { "buffer": 0, "byteOffset": 0,      "byteLength": 42696, "target": 34962 },
+//!     { "buffer": 0, "byteOffset": 42696,  "byteLength": 42696, "target": 34962 },
+//!     { "buffer": 0, "byteOffset": 85392,  "byteLength": 28464, "target": 34962 },
+//!     { "buffer": 0, "byteOffset": 113856, "byteLength": 14232, "target": 34962 },
+//!     { "buffer": 0, "byteOffset": 128088, "byteLength": 56928, "target": 34962 },
+//!     { "buffer": 0, "byteOffset": 185016, "byteLength": 39576, "target": 34963 }
+//!     // ... 109 more
+//!   ],
+//!
+//!   "buffers": [ { "byteLength": 227716 } ],
+//!
+//!   "nodes":      [ /* 24: the forearm, the finger bones, the mesh */ ],
+//!   "skins":      [ /* 1 */ ],
+//!   "animations": [ /* 8 */ ]
+//! }
+//! ```
+
+
+
+use serde::Deserialize;
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct Document {
+    // glTF lets a file leave out each of these lists, and serde then fills in an empty list
+    #[serde(default)]
+    pub(crate) meshes: Vec<Mesh>,
+    #[serde(default)]
+    pub(crate) accessors: Vec<Accessor>, // describes how to read each kind of data
+    #[serde(default)]
+    pub(crate) buffer_views: Vec<BufferView>,
+}
+
+#[derive(Deserialize)]
+pub(crate) struct Mesh {
+    pub(crate) primitives: Vec<Primitive>,
+}
+
+#[derive(Deserialize)]
+pub(crate) struct Primitive {
+    pub(crate) attributes: Attributes, // points to the accessor for each kind of vertex data
+    pub(crate) indices: Option<usize>, // points to the accessor for the triangle list
+}
+
+/// Points to the accessor that stores each kind of vertex data, under the attribute names that
+/// glTF uses
+#[derive(Deserialize)]
+pub(crate) struct Attributes {
+    #[serde(rename = "POSITION")]
+    pub(crate) position: usize, // points to the accessor for the vertex positions
+    #[serde(rename = "NORMAL")]
+    pub(crate) normal: Option<usize>, // points to the accessor for the vertex normals
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct Accessor {
+    pub(crate) buffer_view: Option<usize>, // points to the buffer view; absent where every element is zero
+    #[serde(default)]
+    pub(crate) byte_offset: usize,
+    pub(crate) component_type: u32, // defines the number type, as a code that the glTF specification sets
+    pub(crate) count: usize,
+    #[serde(rename = "type")]
+    pub(crate) kind: String, // defines the shape of each element, such as `VEC3` or `SCALAR`
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct BufferView {
+    #[serde(default)]
+    pub(crate) byte_offset: usize,
+    pub(crate) byte_length: usize,
+    pub(crate) byte_stride: Option<usize>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::glb::split_glb;
+    use crate::test_support::HAND_MODEL;
+
+    /// Returns the JSON chunk of the hand model
+    fn read_hand_json() -> &'static [u8] {
+        let glb = split_glb(HAND_MODEL).expect("the hand model is a valid GLB file");
+        glb.json
+    }
+
+    /// Returns the buffer view, byte offset, component type, count and kind of the accessor that
+    /// `json` describes, or `None` where `json` fails to parse
+    fn summarise_accessor(json: &str) -> Option<(Option<usize>, usize, u32, usize, String)> {
+        let accessor = serde_json::from_str::<Accessor>(json).ok()?;
+        Some((
+            accessor.buffer_view,
+            accessor.byte_offset,
+            accessor.component_type,
+            accessor.count,
+            accessor.kind,
+        ))
+    }
+
+    /// Returns the byte offset, byte length and byte stride of the buffer view that `json`
+    /// describes, or `None` where `json` fails to parse
+    fn summarise_buffer_view(json: &str) -> Option<(usize, usize, Option<usize>)> {
+        let view = serde_json::from_str::<BufferView>(json).ok()?;
+        Some((view.byte_offset, view.byte_length, view.byte_stride))
+    }
+
+    /// Returns the position and normal accessors that `json` points to, or `None` where `json`
+    /// fails to parse
+    fn summarise_attributes(json: &str) -> Option<(usize, Option<usize>)> {
+        let attributes = serde_json::from_str::<Attributes>(json).ok()?;
+        Some((attributes.position, attributes.normal))
+    }
+
+    /// Returns the position, normal and index accessors that `json` points to, or `None` where
+    /// `json` fails to parse
+    fn summarise_primitive(json: &str) -> Option<(usize, Option<usize>, Option<usize>)> {
+        let primitive = serde_json::from_str::<Primitive>(json).ok()?;
+        let attributes = primitive.attributes;
+        Some((attributes.position, attributes.normal, primitive.indices))
+    }
+
+    /// Returns the number of meshes, accessors and buffer views in the document that `json`
+    /// describes, or `None` where `json` fails to parse
+    fn summarise_document(json: &str) -> Option<(usize, usize, usize)> {
+        let document = serde_json::from_str::<Document>(json).ok()?;
+        Some((
+            document.meshes.len(),
+            document.accessors.len(),
+            document.buffer_views.len(),
+        ))
+    }
+
+    /// Checks that the hand model's document contains one mesh, whose primitive points to the
+    /// expected accessors, along with 115 accessors and 115 buffer views
+    #[test]
+    fn from_slice_with_hand_model_document_returns_mesh_and_lists() {
+        let json = read_hand_json();
+
+        let document = serde_json::from_slice::<Document>(json).expect("the hand model's JSON parses");
+
+        let primitive_counts: Vec<usize> = document.meshes.iter().map(|mesh| mesh.primitives.len()).collect();
+        let primitive = &document.meshes[0].primitives[0];
+        assert_eq!(primitive_counts, [1], "primitives in each mesh");
+        assert_eq!(primitive.attributes.position, 0, "position accessor");
+        assert_eq!(primitive.attributes.normal, Some(1), "normal accessor");
+        assert_eq!(primitive.indices, Some(5), "index accessor");
+        assert_eq!(document.accessors.len(), 115, "number of accessors");
+        assert_eq!(document.buffer_views.len(), 115, "number of buffer views");
+    }
+
+    /// Checks that the hand model's first six accessors keep their buffer view, offset, number
+    /// type, count and shape
+    #[test]
+    fn from_slice_with_hand_model_document_returns_mesh_accessors() {
+        let json = read_hand_json();
+        let expected = [
+            (Some(0), 0, 5126, 3558, "VEC3"),
+            (Some(1), 0, 5126, 3558, "VEC3"),
+            (Some(2), 0, 5126, 3558, "VEC2"),
+            (Some(3), 0, 5121, 3558, "VEC4"),
+            (Some(4), 0, 5126, 3558, "VEC4"),
+            (Some(5), 0, 5123, 19788, "SCALAR"),
+        ];
+
+        let document = serde_json::from_slice::<Document>(json).expect("the hand model's JSON parses");
+
+        for (index, expected) in expected.into_iter().enumerate() {
+            let accessor = &document.accessors[index];
+            let fields = (
+                accessor.buffer_view,
+                accessor.byte_offset,
+                accessor.component_type,
+                accessor.count,
+                accessor.kind.as_str(),
+            );
+            assert_eq!(fields, expected, "fields of accessor {index}");
+        }
+    }
+
+    /// Checks that the hand model's first six buffer views keep their byte offsets and byte
+    /// lengths, and have no stride
+    #[test]
+    fn from_slice_with_hand_model_document_returns_buffer_view_ranges() {
+        let json = read_hand_json();
+        let expected = [
+            (0, 42696),
+            (42696, 42696),
+            (85392, 28464),
+            (113856, 14232),
+            (128088, 56928),
+            (185016, 39576),
+        ];
+
+        let document = serde_json::from_slice::<Document>(json).expect("the hand model's JSON parses");
+
+        for (index, (expected_offset, expected_length)) in expected.into_iter().enumerate() {
+            let view = &document.buffer_views[index];
+            let fields = (view.byte_offset, view.byte_length, view.byte_stride);
+            assert_eq!(fields, (expected_offset, expected_length, None), "fields of buffer view {index}");
+        }
+    }
+
+    /// Checks that a document parses from standard and extreme JSON, ignoring the fields that it
+    /// does not model
+    #[test]
+    fn from_str_with_standard_and_extreme_document_returns_lists() {
+        let cases = [
+            (
+                "one of each",
+                r#"{
+                    "meshes": [{ "primitives": [{ "attributes": { "POSITION": 0, "NORMAL": 1 }, "indices": 2 }] }],
+                    "accessors": [{ "bufferView": 0, "componentType": 5126, "count": 3, "type": "VEC3" }],
+                    "bufferViews": [{ "buffer": 0, "byteLength": 36 }]
+                }"#,
+                (1, 1, 1),
+            ),
+            (
+                "empty lists",
+                r#"{ "meshes": [], "accessors": [], "bufferViews": [] }"#,
+                (0, 0, 0),
+            ),
+            (
+                "mesh with no primitives",
+                r#"{ "meshes": [{ "primitives": [] }], "accessors": [], "bufferViews": [] }"#,
+                (1, 0, 0),
+            ),
+            (
+                "unknown fields at the top level",
+                r#"{
+                    "asset": { "version": "2.0" }, "scene": 0, "scenes": [{ "nodes": [0] }],
+                    "nodes": [{ "mesh": 0 }], "skins": [], "animations": [], "buffers": [{ "byteLength": 0 }],
+                    "extensionsUsed": ["KHR_materials_unlit"],
+                    "meshes": [], "accessors": [], "bufferViews": []
+                }"#,
+                (0, 0, 0),
+            ),
+            (
+                "unknown fields in each mesh",
+                r#"{
+                    "meshes": [{ "name": "Hand", "weights": [0.5], "primitives": [] }],
+                    "accessors": [], "bufferViews": []
+                }"#,
+                (1, 0, 0),
+            ),
+            (
+                "space padding after the JSON, as a GLB chunk adds",
+                "{ \"meshes\": [], \"accessors\": [], \"bufferViews\": [] }   ",
+                (0, 0, 0),
+            ),
+            (
+                "snake case buffer views beside the camel case list",
+                r#"{ "meshes": [], "accessors": [], "bufferViews": [{ "byteLength": 0 }], "buffer_views": [{}, {}] }"#,
+                (0, 0, 1),
+            ),
+            (
+                "primitive missing indices",
+                r#"{ "meshes": [{ "primitives": [{ "attributes": { "POSITION": 0, "NORMAL": 1 } }] }],
+                     "accessors": [], "bufferViews": [] }"#,
+                (1, 0, 0),
+            ),
+        ];
+
+        for (name, json, expected) in cases {
+            let counts = summarise_document(json);
+
+            assert_eq!(counts, Some(expected), "meshes, accessors and buffer views for {name}");
+        }
+    }
+
+    /// Checks that a document missing a list parses with that list empty, since the glTF
+    /// specification makes `meshes`, `accessors` and `bufferViews` optional
+    #[test]
+    fn from_str_with_document_missing_lists_returns_empty_lists() {
+        let cases = [
+            ("no meshes", r#"{ "accessors": [], "bufferViews": [] }"#),
+            ("no accessors", r#"{ "meshes": [], "bufferViews": [] }"#),
+            ("no buffer views", r#"{ "meshes": [], "accessors": [] }"#),
+            ("asset alone", r#"{ "asset": { "version": "2.0" } }"#),
+        ];
+
+        for (name, json) in cases {
+            let counts = summarise_document(json);
+
+            assert_eq!(counts, Some((0, 0, 0)), "meshes, accessors and buffer views for {name}");
+        }
+    }
+
+    /// Checks that a document is rejected where a list that it models is null, or where a mesh or
+    /// accessor leaves out a field that it requires
+    #[test]
+    fn from_str_with_abnormal_document_returns_error() {
+        let cases = [
+            ("accessors as null", r#"{ "meshes": [], "accessors": null, "bufferViews": [] }"#),
+            ("mesh missing primitives", r#"{ "meshes": [{}], "accessors": [], "bufferViews": [] }"#),
+            (
+                "accessor missing count",
+                r#"{ "meshes": [], "accessors": [{ "bufferView": 0, "componentType": 5126, "type": "VEC3" }],
+                     "bufferViews": [] }"#,
+            ),
+        ];
+
+        for (name, json) in cases {
+            let result = serde_json::from_str::<Document>(json);
+
+            assert!(result.is_err(), "document for {name} should be rejected");
+        }
+    }
+
+    /// Checks that a primitive parses its attributes and index accessor, reading an absent or null
+    /// index accessor as `None` and ignoring the fields that it does not model
+    #[test]
+    fn from_str_with_standard_and_extreme_primitive_returns_accessors() {
+        let cases = [
+            (
+                "standard",
+                r#"{ "attributes": { "POSITION": 0, "NORMAL": 1 }, "indices": 5 }"#,
+                (0, Some(1), Some(5)),
+            ),
+            (
+                "unknown fields",
+                r#"{ "attributes": { "POSITION": 0, "NORMAL": 1 }, "indices": 5, "mode": 4, "material": 0, "targets": [] }"#,
+                (0, Some(1), Some(5)),
+            ),
+            (
+                "one accessor for every field",
+                r#"{ "attributes": { "POSITION": 0, "NORMAL": 0 }, "indices": 0 }"#,
+                (0, Some(0), Some(0)),
+            ),
+            (
+                "missing indices",
+                r#"{ "attributes": { "POSITION": 0, "NORMAL": 1 } }"#,
+                (0, Some(1), None),
+            ),
+            (
+                "null indices",
+                r#"{ "attributes": { "POSITION": 0, "NORMAL": 1 }, "indices": null }"#,
+                (0, Some(1), None),
+            ),
+            (
+                "attributes missing normal",
+                r#"{ "attributes": { "POSITION": 0 }, "indices": 5 }"#,
+                (0, None, Some(5)),
+            ),
+        ];
+
+        for (name, json, expected) in cases {
+            let accessors = summarise_primitive(json);
+
+            assert_eq!(accessors, Some(expected), "position, normal and index accessors for {name}");
+        }
+    }
+
+    /// Checks that a primitive is rejected where it leaves out its attributes, which it requires
+    #[test]
+    fn from_str_with_primitive_missing_attributes_returns_error() {
+        let json = r#"{ "indices": 5 }"#;
+
+        let accessors = summarise_primitive(json);
+
+        assert_eq!(accessors, None, "primitive without attributes should be rejected");
+    }
+
+    /// Checks that a primitive keeps the largest accessor index that a `usize` can store, in every
+    /// field
+    #[test]
+    fn from_str_with_largest_primitive_values_returns_accessors() {
+        let json = format!(
+            r#"{{ "attributes": {{ "POSITION": {max}, "NORMAL": {max} }}, "indices": {max} }}"#,
+            max = usize::MAX,
+        );
+        let expected = (usize::MAX, Some(usize::MAX), Some(usize::MAX));
+
+        let accessors = summarise_primitive(&json);
+
+        assert_eq!(accessors, Some(expected), "position, normal and index accessors with the largest values");
+    }
+
+    /// Checks that the attributes parse from the upper case glTF names, reading an absent or null
+    /// normal as `None` and ignoring every other attribute
+    #[test]
+    fn from_str_with_standard_and_extreme_attributes_returns_accessors() {
+        let cases = [
+            ("standard", r#"{ "POSITION": 0, "NORMAL": 1 }"#, (0, Some(1))),
+            (
+                "other attributes, as Blender exports",
+                r#"{ "POSITION": 0, "NORMAL": 1, "TEXCOORD_0": 2, "JOINTS_0": 3, "WEIGHTS_0": 4 }"#,
+                (0, Some(1)),
+            ),
+            ("fields in reverse order", r#"{ "NORMAL": 7, "POSITION": 6 }"#, (6, Some(7))),
+            ("one accessor for both", r#"{ "POSITION": 3, "NORMAL": 3 }"#, (3, Some(3))),
+            ("missing normal", r#"{ "POSITION": 0 }"#, (0, None)),
+            ("null normal", r#"{ "POSITION": 0, "NORMAL": null }"#, (0, None)),
+        ];
+
+        for (name, json, expected) in cases {
+            let accessors = summarise_attributes(json);
+
+            assert_eq!(accessors, Some(expected), "position and normal accessors for {name}");
+        }
+    }
+
+    /// Checks that the attributes are rejected where the position is missing, or where the names
+    /// are not in the upper case that glTF uses
+    #[test]
+    fn from_str_with_abnormal_attributes_returns_error() {
+        let cases = [
+            ("missing position", r#"{ "NORMAL": 1 }"#),
+            ("lower case names", r#"{ "position": 0, "normal": 1 }"#),
+        ];
+
+        for (name, json) in cases {
+            let accessors = summarise_attributes(json);
+
+            assert_eq!(accessors, None, "attributes for {name} should be rejected");
+        }
+    }
+
+    /// Checks that an accessor parses from the camel case glTF names, with an absent byte offset
+    /// read as 0, an absent or null buffer view read as `None` and unknown fields ignored
+    #[test]
+    fn from_str_with_standard_and_extreme_accessor_returns_fields() {
+        let cases = [
+            (
+                "standard",
+                r#"{ "bufferView": 1, "componentType": 5126, "count": 3558, "type": "VEC3" }"#,
+                (Some(1), 0, 5126, 3558, "VEC3"),
+            ),
+            (
+                "explicit byte offset",
+                r#"{ "bufferView": 1, "byteOffset": 24, "componentType": 5126, "count": 2, "type": "VEC3" }"#,
+                (Some(1), 24, 5126, 2, "VEC3"),
+            ),
+            (
+                "explicit zero byte offset",
+                r#"{ "bufferView": 0, "byteOffset": 0, "componentType": 5123, "count": 6, "type": "SCALAR" }"#,
+                (Some(0), 0, 5123, 6, "SCALAR"),
+            ),
+            (
+                "unknown fields",
+                r#"{ "bufferView": 0, "componentType": 5126, "count": 1, "type": "VEC3",
+                     "min": [-1.0, -1.0, -1.0], "max": [1.0, 1.0, 1.0], "normalized": false, "name": "positions" }"#,
+                (Some(0), 0, 5126, 1, "VEC3"),
+            ),
+            (
+                "zero count",
+                r#"{ "bufferView": 0, "componentType": 5125, "count": 0, "type": "SCALAR" }"#,
+                (Some(0), 0, 5125, 0, "SCALAR"),
+            ),
+            (
+                "kind outside the specification",
+                r#"{ "bufferView": 0, "componentType": 1, "count": 1, "type": "" }"#,
+                (Some(0), 0, 1, 1, ""),
+            ),
+            (
+                "missing buffer view",
+                r#"{ "componentType": 5126, "count": 1, "type": "VEC3" }"#,
+                (None, 0, 5126, 1, "VEC3"),
+            ),
+            (
+                "null buffer view",
+                r#"{ "bufferView": null, "componentType": 5126, "count": 1, "type": "VEC3" }"#,
+                (None, 0, 5126, 1, "VEC3"),
+            ),
+            (
+                "snake case buffer view, read as an unknown field",
+                r#"{ "buffer_view": 0, "componentType": 5126, "count": 1, "type": "VEC3" }"#,
+                (None, 0, 5126, 1, "VEC3"),
+            ),
+        ];
+
+        for (name, json, (view, offset, component, count, kind)) in cases {
+            let expected = (view, offset, component, count, kind.to_string());
+
+            let fields = summarise_accessor(json);
+
+            assert_eq!(fields, Some(expected), "fields of the accessor for {name}");
+        }
+    }
+
+    /// Checks that an accessor keeps the largest value that each number field can store
+    #[test]
+    fn from_str_with_largest_accessor_values_returns_fields() {
+        let json = format!(
+            r#"{{ "bufferView": {max}, "byteOffset": {max}, "componentType": {}, "count": {max}, "type": "MAT4" }}"#,
+            u32::MAX,
+            max = usize::MAX,
+        );
+        let expected = (Some(usize::MAX), usize::MAX, u32::MAX, usize::MAX, "MAT4".to_string());
+
+        let fields = summarise_accessor(&json);
+
+        assert_eq!(fields, Some(expected), "fields of the accessor with the largest values");
+    }
+
+    /// Checks that an accessor is rejected where a number is too large for its field
+    ///
+    /// serde_json reads a number past `u64::MAX` as a float, and therefore rejects the three
+    /// `usize` fields as not whole numbers rather than as too large. The component type is a
+    /// `u32`, and its case alone reaches a check of the range.
+    #[test]
+    fn from_str_with_accessor_number_too_large_for_field_returns_error() {
+        let past_usize = usize::MAX as u128 + 1;
+        let past_u32 = u64::from(u32::MAX) + 1;
+        let cases = [
+            (
+                "buffer view",
+                format!(r#"{{ "bufferView": {past_usize}, "componentType": 5126, "count": 1, "type": "VEC3" }}"#),
+            ),
+            (
+                "byte offset",
+                format!(r#"{{ "bufferView": 0, "byteOffset": {past_usize}, "componentType": 5126, "count": 1, "type": "VEC3" }}"#),
+            ),
+            (
+                "component type",
+                format!(r#"{{ "bufferView": 0, "componentType": {past_u32}, "count": 1, "type": "VEC3" }}"#),
+            ),
+            (
+                "count",
+                format!(r#"{{ "bufferView": 0, "componentType": 5126, "count": {past_usize}, "type": "VEC3" }}"#),
+            ),
+        ];
+
+        for (name, json) in cases {
+            let fields = summarise_accessor(&json);
+
+            assert_eq!(fields, None, "accessor with a number too large for the {name} field should be rejected");
+        }
+    }
+
+    /// Checks that an accessor is rejected where a required field is missing or misnamed, or where
+    /// its byte offset is null rather than absent
+    #[test]
+    fn from_str_with_abnormal_accessor_returns_error() {
+        let cases = [
+            ("missing component type", r#"{ "bufferView": 0, "count": 1, "type": "VEC3" }"#),
+            ("missing count", r#"{ "bufferView": 0, "componentType": 5126, "type": "VEC3" }"#),
+            ("missing type", r#"{ "bufferView": 0, "componentType": 5126, "count": 1 }"#),
+            (
+                "field named kind rather than type",
+                r#"{ "bufferView": 0, "componentType": 5126, "count": 1, "kind": "VEC3" }"#,
+            ),
+            (
+                "null byte offset",
+                r#"{ "bufferView": 0, "byteOffset": null, "componentType": 5126, "count": 1, "type": "VEC3" }"#,
+            ),
+        ];
+
+        for (name, json) in cases {
+            let fields = summarise_accessor(json);
+
+            assert_eq!(fields, None, "accessor for {name} should be rejected");
+        }
+    }
+
+    /// Checks that a buffer view reads an absent byte offset as 0 and an absent stride as `None`,
+    /// and keeps the values that the JSON gives
+    #[test]
+    fn from_str_with_standard_and_extreme_buffer_view_returns_fields() {
+        let cases = [
+            (
+                "offset and unknown fields",
+                r#"{ "buffer": 0, "byteOffset": 42696, "byteLength": 42696, "target": 34962 }"#,
+                (42696, 42696, None),
+            ),
+            ("byte length alone", r#"{ "byteLength": 36 }"#, (0, 36, None)),
+            ("explicit zero offset", r#"{ "byteOffset": 0, "byteLength": 36 }"#, (0, 36, None)),
+            (
+                "explicit stride",
+                r#"{ "byteOffset": 8, "byteLength": 64, "byteStride": 32 }"#,
+                (8, 64, Some(32)),
+            ),
+            ("stride with no offset", r#"{ "byteLength": 24, "byteStride": 12 }"#, (0, 24, Some(12))),
+            ("null stride", r#"{ "byteOffset": 4, "byteLength": 36, "byteStride": null }"#, (4, 36, None)),
+        ];
+
+        for (name, json, expected) in cases {
+            let fields = summarise_buffer_view(json);
+
+            assert_eq!(fields, Some(expected), "offset, length and stride of the buffer view for {name}");
+        }
+    }
+
+    /// Checks that a buffer view keeps the largest offset, length and stride that a `usize` can
+    /// store
+    #[test]
+    fn from_str_with_largest_buffer_view_values_returns_fields() {
+        let json = format!(
+            r#"{{ "byteOffset": {max}, "byteLength": {max}, "byteStride": {max} }}"#,
+            max = usize::MAX,
+        );
+        let expected = (usize::MAX, usize::MAX, Some(usize::MAX));
+
+        let fields = summarise_buffer_view(&json);
+
+        assert_eq!(fields, Some(expected), "offset, length and stride with the largest values");
+    }
+
+    /// Checks that a buffer view is rejected where its byte length is missing, where its offset is
+    /// null rather than absent, or where a number is too large for its field
+    #[test]
+    fn from_str_with_abnormal_buffer_view_returns_error() {
+        let past_usize = usize::MAX as u128 + 1;
+        let cases = [
+            ("missing byte length", r#"{ "byteOffset": 4 }"#.to_string()),
+            ("null offset", r#"{ "byteOffset": null, "byteLength": 36 }"#.to_string()),
+            (
+                "number too large for the offset field",
+                format!(r#"{{ "byteOffset": {past_usize}, "byteLength": 36 }}"#),
+            ),
+            (
+                "number too large for the stride field",
+                format!(r#"{{ "byteLength": 36, "byteStride": {past_usize} }}"#),
+            ),
+        ];
+
+        for (name, json) in cases {
+            let fields = summarise_buffer_view(&json);
+
+            assert_eq!(fields, None, "buffer view for {name} should be rejected");
+        }
+    }
+}

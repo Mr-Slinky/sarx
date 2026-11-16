@@ -1,117 +1,246 @@
-//! The shape that the renderer draws, stored as a list of vertices.
+//! The shape that the renderer draws, stored as a list of vertices and a list of indices.
 //!
-//! A vertex is one corner of a shape. The GPU draws the shape from its vertices, joining every
-//! three of them into a triangle.
+//! A vertex is one corner of a shape. An index is a position in the list of vertices. The GPU
+//! draws the shape by joining every three indices into a triangle, whose corners are the vertices
+//! that those indices pick out.
 
+use bytemuck::{Pod, Zeroable};
+use hermes::MeshData;
+use std::mem::offset_of;
 use wgpu::{BufferAddress, VertexAttribute, VertexBufferLayout, VertexFormat, VertexStepMode};
 
-/// The vertices of one shape, each stored as an x, y and z coordinate in clip space.
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+pub(crate) struct Vertex {
+    position: [f32; 3], // the corner's position, in the model's own space
+    normal: [f32; 3],   // the direction that the surface faces at this corner
+}
+
+/// The vertices and indices of one shape.
 ///
-/// Clip space is the coordinate system that the GPU draws in. Its x runs from -1 at the window's
-/// left edge to 1 at its right edge, and its y runs from -1 at the bottom edge to 1 at the top.
+/// Each vertex stores a position in the model's own space, and the normal, which is the direction
+/// that the surface faces at that corner.
 ///
-/// A caller copies the vertices into a vertex buffer, using the bytes that `to_bytes` returns.
+/// A caller copies the vertices into a vertex buffer, using the bytes that `cast_vertex_bytes`
+/// returns. It copies the indices into an index buffer in the same way, using `cast_index_bytes`.
 /// The pipeline then reads each vertex back through `LAYOUT`.
 ///
 /// # Examples
 ///
-/// The example copies a triangle into a vertex buffer, then draws every vertex in it.
+/// The example copies the hand's mesh into a vertex buffer and an index buffer, then draws every
+/// triangle in it.
 ///
 /// ```ignore
-/// // Copies the vertices into a vertex buffer, using the bytes that `to_bytes` returns
-/// let mesh = Mesh::build_triangle();
-/// let contents = mesh.to_bytes();
+/// // Copies the vertices into a vertex buffer, using the bytes that `cast_vertex_bytes` returns
+/// let mesh = Mesh::from_mesh_data(hand);
 /// let descriptor = BufferInitDescriptor {
 ///     label: Some("Mesh vertices"),
-///     contents: &contents,
+///     contents: mesh.cast_vertex_bytes(),
 ///     usage: BufferUsages::VERTEX,
 /// };
 /// let vertex_buffer = device.create_buffer_init(&descriptor);
 ///
-/// // Draws every vertex in the buffer, which the pipeline reads back through `LAYOUT`
+/// // Copies the indices into an index buffer, using the bytes that `cast_index_bytes` returns
+/// let descriptor = BufferInitDescriptor {
+///     label: Some("Mesh indices"),
+///     contents: mesh.cast_index_bytes(),
+///     usage: BufferUsages::INDEX,
+/// };
+/// let index_buffer = device.create_buffer_init(&descriptor);
+///
+/// // Draws every triangle, reading each vertex back through `LAYOUT`
 /// render_pass.set_vertex_buffer(0, vertex_buffer.slice(..));
-/// render_pass.draw(0..mesh.vertex_count(), 0..1);
+/// render_pass.set_index_buffer(index_buffer.slice(..), IndexFormat::Uint32);
+/// render_pass.draw_indexed(0..mesh.count_indices(), 0, 0..1);
 /// ```
 pub(crate) struct Mesh {
-    /// The x, y and z coordinates of each vertex, in drawing order.
-    vertices: Vec<[f32; 3]>,
+    vertices: Vec<Vertex>, // every corner, each stored once
+    indices: Vec<u32>,     // three entries for each triangle, each one an index into `vertices`
 }
 
 impl Mesh {
-    /// The layout that tells the pipeline how to read the bytes that `to_bytes` returns.
+    /// The layout that tells the pipeline how to read the bytes that `cast_vertex_bytes` returns.
     ///
-    /// Each vertex takes 12 bytes. The vertex shader receives them at location 0, as three `f32`
-    /// values.
+    /// Each vertex takes 24 bytes. The vertex shader receives the position at location 0 and the
+    /// normal at location 1, each as three `f32` values.
     pub(crate) const LAYOUT: VertexBufferLayout<'static> = VertexBufferLayout {
-        array_stride: size_of::<[f32; 3]>() as BufferAddress,
+        // Steps 24 bytes from one vertex to the next
+        array_stride: size_of::<Vertex>() as BufferAddress,
+        // Moves to the next vertex for each vertex that the draw reads
         step_mode: VertexStepMode::Vertex,
-        attributes: &[VertexAttribute {
-            format: VertexFormat::Float32x3,
-            offset: 0,
-            shader_location: 0,
-        }],
+        // Describes the two attributes inside each vertex
+        attributes: &[
+            // Hands the position to the shader at location 0
+            VertexAttribute {
+                format: VertexFormat::Float32x3,
+                offset: offset_of!(Vertex, position) as BufferAddress,
+                shader_location: 0,
+            },
+            // Hands the normal to the shader at location 1
+            VertexAttribute {
+                format: VertexFormat::Float32x3,
+                offset: offset_of!(Vertex, normal) as BufferAddress,
+                shader_location: 1,
+            },
+        ],
     };
 
-    /// Returns a flat triangle in the centre of the window.
-    ///
-    /// The triangle has three vertices, one for each corner. It is half as wide as the window, and
-    /// half as tall.
-    ///
-    /// # Examples
-    ///
-    /// The triangle has one vertex for each of its three corners.
-    ///
-    /// ```ignore
-    /// let triangle = Mesh::build_triangle();
-    /// assert_eq!(triangle.vertex_count(), 3); // one vertex for each corner
-    /// ```
-    pub(crate) fn build_triangle() -> Self {
+    pub(crate) fn from_mesh_data(data: MeshData) -> Self {
+        // Pairs each position with the normal at the same index, and builds one vertex from each pair
+        let vertices = data
+            .positions
+            .into_iter()
+            .zip(data.normals)
+            .map(|(position, normal)| Vertex { position, normal })
+            .collect();
+        // Keeps the triangle list as it is, moving it out of `data` rather than copying it
         Self {
-            vertices: vec![
-                [0.0, 0.5, 0.0],   // top corner
-                [-0.5, -0.5, 0.0], // bottom left corner
-                [0.5, -0.5, 0.0],  // bottom right corner
-            ],
+            vertices,
+            indices: data.indices,
         }
     }
 
-    /// Returns the number of vertices in the mesh.
-    ///
-    /// # Examples
-    ///
-    /// A triangle has three vertices.
-    ///
-    /// ```ignore
-    /// let triangle = Mesh::build_triangle();
-    /// assert_eq!(triangle.vertex_count(), 3);
-    /// ```
-    pub(crate) fn vertex_count(&self) -> u32 {
-        self.vertices.len() as u32
+    pub(crate) fn count_indices(&self) -> u32 {
+        self.indices.len() as u32
     }
 
-    /// Returns every coordinate of every vertex as bytes, in order.
-    ///
-    /// A caller copies these bytes into a vertex buffer. Each coordinate takes four bytes, in the
-    /// CPU's native byte order.
-    ///
-    /// # Examples
-    ///
-    /// The triangle comes to 36 bytes, starting with the x coordinate of its top corner.
-    ///
-    /// ```ignore
-    /// // Three vertices of three coordinates, at four bytes each
-    /// let bytes = Mesh::build_triangle().to_bytes();
-    /// assert_eq!(bytes.len(), 36);
-    ///
-    /// // The first four bytes are the x coordinate of the top corner
-    /// let top_x = 0.0_f32.to_ne_bytes();
-    /// assert_eq!(bytes[0..4], top_x);
-    /// ```
-    pub(crate) fn to_bytes(&self) -> Vec<u8> {
-        self.vertices
+    pub(crate) fn cast_vertex_bytes(&self) -> &[u8] {
+        bytemuck::cast_slice(&self.vertices)
+    }
+
+    pub(crate) fn cast_index_bytes(&self) -> &[u8] {
+        bytemuck::cast_slice(&self.indices)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Returns one triangle, whose positions and normals all differ, so that a value read from the
+    /// wrong place shows up
+    fn build_triangle() -> MeshData {
+        MeshData {
+            positions: vec![[1.0, 2.0, 3.0], [4.0, 5.0, 6.0], [7.0, 8.0, 9.0]],
+            normals: vec![[0.0, 1.0, 0.0], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]],
+            indices: vec![0, 1, 2],
+        }
+    }
+
+    /// Returns an empty mesh, with no positions, normals or indices
+    fn build_empty() -> MeshData {
+        MeshData {
+            positions: Vec::new(),
+            normals: Vec::new(),
+            indices: Vec::new(),
+        }
+    }
+
+    /// Checks that the layout matches the `VertexInput` struct of `lit.wgsl`: a 24-byte stride,
+    /// with the position at offset 0 and location 0, and the normal at offset 12 and location 1
+    #[test]
+    fn layout_with_position_and_normal_matches_lit_shader() {
+        let layout = Mesh::LAYOUT;
+
+        let attributes = layout.attributes;
+
+        assert_eq!(layout.array_stride, 24, "stride");
+        assert!(
+            matches!(layout.step_mode, VertexStepMode::Vertex),
+            "step mode"
+        );
+        assert_eq!(attributes.len(), 2, "count of attributes");
+        assert_eq!(attributes[0].offset, 0, "offset of the position");
+        assert_eq!(attributes[0].shader_location, 0, "location of the position");
+        assert_eq!(
+            attributes[0].format,
+            VertexFormat::Float32x3,
+            "format of the position"
+        );
+        assert_eq!(attributes[1].offset, 12, "offset of the normal");
+        assert_eq!(attributes[1].shader_location, 1, "location of the normal");
+        assert_eq!(
+            attributes[1].format,
+            VertexFormat::Float32x3,
+            "format of the normal"
+        );
+    }
+
+    /// Checks that one triangle gives three vertices of 24 bytes each, and three indices
+    #[test]
+    fn from_mesh_data_with_triangle_returns_three_vertices_and_indices() {
+        let data = build_triangle();
+
+        let mesh = Mesh::from_mesh_data(data);
+
+        assert_eq!(mesh.cast_vertex_bytes().len(), 72, "bytes of vertices");
+        assert_eq!(mesh.count_indices(), 3, "count of indices");
+    }
+
+    /// Checks that an empty mesh gives no vertex bytes and no indices
+    #[test]
+    fn from_mesh_data_with_empty_data_returns_empty_mesh() {
+        let data = build_empty();
+
+        let mesh = Mesh::from_mesh_data(data);
+
+        assert!(mesh.cast_vertex_bytes().is_empty(), "bytes of vertices");
+        assert!(mesh.cast_index_bytes().is_empty(), "bytes of indices");
+        assert_eq!(mesh.count_indices(), 0, "count of indices");
+    }
+
+    /// Checks that each vertex stores its position in its first 12 bytes and its normal in the 12
+    /// after, as `LAYOUT` describes
+    #[test]
+    fn cast_vertex_bytes_with_triangle_returns_position_then_normal() {
+        let mesh = Mesh::from_mesh_data(build_triangle());
+
+        let bytes = mesh.cast_vertex_bytes();
+
+        let first_position: [f32; 3] = bytemuck::pod_read_unaligned(&bytes[0..12]);
+        let first_normal: [f32; 3] = bytemuck::pod_read_unaligned(&bytes[12..24]);
+        let second_position: [f32; 3] = bytemuck::pod_read_unaligned(&bytes[24..36]);
+        assert_eq!(first_position, [1.0, 2.0, 3.0], "first position");
+        assert_eq!(first_normal, [0.0, 1.0, 0.0], "first normal");
+        assert_eq!(second_position, [4.0, 5.0, 6.0], "second position");
+    }
+
+    /// Checks that the index bytes hold each index as four bytes, in order
+    #[test]
+    fn cast_index_bytes_with_triangle_returns_each_index_in_order() {
+        let mesh = Mesh::from_mesh_data(build_triangle());
+
+        let bytes = mesh.cast_index_bytes();
+
+        let (chunks, _) = bytes.as_chunks::<4>();
+        let indices: Vec<u32> = chunks
             .iter()
-            .flatten()
-            .flat_map(|coordinate| coordinate.to_ne_bytes())
-            .collect()
+            .map(|chunk| u32::from_ne_bytes(*chunk))
+            .collect();
+        assert_eq!(bytes.len(), 12, "bytes of indices");
+        assert_eq!(indices, [0, 1, 2], "indices read back");
+    }
+
+    /// Checks that the count of indices matches the length of the index list, whatever its length
+    #[test]
+    fn count_indices_with_index_lists_returns_length() {
+        let cases = [
+            ("no indices", Vec::new()),
+            ("one triangle", vec![0, 1, 2]),
+            ("two triangles", vec![0, 1, 2, 2, 1, 0]),
+        ];
+
+        for (name, indices) in cases {
+            let expected = indices.len() as u32;
+            let data = MeshData {
+                indices,
+                ..build_triangle()
+            };
+            let mesh = Mesh::from_mesh_data(data);
+
+            let count = mesh.count_indices();
+
+            assert_eq!(count, expected, "count of indices for {name}");
+        }
     }
 }

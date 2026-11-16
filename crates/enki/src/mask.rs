@@ -1,16 +1,21 @@
 //! Defines the mask that records a set of component types, with one bit for each type.
 //!
 //! A world gives each component type a position, from 0 upwards, the first time that it meets the
-//! type. For each type in its set, a [`ComponentMask`] sets the bit at that position. A table
-//! stores a mask for the component types that it stores, and a query builds a mask for the types
-//! that it asks for. The table then compares the two masks to answer whether it stores every type in the
-//! query. The comparison does not visit any column.
+//! type. For each type in its set, a [`ComponentMask`] sets the bit at that position. Each table
+//! keeps a mask for its types, and `World::find_query_mask` builds a mask for the types that a
+//! query asks for. The table then compares the two masks to answer whether it stores every type in
+//! the query, without visiting any column.
 //!
 //! A mask has room for [`ComponentMask::CAPACITY`] component types. That number is also the limit
-//! on the component types in one world. This module defines every operation on the bits. As a
-//! result, a change to the limit changes this module alone.
+//! on the component types in one world. Every operation on the bits is defined below. A change to
+//! the limit therefore changes this file, along with the doctest on `World::MAX_COMPONENT_TYPES`
+//! and the world tests, which state the number 64.
+//!
+//! The example on [`ComponentMask`] builds a mask for two types, then checks which types it
+//! contains.
 
 use std::fmt;
+use std::iter;
 use std::ops::{BitOr, BitOrAssign};
 
 // ========================================================================================== \\
@@ -24,6 +29,10 @@ use std::ops::{BitOr, BitOrAssign};
 ///
 /// A test can also build a mask for several types in one call, with `from_positions`. That method
 /// exists in test builds alone.
+///
+/// The type is `pub` because the public trait `ComponentSet` uses it in the signature of
+/// `push_into`. The `mask` module is private, so code outside the crate still cannot write a path
+/// to the type.
 ///
 /// # Examples
 ///
@@ -40,16 +49,28 @@ use std::ops::{BitOr, BitOrAssign};
 /// assert!(!table.contains_all(ComponentMask::single(1)));
 /// ```
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
-pub(crate) struct ComponentMask(u64);
+pub struct ComponentMask(u64);
 
 impl ComponentMask {
     /// Defines the number of component types that a mask has room for.
+    ///
+    /// # Examples
+    ///
+    /// A mask has room for 64 component types, one for each bit of a `u64`. The test
+    /// `capacity_with_u64_mask_returns_64` checks the value.
     pub(crate) const CAPACITY: usize = u64::BITS as usize;
 
     /// Defines the mask for the set with no component types.
+    ///
+    /// # Examples
+    ///
+    /// `ComponentMask::EMPTY | ComponentMask::single(3)` equals `ComponentMask::single(3)`. The
+    /// test `default_with_no_data_returns_empty` checks that the default mask equals `EMPTY`.
     pub(crate) const EMPTY: Self = Self(0);
 
     /// Returns the mask with one set bit, at `position`.
+    ///
+    /// The example on [`ComponentMask`] builds the masks for two types with this method.
     ///
     /// # Panics
     ///
@@ -63,12 +84,19 @@ impl ComponentMask {
         Self(1 << position)
     }
 
-    /// Returns the mask with a set bit at each entry of `positions`, for tests to build a mask in one
-    /// line.
+    /// Returns the mask with a set bit at each entry of `positions`, for tests to build a mask in
+    /// one line.
     ///
     /// # Panics
     ///
     /// Panics where an entry is not below [`CAPACITY`](Self::CAPACITY).
+    ///
+    /// # Examples
+    ///
+    /// `ComponentMask::from_positions(&[0, 3])` equals `ComponentMask::single(0) |
+    /// ComponentMask::single(3)`. The test
+    /// `from_positions_with_standard_and_extreme_positions_returns_combined_mask` checks more
+    /// positions.
     #[cfg(test)]
     pub(crate) fn from_positions(positions: &[usize]) -> Self {
         positions
@@ -87,7 +115,7 @@ impl ComponentMask {
 
     /// Returns `true` where `self` and `other` share at least one component type, and `false` where
     /// they share none.
-    pub(crate) fn intersects(self, other: Self) -> bool {
+    pub(crate) fn contains_any(self, other: Self) -> bool {
         self.0 & other.0 != 0
     }
 
@@ -98,6 +126,27 @@ impl ComponentMask {
     pub(crate) fn without(mut self, other: Self) -> Self {
         self.0 &= !other.0;
         self
+    }
+
+    /// Returns an iterator over the position of each set bit, lowest first.
+    ///
+    /// # Examples
+    ///
+    /// For the mask with bits 0 and 3 set, the iterator yields 0, then 3, then stops. For
+    /// [`EMPTY`](Self::EMPTY), it yields nothing.
+    pub(crate) fn read_positions(self) -> impl Iterator<Item = usize> {
+        let mut bits = self.0;
+        iter::from_fn(move || {
+            if bits == 0 {
+                return None;
+            }
+            // Counts the zeros below the lowest set bit, which is that bit's position
+            let position = bits.trailing_zeros() as usize;
+            // Clears the lowest set bit. Subtracting 1 turns that bit off and every zero below it
+            // on, and `&` with the original then keeps every bit above it
+            bits &= bits - 1;
+            Some(position)
+        })
     }
 }
 
@@ -302,9 +351,9 @@ mod tests {
         }
     }
 
-    /// Checks that `intersects` returns `true` only where the two masks share a type
+    /// Checks that `contains_any` returns `true` only where the two masks share a type
     #[test]
-    fn intersects_with_standard_and_extreme_masks_returns_expected() {
+    fn contains_any_with_standard_and_extreme_masks_returns_expected() {
         let table = ComponentMask::from_positions(&[0, 2, 63]);
 
         let cases = [
@@ -333,9 +382,9 @@ mod tests {
         ];
 
         for (name, mask, other, expected) in cases {
-            let result = mask.intersects(other);
+            let result = mask.contains_any(other);
 
-            assert_eq!(result, expected, "intersects for {name}");
+            assert_eq!(result, expected, "contains_any for {name}");
         }
     }
 
@@ -476,5 +525,38 @@ mod tests {
         let text = format!("{mask:#b}");
 
         assert_eq!(text, "0b101", "prefixed binary text");
+    }
+
+    /// Checks that `read_positions` yields each set bit once, lowest first, whatever order the bits
+    /// were set in, from no bits up to all 64
+    #[test]
+    fn read_positions_with_standard_and_extreme_masks_yields_set_bits_lowest_first() {
+        let every_position: Vec<usize> = (0..ComponentMask::CAPACITY).collect();
+
+        // Pairs each mask with the positions that it should yield, in order
+        let cases = [
+            ("empty", ComponentMask::EMPTY, vec![]),
+            ("bit 0 alone", ComponentMask::single(0), vec![0]),
+            ("bit 63 alone", ComponentMask::single(63), vec![63]),
+            (
+                "bits set out of order",
+                ComponentMask::from_positions(&[40, 3, 63, 0, 17]),
+                vec![0, 3, 17, 40, 63],
+            ),
+            (
+                "all 64 bits",
+                ComponentMask::from_positions(&every_position),
+                every_position.clone(),
+            ),
+        ];
+
+        let found = cases.map(|(name, mask, expected)| {
+            let positions: Vec<usize> = mask.read_positions().collect();
+            (name, positions, expected)
+        });
+
+        for (name, positions, expected) in found {
+            assert_eq!(positions, expected, "positions for {name}");
+        }
     }
 }

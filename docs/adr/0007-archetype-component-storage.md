@@ -8,7 +8,7 @@ decision-makers: Kheagen Haskins
 
 ## Context and Problem Statement
 
-ADR 0009 settles that the developer writes the ECS by hand, in the `enki` crate. That record
+ADR 0005 settles that the developer writes the ECS by hand, in the `enki` crate. That record
 leaves one question open: how the ECS stores its components. This record settles it.
 
 The layout of the components in memory decides how fast the systems run. The reason lies in how the
@@ -32,7 +32,7 @@ and the physics engine are two of them. Each of these systems reads several comp
 entity together. The physics engine, for example, reads a position, a velocity, a mass and a
 collider.
 
-Entities also gain and lose components while the game runs. The central AI, which ADR 0006 sets
+Entities also gain and lose components while the game runs. The central AI, which ADR 0016 sets
 out, gives a villager a task and later takes it away. A villager becomes hungry, then eats.
 
 How does the ECS lay out its components in memory?
@@ -41,8 +41,7 @@ How does the ECS lay out its components in memory?
 
 - The systems that run on every step read several components of each entity together. They should
   read memory in order.
-- Entities gain and lose components while the game runs. The central AI assigning a task is one
-  example.
+- Entities gain and lose components while the game runs, as when the central AI assigns a task.
 - Some systems work on a whole column at once. Such a system uses slice operations, or SIMD
   instructions, which process several values in one CPU instruction.
 - The ECS is structure that other code builds on. Its first version follows the design that Sarx
@@ -83,8 +82,8 @@ A system that moves hungry villagers towards food walks the second table alone. 
 `Position` and `Hungry` columns in order.
 
 Sparse sets, a second way to store components, remain open as a later extension. The developer
-would add them for one component type at a time. They would add them only where a measurement shows that
-moving entities between tables has become the slow part of a step.
+would add them for one component type at a time, and only where a measurement shows that moving
+entities between tables has become the slow part of a step.
 
 ### Queries per Table
 
@@ -176,7 +175,7 @@ EnTT, a widely used C++ ECS, appears to store its components this way.
   looks the entity up in the other store. Removals shuffle each store in a different order. After
   that, those lookups land at scattered addresses.
 - Bad, because the fix for those lookups has a limit. EnTT calls the fix a group, and a group keeps a
-  chosen set of stores in the same order. As far as the author knows, a component type belongs to
+  chosen set of stores in the same order. As far as the developer knows, a component type belongs to
   one group at most. As a result, only the queries chosen ahead of time read in order.
 
 ### Archetypes, with Sparse-Set Storage as an Option for Each Component Type

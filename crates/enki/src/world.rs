@@ -3,12 +3,14 @@
 //! An entity is one thing in the game, such as a villager or a tree. A component is one piece of
 //! data that an entity has, such as its position. An entity has no data apart from its components.
 //!
+//! The example on [`World`] follows one entity from its spawn to its despawn.
+//!
 //! # Tables
 //!
-//! The world stores its entities in tables, as ADR 0011 sets out. Each table is an [`Archetype`].
+//! The world stores its entities in tables, as ADR 0007 sets out. Each table is an [`Archetype`].
 //! A table stores every entity that has one exact set of component types, with one column for each
-//! type. Every entity with a `Position` and a `Health`, for example, lives in the same table. Every
-//! entity with a `Position`, a `Health` and a `Velocity` lives in another table.
+//! type. The world stores every entity with a `Position` and a `Health`, for example, in the same
+//! table. It stores every entity with a `Position`, a `Health` and a `Velocity` in another table.
 //!
 //! A new entity has no components. It therefore starts in the empty table, which has no columns.
 //! The empty table always takes position [`World::EMPTY`] in the list of tables.
@@ -19,25 +21,25 @@
 //!
 //! # Masks
 //!
-//! The world gives each component type a bit, the first time that it meets the type. The first type
-//! takes bit 0, the second takes bit 1, and the order continues up to the last bit. A mask is a
+//! The world gives each component type a bit, the first time that it meets the type, and records
+//! the bit in its [`ComponentRegistry`], which sets out the order of the bits. A mask is a
 //! [`ComponentMask`] that combines the bits of a set of types. A world has room for as many
 //! component types as a mask has bits, which [`ComponentMask::CAPACITY`] defines.
 //!
-//! Each table has a mask, which combines the bits of its types. The world keeps a map from each mask
-//! to its table. It finds the table for a set of types by building the mask of that set, then
+//! Each table has a mask, which combines the bits of its types. The world keeps a map from each
+//! mask to its table. It finds the table for a set of types by building the mask of that set, then
 //! looking the mask up in the map.
 //!
 //! # Slots and versions
 //!
-//! An [`Entity`] is a handle, which stores an index and a version. The index selects one slot in the
-//! world. A slot records where the entity is stored, as a table and a row in that table.
+//! An [`Entity`] is a handle, which stores an index and a version. The index selects one slot in
+//! the world. A slot records where the entity is stored, as a table and a row in that table.
 //!
-//! The world reuses the slot of a despawned entity for a later entity. Before then, it raises the
-//! version in that slot by one. A handle to the despawned entity then keeps its old version, which
-//! differs from the version in the slot. The world compares the two versions on every call, and
-//! treats a handle with a different version as one that does not refer to any entity. As a result,
-//! an old handle never reaches the later entity that reuses its slot.
+//! The world reuses the slot of a despawned entity for a later entity. Before then, its allocator,
+//! `Entities`, raises the version in that slot by one. A handle to the despawned entity then keeps
+//! its old version, which differs from the version in the slot. The world compares the two versions
+//! on every call, and treats a handle with a different version as one that does not refer to any
+//! entity. As a result, an old handle never reaches the later entity that reuses its slot.
 //!
 //! A slot serves at most `u32::MAX` entities over the life of the world. Once a despawn raises the
 //! version in a slot to `u32::MAX`, the world retires the slot. The world never reuses that slot,
@@ -50,9 +52,9 @@
 //! # Rows after a move
 //!
 //! A table keeps its rows packed, with no gaps between them. When an entity leaves a row, the last
-//! entity in the table moves into that row. Each move therefore changes the location of up to two
-//! entities. One is the entity that left. The other is the entity that filled its row, unless the
-//! entity left the last row. The world updates the slot of each.
+//! entity in the table moves into that row. Each move therefore changes the location of the entity
+//! that left, and also of the entity that filled its row, unless the row was the last. The world
+//! updates the slot of each.
 //!
 //! Every method that moves an entity MUST update both slots. If a method leaves a slot pointing
 //! at the wrong row, a later call would read or change the components of a different entity. A row
@@ -60,10 +62,14 @@
 
 use crate::archetype::Archetype;
 use crate::component::{Component, ComponentInfo, ComponentVec};
+use crate::entity::Entities;
 use crate::mask::ComponentMask;
-use crate::{Bundle, Entity, Query, query};
+use crate::query::Permission;
+use crate::registry::ComponentRegistry;
+use crate::{ComponentSet, Entity, Query, ReadOnlyQuery, query};
 use std::any::TypeId;
 use std::collections::HashMap;
+use std::fmt;
 
 // ========================================================================================== \\
 //                                         Public API                                         \\
@@ -71,30 +77,35 @@ use std::collections::HashMap;
 
 /// Stores every entity and every component in one game.
 ///
-/// A caller creates an entity with [`spawn_empty_ent`](Self::spawn_empty_ent), which returns an
+/// A caller creates an entity with [`spawn_empty`](Self::spawn_empty), which returns an
 /// [`Entity`] handle. The caller then passes that handle to the other methods, to give the entity
 /// components, to read and change them, to remove them, and finally to despawn the entity.
 ///
 /// # Examples
 ///
 /// The example creates a player with a position and health, and takes 10 health from it. It then
-/// removes the position, and despawns the player with its health still in place.
+/// removes the position, which comes back as a value, and despawns the player with its health still
+/// in place.
 ///
 /// ```
-/// use enki::{Component, World};
+/// use enki::World;
+/// # use enki::Component;
 ///
+/// #[derive(Debug)]
 /// struct Position(f32, f32);
+/// #[derive(Debug)]
 /// struct Health(u32);
-///
-/// impl Component for Position {}
-/// impl Component for Health {}
+/// # impl Component for Position {}
+/// # impl Component for Health {}
 ///
 /// // Creates an empty world, and a player with no components
 /// let mut world = World::new();
-/// let player = world.spawn_empty_ent();
+/// let player = world.spawn_empty();
 ///
 /// // Gives the player a position and health in one call
-/// world.add_components(player, (Position(0.0, 0.0), Health(100)));
+/// world
+///     .add_components(player, (Position(0.0, 0.0), Health(100)))
+///     .expect("the player should be alive");
 ///
 /// // Takes 10 health from the player, then reads the health back
 /// if let Some(health) = world.get_mut::<Health>(player) {
@@ -103,34 +114,78 @@ use std::collections::HashMap;
 /// let health = world.get::<Health>(player).map(|health| health.0);
 /// assert_eq!(health, Some(90));
 ///
-/// // Removes the player's position, which leaves its health in place
-/// world.remove::<Position>(player);
+/// // Removes the player's position and reads the value that comes back, which leaves its health in
+/// // place
+/// let removed = world
+///     .remove_component::<Position>(player)
+///     .map(|position| (position.0, position.1));
+/// assert_eq!(removed, Some((0.0, 0.0)));
 /// assert!(world.get::<Position>(player).is_none());
 ///
 /// // Despawns the player, which drops its health along with it
-/// world.despawn_ent(player);
+/// world.despawn(player);
 ///
-/// // Checks that the old handle now reaches no entity
+/// // Checks that the old handle does not reach an entity any more
 /// assert!(world.get::<Health>(player).is_none());
 /// ```
 pub struct World {
     /// Stores every table. Entry [`World::EMPTY`] is the table for entities with no components.
+    ///
+    /// The world never removes a table. Each table therefore keeps its position in this list for
+    /// the life of the world, and `indices` can store that position.
+    ///
+    /// For example, a world whose only entity has a `Position` stores two tables. Entry 0 is the
+    /// empty table, and entry 1 is the table for `{Position}`.
     archetypes: Vec<Archetype>,
     /// Maps the mask of each table to its position in `archetypes`.
+    ///
+    /// For example, a new world maps [`ComponentMask::EMPTY`] to [`World::EMPTY`].
     indices: HashMap<ComponentMask, usize>,
-    /// Maps each component type to its bit.
-    component_bits: HashMap<TypeId, ComponentMask>,
-    /// Stores one slot for each entity index, at that index.
-    slots: Vec<Slot>,
-    /// Stores the index of each slot that `spawn_empty_ent` can reuse.
-    free_slots: Vec<u32>,
+    /// Stores, for each bit position, the position in `archetypes` of every table that stores the
+    /// component type with that bit.
+    ///
+    /// Each list grows in the order that the world creates tables, which keeps it sorted. For
+    /// example, a world with tables for `{Position}` and `{Position, Health}`, with `Position` at
+    /// bit 0, stores `[1, 2]` at entry 0.
+    tables_by_type: Vec<Vec<usize>>,
+    /// Gives each component type its bit.
+    ///
+    /// For example, a world that met `Position` first gives `Position` the mask with bit 0 set.
+    registry: ComponentRegistry,
+    /// Hands out entity handles, and records where each living entity is stored.
+    ///
+    /// For example, once a caller despawns the entity at index 2, the next spawn reuses index 2.
+    entities: Entities,
 }
 
 impl World {
     /// Defines the position in `archetypes` of the table for entities that have no components.
+    ///
+    /// For example, `self.archetypes[Self::EMPTY]` returns the table where
+    /// [`spawn_empty`](Self::spawn_empty) places each new entity.
     const EMPTY: usize = 0;
 
+    /// Defines how many component types one world has room for.
+    ///
+    /// The world gives each component type a bit, the first time that it meets the type. Once every
+    /// bit is taken, a call that brings in one more type panics.
+    ///
+    /// # Examples
+    ///
+    /// The example reads the limit.
+    ///
+    /// ```
+    /// use enki::World;
+    ///
+    /// // Reads the number of component types that a world has room for
+    /// assert_eq!(World::MAX_COMPONENT_TYPES, 64);
+    /// ```
+    pub const MAX_COMPONENT_TYPES: usize = ComponentMask::CAPACITY;
+
     /// Returns a world with no entities and no component types.
+    ///
+    /// The example on [`World`] shows a call.
+    #[must_use]
     pub fn new() -> Self {
         // Starts the list of tables with one table, which has no columns
         let archetypes = vec![Archetype::new(&[])];
@@ -142,115 +197,84 @@ impl World {
         Self {
             archetypes,
             indices: archetype_indices,
-            component_bits: HashMap::new(),
-            slots: Vec::new(),
-            free_slots: Vec::new(),
+            tables_by_type: vec![Vec::new(); ComponentMask::CAPACITY],
+            registry: ComponentRegistry::new(),
+            entities: Entities::new(),
         }
     }
 
     /// Creates an entity with no components, and returns its handle.
     ///
-    /// The handle reaches the entity until [`despawn_ent`](Self::despawn_ent) removes it. From then
+    /// The handle reaches the entity until [`despawn`](Self::despawn) removes it. From then
     /// on, every method treats the handle as one that does not refer to any entity, even once a
     /// later entity takes the same index.
+    ///
+    /// The example on [`World`] shows a call.
     ///
     /// # Panics
     ///
     /// Panics where every one of the 2^32 entity indices is taken, with none free for reuse.
-    pub fn spawn_empty_ent(&mut self) -> Entity {
+    pub fn spawn_empty(&mut self) -> Entity {
         // Places the new entity in the empty table, at the row just past its last entity
         let row = self.archetypes[Self::EMPTY].len();
         let location = Location::new(Self::EMPTY, row);
-
-        // Takes a freed slot where one exists, and adds a new slot otherwise
-        let entity = match self.free_slots.pop() {
-            Some(index) => {
-                // Borrows the freed slot, to change it in place
-                let slot = &mut self.slots[index as usize];
-                // Points the slot at the new entity's row
-                slot.location = location;
-                // Returns a handle at the slot's version, which `despawn_ent` already raised
-                Entity::new(index, slot.version)
-            }
-            None => {
-                // Takes the next index, which equals the number of slots, and panics past `u32::MAX`
-                let index = u32::try_from(self.slots.len()).expect(
-                    "the number of slots should fit in a `u32`, the type of an entity index",
-                );
-                // Adds the new slot at version 0, pointing at the new entity's row
-                self.slots.push(Slot {
-                    version: 0,
-                    location,
-                });
-                // Returns a handle for the new slot, at version 0
-                Entity::new(index, 0)
-            }
-        };
-
-        // Adds the entity to the end of the empty table, at the row that `location` records
-        // SAFETY: `push_entity` requires one new component in every column. This table has no
-        // columns, meaning there is nothing to push
-        unsafe { self.archetypes[Self::EMPTY].push_entity(entity) };
-        // Returns the handle to the caller
+        // Takes a handle, from a freed slot where one exists, with the slot pointing at that row
+        let entity = self.entities.alloc(location);
+        // Adds the entity to the end of the empty table, at the row that `location` records. The
+        // table has no columns, meaning the closure is empty
+        self.archetypes[Self::EMPTY].push_entity(entity, |_, _| {});
         entity
     }
 
     /// Removes `entity` from the world, and drops its components.
     ///
-    /// Returns `true` where `entity` was alive. Returns `false` where the handle does not refer to a
-    /// living entity, such as one already despawned. The world is then left unchanged.
+    /// Returns `true` where `entity` was alive. Returns `false` where the handle does not refer to
+    /// a living entity, such as one already despawned. The world is then left unchanged.
+    ///
+    /// The example on [`World`] shows a call. The example on [`Entity`] shows a second call with a
+    /// copy of the same handle, which returns `false`.
     ///
     /// # Aborts
     ///
     /// The program aborts where a component of the entity panics in its `Drop` implementation.
     /// The panic message prints first. The panic would otherwise leave the columns in the entity's
     /// table with different lengths.
-    pub fn despawn_ent(&mut self, entity: Entity) -> bool {
+    pub fn despawn(&mut self, entity: Entity) -> bool {
         // Finds where the entity is stored, and returns `false` where it does not exist
         let Some(location) = self.locate(entity) else {
             return false;
         };
 
-        // Borrows the entity's table, to change it in place
         let archetype_table = &mut self.archetypes[location.arch_index()];
         // Deletes the entity's row, which moves the table's last entity into that row
         let filled_opt = archetype_table.remove_entity(location.row());
         // Records the new row of the entity that moved, where one did
-        if let Some(filled) = filled_opt {
-            self.slots[filled.index()].location.set_row(location.row());
-        }
+        self.record_filled_row(filled_opt, location.row());
 
-        let index = entity.index();
-        // Borrows the entity's slot, to change it in place
-        let slot = &mut self.slots[index];
-        // Raises the version, which makes `locate` refuse every copy of the dead handle
-        slot.version += 1;
-        // Frees the slot for `spawn_empty_ent` to reuse, unless its version has reached `u32::MAX`
-        if slot.version != u32::MAX {
-            self.free_slots.push(index as u32);
-        }
-        // Reports that the entity existed
+        // Raises the slot's version, which makes `locate` refuse every copy of the dead handle
+        self.entities.free(entity);
         true
     }
 
     /// Makes room for at least `additional` more entities that have exactly the component types in
-    /// the bundle type `B`.
+    /// the component set `S`.
     ///
-    /// The world finds or creates the table for the types in `B`. It then makes room in every
+    /// The world finds or creates the table for the types in `S`. It then makes room in every
     /// column of that table, and in its entity list. It also makes room in the list of slots, for
     /// each of the `additional` entities that a freed slot will not take.
     ///
     /// The table and the list of slots then keep their blocks of memory while the caller spawns
-    /// the next `additional` entities and gives each one a `B`. The empty table, where each new
+    /// the next `additional` entities and gives each one an `S`. The empty table, where each new
     /// entity starts, grows as usual.
     ///
-    /// The world gives a bit to each type in `B` that it has not met before. It keeps the table
+    /// The world gives a bit to each type in `S` that it has not met before. It keeps the table
     /// from then on, as it keeps every other table.
     ///
     /// # Panics
     ///
-    /// Panics where `B` lists the same component type twice. Also panics where `B` brings in more
-    /// component types than the world has room for, which [`ComponentMask::CAPACITY`] defines.
+    /// Panics where `S` lists the same component type twice. Also panics where `S` brings in more
+    /// component types than the world has room for, which
+    /// [`MAX_COMPONENT_TYPES`](Self::MAX_COMPONENT_TYPES) defines.
     ///
     /// Also panics where the required capacity overflows a `usize`, or where a larger block would
     /// exceed `isize::MAX` bytes. The program aborts where the allocator cannot supply the block.
@@ -260,13 +284,15 @@ impl World {
     /// The example makes room for 100 entities with a position and health, then creates them.
     ///
     /// ```
-    /// use enki::{Component, World};
+    /// use enki::World;
+    /// # use enki::Component;
     ///
+    /// #[derive(Debug)]
     /// struct Position(f32, f32);
+    /// #[derive(Debug)]
     /// struct Health(u32);
-    ///
-    /// impl Component for Position {}
-    /// impl Component for Health {}
+    /// # impl Component for Position {}
+    /// # impl Component for Health {}
     ///
     /// let mut world = World::new();
     ///
@@ -275,94 +301,90 @@ impl World {
     ///
     /// // Creates the 100 entities, which the reserved table takes without growing
     /// for _ in 0..100 {
-    ///     let entity = world.spawn_empty_ent();
-    ///     world.add_components(entity, (Position(0.0, 0.0), Health(100)));
+    ///     let entity = world.spawn_empty();
+    ///     world
+    ///         .add_components(entity, (Position(0.0, 0.0), Health(100)))
+    ///         .expect("the entity should be alive");
     /// }
     /// ```
-    pub fn reserve<B: Bundle>(&mut self, additional: usize) {
-        // Describes each type in the bundle, giving a bit to each type that the world has not met
-        let infos = B::infos(self);
+    pub fn reserve<S: ComponentSet>(&mut self, additional: usize) {
+        // Describes each type in the component set, giving a bit to each type that the world has
+        // not met
+        let infos = S::infos(&mut self.registry);
         let arch_index = self.find_or_create_archetype(Self::EMPTY, &infos);
         self.archetypes[arch_index].reserve(additional);
 
-        let new_slots = additional.saturating_sub(self.free_slots.len());
-        self.slots.reserve(new_slots);
+        self.entities.reserve(additional);
     }
 
-    /// Gives `ent` every component in the bundle `components`, in one call.
+    /// Gives `entity` every component in `components`, a component set, in one call.
     ///
-    /// For each component in the bundle, the entity either gains it or has its existing component
-    /// of that type replaced. The world drops each replaced component. The entity keeps every
-    /// component that the bundle does not replace. The entity moves to another table at most once,
-    /// whatever the number of components in the bundle.
+    /// For each component in `components`, the entity either gains it or has its existing
+    /// component of that type replaced, and the world drops each replaced component. The entity
+    /// keeps every other component, and moves to another table at most once per call.
     ///
-    /// Each component type in the bundle must implement [`Component`].
+    /// Each component type in `components` must implement [`Component`].
     ///
-    /// Returns `true` where the entity now has every component in the bundle. Returns `false` where
-    /// the handle does not refer to a living entity. The world is then left unchanged, and the bundle
-    /// is dropped.
+    /// Returns `Ok(())` where the entity now has every component in `components`. Returns
+    /// `Err(components)` where the handle does not refer to a living entity. The world is then left
+    /// unchanged, and the caller owns `components` again.
     ///
     /// # Panics
     ///
-    /// Panics where the bundle lists the same component type twice. Also panics where the bundle
-    /// brings in more component types than the world has room for, which
-    /// [`ComponentMask::CAPACITY`] defines. Also panics where the `Drop` implementation of a
-    /// replaced component panics.
+    /// Panics where `components` lists the same component type twice, or brings in more component
+    /// types than the world has room for, which [`MAX_COMPONENT_TYPES`](Self::MAX_COMPONENT_TYPES)
+    /// defines. Also panics where the `Drop` implementation of a replaced component panics. The
+    /// world drops the replaced components last, once every entity is where the world records it. A
+    /// caller that catches the panic can therefore go on using the world.
     ///
-    /// # Examples
-    ///
-    /// The example gives a player a position and a velocity in one call.
-    ///
-    /// ```
-    /// use enki::{Component, World};
-    ///
-    /// struct Position(f32, f32);
-    /// struct Velocity(f32, f32);
-    ///
-    /// impl Component for Position {}
-    /// impl Component for Velocity {}
-    ///
-    /// let mut world = World::new();
-    /// let player = world.spawn_empty_ent();
-    ///
-    /// // Gives the player both components, which moves it to the table for `{Position, Velocity}`
-    /// world.add_components(player, (Position(0.0, 0.0), Velocity(1.0, 0.0)));
-    ///
-    /// // Reads the velocity back
-    /// let speed = world.get::<Velocity>(player).map(|velocity| velocity.0);
-    /// assert_eq!(speed, Some(1.0));
-    /// ```
-    pub fn add_components<B: Bundle>(&mut self, ent: Entity, components: B) -> bool {
-        // Finds where the entity is stored, and returns `false` where it does not exist
-        let Some(location) = self.locate(ent) else {
-            return false;
+    /// The [crate example](crate#examples) gives a villager three components with one call.
+    pub fn add_components<S: ComponentSet>(
+        &mut self,
+        entity: Entity,
+        components: S,
+    ) -> Result<(), S> {
+        // Finds where the entity is stored, and hands the component set back where it does not
+        // exist
+        let Some(location) = self.locate(entity) else {
+            return Err(components);
         };
 
-        // Describes each type in the bundle, giving a bit to each type that the world has not met
-        let infos = B::infos(self);
-        // Finds or creates the table for the entity's types plus the bundle's types
+        // Describes each type in the component set, giving a bit to each type that the world has
+        // not met
+        let infos = S::infos(&mut self.registry);
+        // Finds or creates the table for the entity's types plus the component set's types
         let target_index = self.find_or_create_archetype(location.arch_index(), &infos);
 
-        // Replaces the entity's components in place, where it already has every type in the bundle
+        // Records the types that the entity has now, which `push_into` replaces rather than pushes
+        let existing = self.archetypes[location.arch_index()].mask();
+
+        // Replaces the entity's components in place, where it already has every type in the
+        // component set
         if target_index == location.arch_index() {
-            // Replaces the component at the entity's row in the column for each bundle type
-            components.push_into(&mut self.archetypes[target_index], location.row());
-            return true;
+            let table = &mut self.archetypes[target_index];
+            let replaced = components.push_into(table, location.row(), existing);
+            drop(replaced);
+            return Ok(());
         }
 
-        // Records the entity's row in the target, which is the target's current number of rows
-        let row = self.archetypes[target_index].len();
-        // Moves the entity and every component that it has to the end of the target
-        // SAFETY: `move_entity` requires the entity's current location, and a push onto each new
-        // column in the target. `locate` returned this location. The target's new columns are those
-        // for the bundle types that the entity lacked, and the line below pushes onto each of them.
-        // That line also replaces the component in each column for a bundle type that the entity already had,
-        // which leaves that column's length unchanged
-        let target_table = unsafe { self.move_entity(ent, location, target_index) };
-        // Pushes the bundle's new components, and replaces the ones that the entity already had
-        components.push_into(target_table, row);
-        // Reports that the entity now has every component in the bundle
-        true
+        // Moves the entity to the end of the target, pushing the component set's new components and
+        // replacing the ones that the entity already had. The closure hands the replaced
+        // components out, since dropping them inside the move would run their `Drop` before the
+        // slots record the move
+        let mut replaced = None;
+        // Passes `swap_remove` as `take`, which never runs, since the target has every column that
+        // the source table has
+        self.move_entity(
+            entity,
+            location,
+            target_index,
+            ComponentVec::swap_remove,
+            |table, row| {
+                replaced = Some(components.push_into(table, row, existing));
+            },
+        );
+        drop(replaced);
+        Ok(())
     }
 
     /// Gives `entity` the component `component`, of type `T`.
@@ -372,90 +394,72 @@ impl World {
     ///
     /// `T` must implement [`Component`], which sets out the bounds that every component type meets.
     ///
-    /// Returns `true` where the entity now has `component`. Returns `false` where the handle does not
-    /// refer to a living entity. The world is then left unchanged, and `component` is dropped.
+    /// Returns `Ok(())` where the entity now has `component`. Returns `Err(component)` where the
+    /// handle does not refer to a living entity. The world is then left unchanged, and the caller
+    /// owns `component` again.
+    ///
+    /// The example on [`Component`] shows a call.
     ///
     /// # Panics
     ///
-    /// Panics where the world has not met `T` before, and already has [`ComponentMask::CAPACITY`]
-    /// component types. Also panics where the `Drop` implementation of a replaced `T` panics.
-    pub fn add_component<T: Component>(&mut self, entity: Entity, component: T) -> bool {
-        // Finds where the entity is stored, and returns `false` where it does not exist
-        let Some(location) = self.locate(entity) else {
-            return false;
-        };
-        // Finds the identity of `T`, which a table uses to look up its columns
-        let type_id = TypeId::of::<T>();
-
-        // Replaces the old `T` in place, where the entity's table already has a `T` column
-        if let Some(components) = self.archetypes[location.arch_index()].components_of_mut(type_id)
-        {
-            // Overwrites the entity's `T`, which drops the old one
-            components.as_mut_slice::<T>()[location.row()] = component;
-            // Reports success, since the entity stays in its table with its new `T`
-            return true;
-        }
-
-        // Finds or creates the table for the entity's types plus `T`
-        let target_index = self.find_or_create_archetype_with::<T>(location.arch_index());
-        // Moves the entity and every component that it has to the end of the target
-        // SAFETY: `move_entity` requires the entity's current location, and a push onto each new
-        // column in the target. `locate` returned this location, and the lines below push onto the
-        // `T` column, which is the only new column
-        let target_table = unsafe { self.move_entity(entity, location, target_index) };
-        // Finds the target's `T` column, which the source table lacked
-        let target_column = target_table.components_of_mut(type_id).expect(
-            "the target archetype should store `T`, since it was found or created with `T`",
-        );
-        // Pushes the new component, which fills the entity's row in that column
-        target_column.push_typed(component);
-        // Reports that the entity now has the new `T`
-        true
+    /// Panics where the world has not met `T` before, and already has
+    /// [`MAX_COMPONENT_TYPES`](Self::MAX_COMPONENT_TYPES) component types. Also panics where the
+    /// `Drop` implementation of a replaced `T` panics.
+    pub fn add_component<T: Component>(&mut self, entity: Entity, component: T) -> Result<(), T> {
+        // Adds the component as a component set of one, which replaces an existing `T` in place,
+        // then unwraps the component set that comes back for a dead entity
+        self.add_components(entity, (component,))
+            .map_err(|(component,)| component)
     }
 
-    /// Removes the component of type `T` from `entity`, and drops it. The entity keeps every other
-    /// component.
+    /// Removes the component of type `T` from `entity`, and returns it. The entity keeps every
+    /// other component.
     ///
-    /// Returns `true` where the entity had a `T`. Returns `false` where it had no `T`, or where the
-    /// handle does not refer to a living entity. The world is then left unchanged.
+    /// `T` must implement [`Component`], which sets out the bounds that every component type meets.
     ///
-    /// # Aborts
+    /// Returns `Some` with the removed `T` where the entity had one. Returns `None` where it had no
+    /// `T`, or where the handle does not refer to a living entity. The world is then left
+    /// unchanged.
     ///
-    /// The program aborts where the `Drop` implementation of the `T` panics. The panic message prints
-    /// first. The panic would otherwise leave columns of different lengths in the entity's old and
-    /// new tables.
-    pub fn remove<T: 'static>(&mut self, entity: Entity) -> bool {
-        // Finds where the entity is stored, and returns `false` where it does not exist
-        let Some(location) = self.locate(entity) else {
-            return false;
-        };
+    /// The caller owns the returned `T`. A call that ignores the result drops the `T` at the end of
+    /// the statement, after the world has recorded the move. A panic in that `Drop` therefore
+    /// leaves the world usable.
+    ///
+    /// The example on [`World`] removes a component and reads the value that comes back.
+    pub fn remove_component<T: Component>(&mut self, entity: Entity) -> Option<T> {
+        // Finds where the entity is stored, and returns `None` where it does not exist
+        let location = self.locate(entity)?;
         // Finds the identity of `T`, which a table uses to look up its columns
         let type_id = TypeId::of::<T>();
-        // Returns `false` where the entity's table has no `T` column, since there is nothing to drop
-        if self.archetypes[location.arch_index()]
-            .components_of(type_id)
-            .is_none()
-        {
-            return false;
-        }
+        // Returns `None` where the entity's table has no `T` column, since there is nothing to take
+        self.archetypes[location.arch_index()].components_of(type_id)?;
 
         // Finds or creates the table for the entity's types minus `T`
         let target = self.find_or_create_archetype_without(location.arch_index(), type_id);
-        // Moves the entity's other components to the target, and drops its `T`
-        // SAFETY: `move_entity` requires the entity's current location, and a push onto each new
-        // column in the target. `locate` returned this location, and the target's columns are the
-        // source table's columns minus `T`, meaning the target has no new columns
-        unsafe { self.move_entity(entity, location, target) };
-        // Reports that the entity had a `T`
-        true
+        // Moves the entity's other components to the target, and takes its `T` out of the `T`
+        // column. The target has no new columns, meaning the closure for `fill` is empty
+        let mut removed = None;
+        self.move_entity(
+            entity,
+            location,
+            target,
+            |components, row| removed = Some(components.swap_remove_typed::<T>(row)),
+            |_, _| {},
+        );
+        removed
     }
 
     /// Returns the component of type `T` that `entity` has. Returns `None` where the entity has no
     /// `T`, or where the handle does not refer to a living entity.
     ///
-    /// The returned reference borrows the world, meaning the compiler rejects any change to the world
-    /// while the reference is in use.
-    pub fn get<T: 'static>(&self, entity: Entity) -> Option<&T> {
+    /// `T` must implement [`Component`], which sets out the bounds that every component type meets.
+    ///
+    /// The returned reference borrows the world, meaning the compiler rejects any change to the
+    /// world while the reference is in use.
+    ///
+    /// The example on [`World`] shows a call.
+    #[must_use]
+    pub fn get<T: Component>(&self, entity: Entity) -> Option<&T> {
         // Finds where the entity is stored, and returns `None` where it does not exist
         let location = self.locate(entity)?;
         // Finds the `T` column in the entity's table, and returns `None` where the table has none
@@ -464,12 +468,17 @@ impl World {
         components.as_slice::<T>().get(location.row())
     }
 
-    /// Returns the component of type `T` that `entity` has, for the caller to change. Returns `None`
-    /// where the entity has no `T`, or where the handle does not refer to a living entity.
+    /// Returns the component of type `T` that `entity` has, for the caller to change. Returns
+    /// `None` where the entity has no `T`, or where the handle does not refer to a living entity.
+    ///
+    /// `T` must implement [`Component`], which sets out the bounds that every component type meets.
     ///
     /// The returned reference borrows the world exclusively, meaning the compiler rejects any other
     /// use of the world while the reference is in use.
-    pub fn get_mut<T: 'static>(&mut self, entity: Entity) -> Option<&mut T> {
+    ///
+    /// The example on [`World`] shows a call.
+    #[must_use]
+    pub fn get_mut<T: Component>(&mut self, entity: Entity) -> Option<&mut T> {
         // Finds where the entity is stored, and returns `None` where it does not exist
         let location = self.locate(entity)?;
         // Finds the `T` column in the entity's table, and returns `None` where the table has none
@@ -479,46 +488,23 @@ impl World {
         components.as_mut_slice::<T>().get_mut(location.row())
     }
 
-    /// Returns the bit for the type that `type_id` identifies. Gives the type the next free bit where
-    /// it has none yet.
-    ///
-    /// # Panics
-    ///
-    /// Panics where the type has no bit yet, and the world already has [`ComponentMask::CAPACITY`]
-    /// component types.
-    pub(crate) fn find_or_assign_bit(&mut self, type_id: TypeId) -> ComponentMask {
-        // Counts the bits handed out so far, which is also the position of the next free bit
-        let next_position = self.component_bits.len();
-        // Returns the type's bit, first giving it the next free bit where it has none yet
-        *self.component_bits.entry(type_id).or_insert_with(|| {
-            // Panics where every bit is taken, since a mask has no bit left for another type
-            let capacity = ComponentMask::CAPACITY;
-            assert!(
-                next_position < capacity,
-                "a world has at most {capacity} component types"
-            );
-            // Builds a mask with one set bit, at the next free position
-            ComponentMask::single(next_position)
-        })
-    }
-
     /// Returns an iterator with one item for each table that stores every component type in the
     /// query `Q`. The item contains the columns that `Q` asks for from that table.
     ///
     /// Each item contains whole columns, such as a `&mut [Position]`, rather than one entity. A
-    /// caller that works on a column at a time uses this method. A caller that works on one entity
-    /// at a time uses [`query_mut`](Self::query_mut) instead. Every table that the iterator visits
-    /// has at least one entity.
+    /// caller that works on a column at a time uses this method, and one that works on one entity
+    /// at a time uses [`query_mut`](Self::query_mut). The iterator skips every table that has no
+    /// entities, and is empty where `Q` asks for a type that the world has not met.
     ///
     /// The iterator borrows the world exclusively, meaning the compiler rejects any other use of
-    /// the world while the iterator or a column is in use. The method takes `&mut self` even for a
-    /// query that only reads, since it can give a bit to a type that the world has not met before.
+    /// the world while the iterator or a column is in use. A caller whose query only reads uses
+    /// [`query_archetype`](Self::query_archetype), which borrows the world through a shared
+    /// reference.
     ///
     /// # Panics
     ///
     /// Panics where `Q` changes a component type that it also asks for elsewhere, as in
-    /// `(&mut Position, &Position)`. Also panics where `Q` brings in more component types than the
-    /// world has room for, which [`ComponentMask::CAPACITY`] defines.
+    /// `(&mut Position, &Position)`.
     ///
     /// # Examples
     ///
@@ -526,20 +512,24 @@ impl World {
     /// at a time.
     ///
     /// ```
-    /// use enki::{Component, World};
+    /// use enki::World;
+    /// # use enki::Component;
     ///
+    /// #[derive(Debug)]
     /// struct Position(f32, f32);
+    /// #[derive(Debug)]
     /// struct Velocity(f32, f32);
-    ///
-    /// impl Component for Position {}
-    /// impl Component for Velocity {}
+    /// # impl Component for Position {}
+    /// # impl Component for Velocity {}
     ///
     /// let mut world = World::new();
-    /// let player = world.spawn_empty_ent();
-    /// world.add_components(player, (Position(0.0, 0.0), Velocity(1.0, 2.0)));
+    /// let player = world.spawn_empty();
+    /// world
+    ///     .add_components(player, (Position(0.0, 0.0), Velocity(1.0, 2.0)))
+    ///     .expect("the player should be alive");
     ///
     /// // Moves each position by its velocity, working through the columns of each table
-    /// for (positions, velocities) in world.query_tables_mut::<(&mut Position, &Velocity)>() {
+    /// for (positions, velocities) in world.query_archetype_mut::<(&mut Position, &Velocity)>() {
     ///     for (position, velocity) in positions.iter_mut().zip(velocities) {
     ///         position.0 += velocity.0;
     ///         position.1 += velocity.1;
@@ -549,22 +539,27 @@ impl World {
     /// let moved = world.get::<Position>(player).map(|position| (position.0, position.1));
     /// assert_eq!(moved, Some((1.0, 2.0)));
     /// ```
-    pub fn query_tables_mut<Q: Query>(&mut self) -> impl Iterator<Item = Q::Columns<'_>> {
+    pub fn query_archetype_mut<Q: Query>(&mut self) -> impl Iterator<Item = Q::Columns<'_>> {
         // Panics where `Q` changes a component type that it also asks for elsewhere
-        query::check_access::<Q>();
-        let query_mask = self.find_query_mask::<Q>();
-        self.archetypes
-            .iter()
-            .filter(move |archetype| archetype.len() > 0 && archetype.has_all(query_mask))
+        let permissions = query::check_permissions::<Q>();
+        let query_mask = self.find_query_mask(&permissions);
+        // Visits each table that has entities and stores every type in the query
+        self.find_matching_archetypes(query_mask)
+            // SAFETY: `find_columns` requires three guarantees, which hold as follows:
+            // 1. `&mut self` keeps every other reference off the world while the iterator lives.
+            // 2. `check_permissions` passed above.
+            // 3. The iterator visits each table once, meaning it builds one slice of each column,
+            //    and no other slice of a column that `Q` changes exists
             .filter_map(|archetype| unsafe { Q::find_columns(archetype) })
     }
 
     /// Returns an iterator with one item for each entity that has every component type in the
     /// query `Q`.
     ///
-    /// The item for a query `&T` is a `&T`, and for `&mut T` it is a `&mut T`. For a pair, the
-    /// item is a pair that contains the item for each part. The iterator visits the entities one
-    /// table at a time, and in row order within each table.
+    /// The item for a query `&T` is a `&T`, and for `&mut T` it is a `&mut T`. For a tuple, the
+    /// item is a tuple that contains the item for each field. The iterator visits the entities one
+    /// table at a time, and in row order within each table. The iterator is empty where `Q` asks
+    /// for a type that the world has not met.
     ///
     /// The iterator borrows the world exclusively, meaning the compiler rejects any other use of
     /// the world while the iterator or an item is in use.
@@ -572,8 +567,7 @@ impl World {
     /// # Panics
     ///
     /// Panics where `Q` changes a component type that it also asks for elsewhere, as in
-    /// `(&mut Position, &Position)`. Also panics where `Q` brings in more component types than the
-    /// world has room for, which [`ComponentMask::CAPACITY`] defines.
+    /// `(&mut Position, &Position)`.
     ///
     /// # Examples
     ///
@@ -581,19 +575,23 @@ impl World {
     /// with a position alone stays where it is.
     ///
     /// ```
-    /// use enki::{Component, World};
+    /// use enki::World;
+    /// # use enki::Component;
     ///
+    /// #[derive(Debug)]
     /// struct Position(f32, f32);
+    /// #[derive(Debug)]
     /// struct Velocity(f32, f32);
-    ///
-    /// impl Component for Position {}
-    /// impl Component for Velocity {}
+    /// # impl Component for Position {}
+    /// # impl Component for Velocity {}
     ///
     /// let mut world = World::new();
-    /// let player = world.spawn_empty_ent();
-    /// world.add_components(player, (Position(0.0, 0.0), Velocity(1.0, 2.0)));
-    /// let tree = world.spawn_empty_ent();
-    /// world.add_component(tree, Position(5.0, 5.0));
+    /// let player = world.spawn_empty();
+    /// world
+    ///     .add_components(player, (Position(0.0, 0.0), Velocity(1.0, 2.0)))
+    ///     .expect("the player should be alive");
+    /// let tree = world.spawn_empty();
+    /// world.add_component(tree, Position(5.0, 5.0)).expect("the tree should be alive");
     ///
     /// // Moves each entity that has both components by its velocity
     /// for (position, velocity) in world.query_mut::<(&mut Position, &Velocity)>() {
@@ -609,33 +607,185 @@ impl World {
     /// assert_eq!(tree_position, Some((5.0, 5.0)));
     /// ```
     pub fn query_mut<Q: Query>(&mut self) -> impl Iterator<Item = Q::Item<'_>> {
-        self.query_tables_mut::<Q>().flat_map(Q::split_rows)
+        self.query_archetype_mut::<Q>().flat_map(Q::split_rows)
+    }
+
+    /// Returns an iterator with one item for each table that stores every component type in the
+    /// query `Q`. The item contains the columns that `Q` asks for from that table.
+    ///
+    /// Each item contains whole columns, such as a `&[Position]`. A caller that works on one entity
+    /// at a time uses [`query`](Self::query) instead. Every table that the iterator visits has at
+    /// least one entity. The iterator is empty where `Q` asks for a type that the world has not
+    /// met.
+    ///
+    /// The compiler accepts `Q` only where it implements [`ReadOnlyQuery`], as `&Position` and
+    /// `(&Position, &Velocity)` do. A caller passes a query that changes a component, such as
+    /// `&mut Position`, to [`query_archetype_mut`](Self::query_archetype_mut) instead.
+    ///
+    /// The iterator borrows the world through a shared reference. As a result, the compiler rejects
+    /// any change to the world while the iterator or a column is in use, and accepts other reads.
+    ///
+    /// # Examples
+    ///
+    /// The example adds up the first coordinate of every position, one table at a time. The world
+    /// stores the player and the tree in different tables, since the player also has a velocity.
+    ///
+    /// ```
+    /// use enki::World;
+    /// # use enki::Component;
+    ///
+    /// #[derive(Debug)]
+    /// struct Position(f32, f32);
+    /// #[derive(Debug)]
+    /// struct Velocity(f32, f32);
+    /// # impl Component for Position {}
+    /// # impl Component for Velocity {}
+    ///
+    /// let mut world = World::new();
+    /// let player = world.spawn_empty();
+    /// world
+    ///     .add_components(player, (Position(1.0, 0.0), Velocity(1.0, 2.0)))
+    ///     .expect("the player should be alive");
+    /// let tree = world.spawn_empty();
+    /// world.add_component(tree, Position(5.0, 5.0)).expect("the tree should be alive");
+    ///
+    /// // Adds up the first coordinate of every position, one table at a time
+    /// let mut total = 0.0;
+    /// for positions in world.query_archetype::<&Position>() {
+    ///     total += positions.iter().map(|position| position.0).sum::<f32>();
+    /// }
+    ///
+    /// assert_eq!(total, 6.0);
+    /// ```
+    pub fn query_archetype<Q: ReadOnlyQuery>(&self) -> impl Iterator<Item = Q::Columns<'_>> {
+        // Checks that `Q` does not change a component type that it also asks for elsewhere, as
+        // `find_columns` requires
+        let permissions = query::check_permissions::<Q>();
+        let query_mask = self.find_query_mask(&permissions);
+        self.find_matching_archetypes(query_mask)
+            // SAFETY: `find_columns` requires three guarantees, which hold as follows:
+            // 1. `Q` builds only shared slices, and `&self` stops any change to the world while the
+            //    iterator lives.
+            // 2. `check_permissions` passed above.
+            // 3. `Q` does not borrow any column mutably, meaning the guarantee holds whatever other
+            //    shared slices exist
+            .filter_map(|archetype| unsafe { Q::find_columns(archetype) })
+    }
+
+    /// Returns an iterator with one item for each entity that has every component type in the
+    /// query `Q`.
+    ///
+    /// The item for a query `&T` is a `&T`. For a tuple, the item is a tuple that contains the item
+    /// for each field. The iterator visits the entities one table at a time, and in row order
+    /// within each table.
+    ///
+    /// The compiler accepts `Q` only where it implements [`ReadOnlyQuery`], as `&Position` and
+    /// `(&Position, &Velocity)` do. A caller passes a query that changes a component, such as
+    /// `&mut Position`, to [`query_mut`](Self::query_mut) instead.
+    ///
+    /// The iterator borrows the world through a shared reference. As a result, the compiler rejects
+    /// any change to the world while the iterator or an item is in use, and accepts other reads.
+    ///
+    /// # Examples
+    ///
+    /// The example reads every entity that has a position and a velocity, and works out where each
+    /// one would move to. The query skips the tree, which has a position alone.
+    ///
+    /// ```
+    /// use enki::World;
+    /// # use enki::Component;
+    ///
+    /// #[derive(Debug)]
+    /// struct Position(f32, f32);
+    /// #[derive(Debug)]
+    /// struct Velocity(f32, f32);
+    /// # impl Component for Position {}
+    /// # impl Component for Velocity {}
+    ///
+    /// let mut world = World::new();
+    /// let player = world.spawn_empty();
+    /// world
+    ///     .add_components(player, (Position(1.0, 0.0), Velocity(1.0, 2.0)))
+    ///     .expect("the player should be alive");
+    /// let tree = world.spawn_empty();
+    /// world.add_component(tree, Position(5.0, 5.0)).expect("the tree should be alive");
+    ///
+    /// // Works out where each entity that has both components would move to
+    /// let targets: Vec<(f32, f32)> = world
+    ///     .query::<(&Position, &Velocity)>()
+    ///     .map(|(position, velocity)| (position.0 + velocity.0, position.1 + velocity.1))
+    ///     .collect();
+    ///
+    /// assert_eq!(targets, vec![(2.0, 2.0)]);
+    /// ```
+    pub fn query<Q: ReadOnlyQuery>(&self) -> impl Iterator<Item = Q::Item<'_>> {
+        // Splits each table's columns into one item for each entity
+        self.query_archetype::<Q>().flat_map(Q::split_rows)
     }
 
     // ========================================================================================== \\
     //                                       Helper Methods                                       \\
     // ========================================================================================== \\
 
-    /// Returns the mask with one set bit for each component type that the query `Q` asks for.
+    /// Returns the mask with one set bit for each component type in `permissions`, the list that
+    /// [`check_permissions`](query::check_permissions) returns for a query.
     ///
-    /// Gives a bit to each of those types that the world has not met before.
+    /// Returns `None` where one of those types has no bit yet. A table stores a type only once the
+    /// world has given that type a bit. As a result, `None` means that no table matches the query.
     ///
-    /// # Panics
+    /// # Examples
     ///
-    /// Panics where `Q` brings in more component types than the world has room for, which
-    /// [`ComponentMask::CAPACITY`] defines.
-    fn find_query_mask<Q: Query>(&mut self) -> ComponentMask {
-        let mut accesses = Vec::new();
-        Q::add_access(&mut accesses);
-
+    /// With `Position` at bit 0 and `Health` at bit 1, the list for `(&Position, &mut Health)`
+    /// returns the mask with bits 0 and 1 set, whether the query reads or changes each type. The
+    /// list for `(&Position, &Velocity)` returns `None`, since `Velocity` has no bit.
+    fn find_query_mask(&self, permissions: &[(TypeId, Permission)]) -> Option<ComponentMask> {
         let mut mask = ComponentMask::EMPTY;
         // Visits each type in the list, ignoring whether the query reads or changes it
-        for (type_id, _) in accesses {
-            // Sets the type's bit in the mask, giving the type a bit where it has none yet
-            mask |= self.find_or_assign_bit(type_id);
+        for (type_id, _) in permissions {
+            // Finds the type's bit, and returns `None` where the world has never given it one
+            let bit = self.registry.find_bit(*type_id)?;
+            mask |= bit;
         }
-        // Returns the finished mask
-        mask
+        Some(mask)
+    }
+
+    /// Returns an iterator over the tables that have at least one entity and store every component
+    /// type in `query_mask`.
+    ///
+    /// The method reads the list in `tables_by_type` for each type in `query_mask`, and searches
+    /// only the shortest one. Every table that stores all the types also stores the type with the
+    /// shortest list, meaning that list contains every match. The method then keeps each table in
+    /// it that has an entity and stores every type in `query_mask`.
+    ///
+    /// The iterator visits each table once at most, in the order that the world created them. It
+    /// yields nothing where `query_mask` is `None`, which
+    /// [`find_query_mask`](Self::find_query_mask) returns for a query that asks for a type with no
+    /// bit.
+    ///
+    /// # Examples
+    ///
+    /// In a world with tables for `{Position}` and `{Position, Health}`, `&Position` finds both
+    /// tables, and `&Health` finds the second alone. A table that has lost its last entity matches
+    /// neither. The tests `query_mut_with_several_tables_visits_only_entities_with_every_type` and
+    /// `query_archetype_mut_with_emptied_table_skips_it` check both cases.
+    fn find_matching_archetypes(
+        &self,
+        query_mask: Option<ComponentMask>,
+    ) -> impl Iterator<Item = &Archetype> {
+        // Reads the list of tables for each type in the query, and keeps the shortest one
+        let shortest = query_mask.and_then(|mask| {
+            mask.read_positions()
+                .map(|position| self.tables_by_type[position].as_slice())
+                .min_by_key(|tables| tables.len())
+        });
+        // Takes no tables where a type in the query has no bit, since no table then stores it
+        let candidates = shortest.unwrap_or_default();
+        // Reads the query mask, which is `Some` whenever `candidates` has a table in it
+        let mask = query_mask.unwrap_or_default();
+        candidates
+            .iter()
+            .map(move |&index| &self.archetypes[index])
+            .filter(move |archetype| !archetype.is_empty() && archetype.has_all(mask))
     }
 
     /// Returns where `entity` is stored, or `None` where the handle does not refer to a living
@@ -644,87 +794,62 @@ impl World {
     /// A handle does not refer to a living entity where its index lies past the last slot. It also
     /// does not refer to one where its version differs from the version in its slot, as it does for
     /// a despawned entity.
+    ///
+    /// # Examples
+    ///
+    /// For the third of three entities given a `Health` in a new world, `locate` returns table 1,
+    /// row 2. Once that entity is despawned, `locate` returns `None` for the same handle.
     fn locate(&self, entity: Entity) -> Option<Location> {
-        // Finds the entity's slot, and returns `None` where the index lies past the last slot
-        let slot = self.slots.get(entity.index())?;
-        // Returns `None` where the versions differ, as they do once the entity is despawned
-        if slot.version != entity.version() {
-            return None;
-        }
-
-        // Returns where the living entity is stored
-        Some(slot.location)
+        self.entities.locate(entity)
     }
 
     /// Returns the position in `archetypes` of the table for the types in table `source`, plus the
-    /// types that `bundle_infos` describes. Creates that table where the world has none yet.
+    /// types that `set_infos` describes. Creates that table where the world has none yet.
     ///
-    /// A bundle type that table `source` already stores does not add a column. The entity keeps that
-    /// column, and the bundle replaces its component there.
+    /// A type in the component set that table `source` already stores does not add a column. The
+    /// entity keeps that column, and the component set replaces its component there.
     ///
     /// # Panics
     ///
-    /// Panics where `bundle_infos` describes the same type twice.
-    fn find_or_create_archetype(&mut self, source: usize, bundle_infos: &[ComponentInfo]) -> usize {
-        // Combines the bit of every bundle type into one mask
-        let mut bundle_mask = ComponentMask::EMPTY;
-        for info in bundle_infos {
-            // Stops a bundle that lists a type twice, which would give the new table two columns
-            // for one type
+    /// Panics where `set_infos` describes the same type twice.
+    ///
+    /// # Examples
+    ///
+    /// Adding `Health` to the table for `{Position}` creates the table for `{Position, Health}` on
+    /// the first call, and finds the same table on the second. The test
+    /// `add_component_with_same_types_on_two_entities_reuses_table` reaches it through
+    /// `add_component`.
+    fn find_or_create_archetype(&mut self, source: usize, set_infos: &[ComponentInfo]) -> usize {
+        // Combines the bit of every type in the component set into one mask
+        let mut set_mask = ComponentMask::EMPTY;
+        for info in set_infos {
+            // Stops a component set that lists a type twice, which would give the new table two
+            // columns for one type
             assert!(
-                !bundle_mask.intersects(info.bit()),
-                "a bundle lists the same component type twice"
+                !set_mask.contains_any(info.bit()),
+                "a component set lists the same component type twice"
             );
-            bundle_mask |= info.bit();
+            set_mask |= info.bit();
         }
 
         // Finds the types that the entity already has
         let source_mask = self.archetypes[source].mask();
-        // Builds the target table's mask, which combines the entity's types with the bundle's types
-        let mask = source_mask | bundle_mask;
-        // Returns the table that already has that mask, where one exists
-        if let Some(&index) = self.indices.get(&mask) {
-            return index;
-        }
+        // Builds the target table's mask, which combines the entity's types with the component
+        // set's types
+        let mask = source_mask | set_mask;
 
-        // Copies the descriptions of the source table's columns
-        let mut infos = self.archetypes[source].infos();
-        // Selects the description of each bundle type that the entity lacks. Each other bundle type
-        // replaces the component in a column that the source table already has
-        let dedup_bundle_infos = bundle_infos
-            .iter()
-            .filter(|info| !source_mask.intersects(info.bit()));
-        // Adds those descriptions, one for each new column in the target table
-        infos.extend(dedup_bundle_infos);
-
-        // Creates the new table, and returns its position
-        self.create_archetype(&infos)
-    }
-
-    /// Returns the position in `archetypes` of the table for the types in table `source`, plus `T`.
-    /// Creates that table where the world has none yet.
-    ///
-    /// # Panics
-    ///
-    /// Panics where the world has not met `T` before, and already has [`ComponentMask::CAPACITY`]
-    /// component types.
-    fn find_or_create_archetype_with<T: Component>(&mut self, source: usize) -> usize {
-        // Finds the bit for `T`, giving `T` a new bit where this is the first time the world sees it
-        let bit = self.find_or_assign_bit(TypeId::of::<T>());
-        // Builds the target table's mask, which combines every type in the source table with `T`
-        let mask = self.archetypes[source].mask() | bit;
-        // Returns the table that already has that mask, where one exists
-        if let Some(&index) = self.indices.get(&mask) {
-            return index;
-        }
-
-        // Copies the descriptions of the source table's columns
-        let mut infos = self.archetypes[source].infos();
-        // Adds a description for `T`, with its bit
-        infos.push(ComponentInfo::of::<T>(bit));
-
-        // Creates the new table, and returns its position
-        self.create_archetype(&infos)
+        self.find_or_create_archetype_by_mask(mask, |world| {
+            // Copies the descriptions of the source table's columns
+            let mut infos = world.archetypes[source].infos();
+            // Selects the description of each type in the component set that the entity lacks. Each
+            // other type replaces the component in a column that the source table already has
+            let new_infos = set_infos
+                .iter()
+                .filter(|info| !source_mask.contains_any(info.bit()));
+            // Adds those descriptions, one for each new column in the target table
+            infos.extend(new_infos);
+            infos
+        })
     }
 
     /// Returns the position in `archetypes` of the table for the types in table `source`, minus the
@@ -737,23 +862,72 @@ impl World {
     ///
     /// Panics where the world has never given a bit to the type that `type_id` identifies. A caller
     /// that has checked that table `source` stores the type never meets this case.
+    ///
+    /// # Examples
+    ///
+    /// From the table for `{Position, Health}`, removing `Health` returns the position of the table
+    /// for `{Position}`. The tests `remove_component_with_existing_target_table_reuses_table` and
+    /// `remove_component_with_new_target_table_creates_table` reach it through `remove_component`.
     fn find_or_create_archetype_without(&mut self, source: usize, type_id: TypeId) -> usize {
-        // Finds the bit of the type being removed
-        let bit = self.component_bits[&type_id];
+        // Finds the bit of the type being removed, which it has, since table `source` stores the
+        // type
+        let bit = self
+            .registry
+            .find_bit(type_id)
+            .expect("a type that a table stores should have a bit");
         // Builds the target table's mask, which is the source table's mask with that bit cleared
         let mask = self.archetypes[source].mask().without(bit);
+
+        self.find_or_create_archetype_by_mask(mask, |world| {
+            // Copies the descriptions of the source table's columns
+            let mut infos = world.archetypes[source].infos();
+            // Throws away the description for `type_id`, keeping every other one
+            infos.retain(|info| info.type_id() != type_id);
+            infos
+        })
+    }
+
+    /// Returns the position in `archetypes` of the table filed under `mask`. Creates that table
+    /// where the world has none yet.
+    ///
+    /// The method calls `build_infos` only where it has to create the table. A lookup that finds
+    /// the table therefore does not copy any column descriptions. `build_infos` receives the world,
+    /// and returns one description for each type in `mask`. Those descriptions MUST cover exactly
+    /// the types in `mask`, since the new table builds its mask from them. Otherwise `indices`
+    /// would file the table under a different mask, and the next lookup for `mask` would miss it.
+    ///
+    /// # Panics
+    ///
+    /// Panics in a debug build where the descriptions from `build_infos` give the new table a mask
+    /// other than `mask`.
+    ///
+    /// # Examples
+    ///
+    /// For the mask with the bits of `Position` and `Health`, the method returns the position of
+    /// the table for `{Position, Health}`, and calls `build_infos` only on the first call. The
+    /// tests `add_component_with_same_types_on_two_entities_reuses_table` and
+    /// `remove_component_with_new_target_table_creates_table` reach it through the two methods that
+    /// call it.
+    fn find_or_create_archetype_by_mask(
+        &mut self,
+        mask: ComponentMask,
+        build_infos: impl FnOnce(&Self) -> Vec<ComponentInfo>,
+    ) -> usize {
         // Returns the table that already has that mask, where one exists
         if let Some(&index) = self.indices.get(&mask) {
             return index;
         }
 
-        // Copies the descriptions of the source table's columns
-        let mut infos = self.archetypes[source].infos();
-        // Throws away the description for `type_id`, keeping every other one
-        infos.retain(|info| info.type_id() != type_id);
-
-        // Creates the new table, and returns its position
-        self.create_archetype(&infos)
+        // Describes the new table's columns, now that the table has to be created
+        let infos = build_infos(self);
+        // Creates the new table, which `create_archetype` files under the mask it builds
+        let index = self.create_archetype(&infos);
+        debug_assert_eq!(
+            self.archetypes[index].mask(),
+            mask,
+            "the descriptions must cover exactly the types in the mask"
+        );
+        index
     }
 
     /// Creates a table with one empty column for each description in `infos`, and returns its
@@ -769,53 +943,94 @@ impl World {
     /// # Panics
     ///
     /// Panics in a debug build where two entries in `infos` share a bit.
+    ///
+    /// # Examples
+    ///
+    /// In a new world, the table for `{Position, Health}` takes position 1, after the empty table,
+    /// and `indices` files it under the mask with bits 0 and 1 set.
     fn create_archetype(&mut self, infos: &[ComponentInfo]) -> usize {
         // Takes the next position in `archetypes`, where the new table goes
         let index = self.archetypes.len();
         // Creates the new table, which builds its mask from `infos`
         let archetype = Archetype::new(infos);
+        let mask = archetype.mask();
         // Files the new table under its own mask, for the next lookup to find
-        self.indices.insert(archetype.mask(), index);
+        self.indices.insert(mask, index);
+        // Adds the new table to the list of tables for each type that it stores
+        for position in mask.read_positions() {
+            self.tables_by_type[position].push(index);
+        }
         // Adds the new table at that position
         self.archetypes.push(archetype);
-        // Returns the new table's position
         index
     }
 
-    /// Moves `entity` from its table to the end of the table at position `target`, and returns
-    /// the target table for the caller to fill.
+    /// Moves `entity` from its table to the end of the table at position `target`, and calls `fill`
+    /// to push the components that the target needs and the source table lacked.
     ///
-    /// The method drops each component that the target has no column for. It also updates the slot
-    /// of the moved entity, and the slot of the entity that fills its old row.
+    /// The method passes `take` and `fill` on to [`Archetype::move_entity`], which sets out what
+    /// each closure MUST do. `take` receives each column that the target has no column for. The
+    /// method then updates the slot of the moved entity, and the slot of the entity that fills its
+    /// old row.
     ///
-    /// The returned reference borrows the world exclusively, meaning the compiler rejects any other
-    /// use of the world until the caller has finished filling the target.
+    /// `fill` runs before the method updates the slots. It MUST therefore hand out any component
+    /// that it replaces, for the caller to drop once the method returns, as `add_components` does.
+    /// A `Drop` that panicked inside `fill` would leave both slots on their old rows.
+    ///
+    /// `location` MUST be where `entity` is stored now, as [`locate`](Self::locate) returns it. A
+    /// stale row could lie past the end of the entity list, which panics.
     ///
     /// # Panics
     ///
     /// Panics where `target` equals `location.arch_index()`, since `get_disjoint_mut` refuses to
-    /// borrow one table as both the source and the target.
+    /// borrow one table as both the source and the target. Also panics in the cases that
+    /// [`Archetype::move_entity`] sets out, such as a `fill` that misses a new column.
     ///
     /// # Aborts
     ///
-    /// The program aborts where the `Drop` implementation of a dropped component panics, as
-    /// [`Archetype::move_entity_dropping`] sets out.
+    /// The program aborts where `take` panics, such as in the `Drop` implementation of a component
+    /// that it drops, as [`Archetype::move_entity`] sets out.
     ///
-    /// # Safety
+    /// # Examples
     ///
-    /// The caller MUST guarantee two things:
+    /// The example moves the first of two entities out of the empty table, into a new table for
+    /// `{Health}`. The second entity then fills the row that the first one left.
     ///
-    /// - `location` is where `entity` is stored now, as [`locate`](Self::locate) returns it. A stale
-    ///   row could lie past the end of a column.
-    /// - The caller pushes one component onto each column that the target has and the source table
-    ///   lacks, before anything else uses the target. A missing component leaves that column one
-    ///   row short, as [`Archetype::push_entity`] sets out.
-    unsafe fn move_entity(
+    /// ```ignore
+    /// // Spawns two entities, which take rows 0 and 1 of the empty table
+    /// let mut world = World::new();
+    /// let first = world.spawn_empty();
+    /// let second = world.spawn_empty();
+    ///
+    /// // Creates table 1, for `{Health}`, which has no rows yet
+    /// let bit = world.registry.find_or_assign_bit(TypeId::of::<Health>());
+    /// let target = world.create_archetype(&[ComponentInfo::of::<Health>(bit)]);
+    ///
+    /// // Moves the first entity to table 1, and pushes its `Health` onto the new column
+    /// let location = world.locate(first).expect("the entity should be alive");
+    /// world.move_entity(first, location, target, ComponentVec::swap_remove, |table, _| {
+    ///     let health_column = table.components_of_mut(TypeId::of::<Health>()).expect("a column");
+    ///     health_column.push_typed(Health(100));
+    /// });
+    ///
+    /// // Checks that the first entity occupies row 0 of table 1
+    /// let moved = world.locate(first).expect("the entity should be alive");
+    /// assert_eq!(moved.arch_index(), 1);
+    /// assert_eq!(moved.row(), 0);
+    ///
+    /// // Checks that the second entity now occupies row 0 of the empty table
+    /// let filled = world.locate(second).expect("the entity should be alive");
+    /// assert_eq!(filled.arch_index(), World::EMPTY);
+    /// assert_eq!(filled.row(), 0);
+    /// ```
+    fn move_entity(
         &mut self,
         entity: Entity,
         location: Location,
         target: usize,
-    ) -> &mut Archetype {
+        take: impl FnMut(&mut ComponentVec, usize),
+        fill: impl FnOnce(&mut Archetype, usize),
+    ) {
         // Lists the two tables to borrow, with the entity's current table first and the target
         // second
         let indices = [location.arch_index(), target];
@@ -827,25 +1042,32 @@ impl World {
 
         // Records the entity's row in the target, which is the target's current number of rows
         let row = target_table.len();
-        // Moves the entity to the end of the target, and finds the entity that fills its old row,
+        // Moves the entity to the end of the target, takes its components that the target has no
+        // column for, and fills its new columns, then finds the entity that fills its old row,
         // where one does
-        // SAFETY: `move_entity_dropping` requires a row in range, and a push onto each new column in
-        // the target. The caller MUST guarantee both, as the Safety section of this method sets out
-        let moved_ent = unsafe { source_table.move_entity_dropping(location.row(), target_table) };
+        let moved_ent = source_table.move_entity(location.row(), target_table, take, fill);
 
-        // Describes where the entity now lives
         let new_location = Location::new(target, row);
-        // Updates the slot of `entity`, and the slot of `moved_ent`, which is the entity that filled
-        // its old row
+        // Updates the slot of `entity`, and the slot of `moved_ent`, which is the entity that
+        // filled its old row
         self.record_move(entity, moved_ent, location, new_location);
-        // Returns the target, for the caller to push onto its new columns
-        &mut self.archetypes[target]
     }
 
     /// Updates the slots after `moved_ent` moves from `old_location` to `new_location`.
     ///
     /// `swapped_ent` is the entity that filled the row that `moved_ent` left, or `None` where that
     /// row was the last one in its table.
+    ///
+    /// The method changes only the row in the slot of `swapped_ent`. That entity stays in the table
+    /// that `moved_ent` left.
+    ///
+    /// # Examples
+    ///
+    /// Where the first of two entities in the empty table moves to row 3 of table 1, the second
+    /// entity fills row 0. `record_move` then points the first slot at table 1, row 3, and the
+    /// second slot at row 0 of the empty table. The test
+    /// `despawn_with_first_row_updates_location_of_filling_entity` reaches it through
+    /// `despawn`.
     fn record_move(
         &mut self,
         moved_ent: Entity,
@@ -854,21 +1076,55 @@ impl World {
         new_location: Location,
     ) {
         // Points the slot of the entity that filled the old row at that row, where one did
-        if let Some(swapped) = swapped_ent {
-            self.slots[swapped.index()]
-                .location
-                .set_row(old_location.row());
-        }
-
+        self.record_filled_row(swapped_ent, old_location.row());
         // Points the moved entity's slot at its new table and row
-        self.slots[moved_ent.index()].location = new_location;
+        self.entities.set_location(moved_ent, new_location);
+    }
+
+    /// Points the slot of `filled_ent` at row `row`, where `filled_ent` is the entity that a
+    /// swap-remove moved into that row. Does nothing where `filled_ent` is `None`, as it is when
+    /// the removed row was the last one in its table.
+    ///
+    /// The entity stays in the same table, meaning the method changes only the row in its slot.
+    ///
+    /// # Examples
+    ///
+    /// Where the first of three entities leaves row 0 of its table, the third entity fills row 0.
+    /// `record_filled_row(Some(third), 0)` then points the slot of the third entity at row 0, and
+    /// `record_filled_row(None, 0)` changes nothing. The test
+    /// `despawn_with_first_row_updates_location_of_filling_entity` reaches it through `despawn`,
+    /// and `add_components_with_entity_leaving_first_row_updates_filling_entity` through a move.
+    fn record_filled_row(&mut self, filled_ent: Option<Entity>, row: usize) {
+        if let Some(filled) = filled_ent {
+            self.entities.set_row(filled, row);
+        }
     }
 }
 
 impl Default for World {
     /// Returns a world with no entities and no component types, as [`World::new`] does.
+    ///
+    /// The example on [`World`] builds the same world with [`World::new`].
     fn default() -> Self {
-        Self::new() // Builds the same empty world as `new`
+        Self::new()
+    }
+}
+
+impl fmt::Debug for World {
+    /// Writes the number of entities, tables and component types in the world.
+    ///
+    /// The output leaves out the components themselves, which could run to thousands of values.
+    /// A new world writes `World { entities: 0, tables: 1, component_types: 0, .. }`, where the
+    /// one table is the empty table.
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let entities: usize = self.archetypes.iter().map(Archetype::len).sum();
+        let component_types = self.registry.count_types();
+        formatter
+            .debug_struct("World")
+            .field("entities", &entities)
+            .field("tables", &self.archetypes.len())
+            .field("component_types", &component_types)
+            .finish_non_exhaustive()
     }
 }
 
@@ -876,61 +1132,68 @@ impl Default for World {
 //                                          Helpers                                           \\
 // ========================================================================================== \\
 
-/// Records the version of one entity index, and where the entity with that version is stored.
-#[derive(Clone, Copy, Debug)]
-struct Slot {
-    /// Stores the version of the entity that occupies the slot. In a free slot, it stores the
-    /// version that the next entity in the slot will take.
-    version: u32,
-    /// Records where the entity is stored. In a free slot, the value is out of date until
-    /// `spawn_empty_ent` overwrites it.
-    location: Location,
-}
-
-// Stops the build where the size of a slot differs from 12 bytes. A slot needs 4 bytes for its
-// version, and 4 bytes for each of its two location fields
-const _: () = assert!(size_of::<Slot>() == 12);
-
 /// Records the table and the row where one entity is stored.
+///
+/// # Examples
+///
+/// `Location::new(1, 2)` records row 2 of table 1. After `set_row(0)`, `arch_index` still returns
+/// 1, and `row` returns 0. The test `set_row_with_new_row_keeps_table` checks it.
 #[derive(Clone, Copy, Debug)]
-struct Location {
+pub(crate) struct Location {
     /// Stores the position in `World::archetypes` of the table that contains the entity.
+    ///
+    /// For example, `Location::new(1, 2)` stores 1.
     arch_index: u32,
     /// Stores the row that the entity occupies in that table.
+    ///
+    /// For example, `Location::new(1, 2)` stores 2.
     row: u32,
 }
 
 impl Location {
     /// Returns the location of row `row` in the table at position `arch_index`.
     ///
+    /// The example on [`Location`] shows a call.
+    ///
     /// # Panics
     ///
     /// Panics where either value exceeds `u32::MAX`.
-    fn new(arch_index: usize, row: usize) -> Self {
+    ///
+    /// # Examples
+    ///
+    /// The test `location_new_with_row_past_u32_max_panics` passes a row one past `u32::MAX`, which
+    /// panics, since the row does not fit in a `u32`.
+    pub(crate) fn new(arch_index: usize, row: usize) -> Self {
         // Narrows the table's position to a `u32`, and panics where it does not fit
         let arch_index =
             u32::try_from(arch_index).expect("a world should have fewer than 2^32 tables");
-        // Narrows the row to a `u32`, which always fits, since a world has at most 2^32 entities
+        // Narrows the row to a `u32`, and panics where it does not fit
         let row = u32::try_from(row).expect("a table should have fewer than 2^32 rows");
         Self { arch_index, row }
     }
 
     /// Returns the position in `World::archetypes` of the table that contains the entity.
-    fn arch_index(self) -> usize {
+    ///
+    /// The example on [`Location`] shows a call.
+    pub(crate) fn arch_index(self) -> usize {
         self.arch_index as usize
     }
 
     /// Returns the row that the entity occupies in its table.
-    fn row(self) -> usize {
+    ///
+    /// The example on [`Location`] shows a call.
+    pub(crate) fn row(self) -> usize {
         self.row as usize
     }
 
     /// Changes the row to `row`, and keeps the table.
     ///
+    /// The example on [`Location`] shows a call.
+    ///
     /// # Panics
     ///
     /// Panics where `row` exceeds `u32::MAX`.
-    fn set_row(&mut self, row: usize) {
+    pub(crate) fn set_row(&mut self, row: usize) {
         *self = Self::new(self.arch_index(), row);
     }
 }
@@ -942,9 +1205,16 @@ impl Location {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::array;
+    use crate::registry::build_64_type_ids;
+    use std::collections::HashSet;
+    use std::env;
+    use std::fmt::Debug;
+    use std::io::{self, Write};
+    use std::panic::{self, AssertUnwindSafe};
+    use std::process::Command;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::thread;
 
     #[derive(Debug, PartialEq)]
     struct Position(f32);
@@ -961,13 +1231,81 @@ mod tests {
 
     impl Component for Velocity {}
 
-    /// Takes no memory, which gives the world a column for a type with a size of zero.
+    /// Owns memory on the heap, which gives the world a column whose components have clean-up code.
+    #[derive(Clone, Debug, PartialEq)]
+    struct Name(String);
+
+    impl Component for Name {}
+
+    /// Has a size of zero, which gives the world a column for a type that does not take any
+    /// memory.
     #[derive(Debug, PartialEq)]
     struct Marker;
 
     impl Component for Marker {}
 
+    /// Stands for a different component type at each value of `N`, which lets one test build a
+    /// component set of thirty-two types, or a query of twelve.
+    #[derive(Debug, PartialEq)]
+    struct Numbered<const N: usize>(usize);
+
+    impl<const N: usize> Component for Numbered<N> {}
+
+    /// Defines the component set type with the most fields that `ComponentSet` is implemented for.
+    type Set32 = (
+        Numbered<0>,
+        Numbered<1>,
+        Numbered<2>,
+        Numbered<3>,
+        Numbered<4>,
+        Numbered<5>,
+        Numbered<6>,
+        Numbered<7>,
+        Numbered<8>,
+        Numbered<9>,
+        Numbered<10>,
+        Numbered<11>,
+        Numbered<12>,
+        Numbered<13>,
+        Numbered<14>,
+        Numbered<15>,
+        Numbered<16>,
+        Numbered<17>,
+        Numbered<18>,
+        Numbered<19>,
+        Numbered<20>,
+        Numbered<21>,
+        Numbered<22>,
+        Numbered<23>,
+        Numbered<24>,
+        Numbered<25>,
+        Numbered<26>,
+        Numbered<27>,
+        Numbered<28>,
+        Numbered<29>,
+        Numbered<30>,
+        Numbered<31>,
+    );
+
+    /// Defines the query type with the most fields that `Query` is implemented for. It reads
+    /// `Numbered<0>` to `Numbered<10>`, and changes `Numbered<11>`.
+    type Query12 = (
+        &'static Numbered<0>,
+        &'static Numbered<1>,
+        &'static Numbered<2>,
+        &'static Numbered<3>,
+        &'static Numbered<4>,
+        &'static Numbered<5>,
+        &'static Numbered<6>,
+        &'static Numbered<7>,
+        &'static Numbered<8>,
+        &'static Numbered<9>,
+        &'static Numbered<10>,
+        &'static mut Numbered<11>,
+    );
+
     /// Adds 1 to a shared counter when dropped, which shows how many times clean-up code ran.
+    #[derive(Debug)]
     struct DropCounter {
         drops: Arc<AtomicUsize>,
     }
@@ -980,19 +1318,22 @@ mod tests {
         }
     }
 
-    /// Builds an array with the `TypeId` of each array type `[u8; N]`, for every `N` listed.
-    macro_rules! type_ids {
-        ($($length:literal)*) => { [$(TypeId::of::<[u8; $length]>()),*] };
+    /// Panics when dropped where `panics` is true, which stands for clean-up code that fails. The
+    /// `id` tells one entity's component apart from another's.
+    #[derive(Debug)]
+    struct Volatile {
+        id: u32,
+        panics: bool,
     }
 
-    /// Returns 64 distinct `TypeId`s, enough to take every bit that a world can hand out.
-    fn build_64_type_ids() -> [TypeId; 64] {
-        type_ids!(
-             0  1  2  3  4  5  6  7  8  9 10 11 12 13 14 15
-            16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31
-            32 33 34 35 36 37 38 39 40 41 42 43 44 45 46 47
-            48 49 50 51 52 53 54 55 56 57 58 59 60 61 62 63
-        )
+    impl Component for Volatile {}
+
+    impl Drop for Volatile {
+        fn drop(&mut self) {
+            if self.panics {
+                panic!("the volatile component {} failed to clean up", self.id);
+            }
+        }
     }
 
     /// Returns where `entity` is stored, and panics where it is not alive.
@@ -1007,48 +1348,256 @@ mod tests {
         }
     }
 
-    /// Checks that a new world has one table with no columns, and no entities or component types
-    #[test]
-    fn new_with_no_args_returns_world_with_only_empty_table() {
-        let world = World::new();
-
-        let empty_table = &world.archetypes[World::EMPTY];
-        assert_eq!(world.archetypes.len(), 1, "number of tables");
-        assert_eq!(
-            empty_table.mask(),
-            ComponentMask::EMPTY,
-            "mask of the empty table"
-        );
-        assert_eq!(empty_table.len(), 0, "rows in the empty table");
-        let empty_index = world.indices.get(&ComponentMask::EMPTY);
-        assert_eq!(
-            empty_index,
-            Some(&World::EMPTY),
-            "table under the empty mask"
-        );
-        assert!(world.component_bits.is_empty(), "component types");
-        assert!(world.slots.is_empty(), "slots");
-        assert!(world.free_slots.is_empty(), "free slots");
+    /// Returns a `Set32` whose field of type `Numbered<N>` contains `N`.
+    fn build_set_32() -> Set32 {
+        (
+            Numbered(0),
+            Numbered(1),
+            Numbered(2),
+            Numbered(3),
+            Numbered(4),
+            Numbered(5),
+            Numbered(6),
+            Numbered(7),
+            Numbered(8),
+            Numbered(9),
+            Numbered(10),
+            Numbered(11),
+            Numbered(12),
+            Numbered(13),
+            Numbered(14),
+            Numbered(15),
+            Numbered(16),
+            Numbered(17),
+            Numbered(18),
+            Numbered(19),
+            Numbered(20),
+            Numbered(21),
+            Numbered(22),
+            Numbered(23),
+            Numbered(24),
+            Numbered(25),
+            Numbered(26),
+            Numbered(27),
+            Numbered(28),
+            Numbered(29),
+            Numbered(30),
+            Numbered(31),
+        )
     }
 
-    /// Checks that `default` builds the same empty world as `new`
+    /// Returns one message for each way in which the slots, the tables, `indices` and
+    /// `tables_by_type` disagree with each other. A consistent world returns an empty list.
+    ///
+    /// A slot is live where the free list lacks its index and its version is below `u32::MAX`. The
+    /// helper checks six things:
+    ///
+    /// - Each live slot points at a table row that contains the slot's own entity.
+    /// - Each table row contains an entity whose slot is live and points back at that row. Together
+    ///   with the first check and equal counts, every live slot then owns exactly one row.
+    /// - Every column has one component for each row of its table.
+    /// - `indices` files each table under the table's own mask, and has one entry for each table.
+    /// - `tables_by_type` lists, for each bit, every table whose mask has that bit, in the order
+    ///   that the world created them, and no other table.
+    /// - The free list contains each index once, and only indices of slots that are neither live
+    ///   nor retired.
+    fn find_violations(world: &World) -> Vec<String> {
+        let mut violations = Vec::new();
+        let slot_count = world.entities.count_slots();
+
+        // Collects the freed indices, and records one that is freed twice or has no slot
+        let mut freed = HashSet::new();
+        for &index in world.entities.read_free_list() {
+            let index = index as usize;
+            if index >= slot_count {
+                violations.push(format!("freed index {index} has no slot"));
+            }
+            if !freed.insert(index) {
+                violations.push(format!("index {index} freed twice"));
+            }
+        }
+
+        // Checks that each live slot points at a row that contains its entity, and counts them
+        let mut live_slots = 0;
+        for index in 0..slot_count {
+            let (version, location) = world.entities.read_slot(index);
+            let retired = version == u32::MAX;
+            let free = freed.contains(&index);
+            if retired && free {
+                violations.push(format!("retired slot {index} in the free slots"));
+            }
+            if retired || free {
+                continue;
+            }
+            live_slots += 1;
+            let entity = Entity::new(index as u32, version);
+            let table = world.archetypes.get(location.arch_index());
+            let found = table.and_then(|table| table.entities().get(location.row()));
+            if found != Some(&entity) {
+                violations.push(format!("slot {index} reaches {found:?}, not {entity:?}"));
+            }
+        }
+
+        let mut rows = 0;
+        for (position, table) in world.archetypes.iter().enumerate() {
+            // Checks that each row's entity has a live slot that points back at this row
+            for (row, entity) in table.entities().iter().enumerate() {
+                if entity.index() >= slot_count {
+                    violations.push(format!("{entity:?} in table {position} has no slot"));
+                    continue;
+                }
+                let (version, location) = world.entities.read_slot(entity.index());
+                let place = (location.arch_index(), location.row());
+                if freed.contains(&entity.index()) {
+                    violations.push(format!("freed slot of {entity:?}"));
+                }
+                if version != entity.version() {
+                    violations.push(format!("version {version} in slot of {entity:?}"));
+                }
+                if place != (position, row) {
+                    violations.push(format!("location {place:?} in slot of {entity:?}"));
+                }
+            }
+            rows += table.len();
+
+            // Checks that every column has one component for each row
+            for info in table.infos() {
+                let length = table.components_of(info.type_id()).map(ComponentVec::len);
+                if length != Some(table.len()) {
+                    violations.push(format!("column length {length:?} in table {position}"));
+                }
+            }
+
+            // Checks that `indices` files the table under its own mask
+            let filed = world.indices.get(&table.mask());
+            if filed != Some(&position) {
+                violations.push(format!("{filed:?} under the mask of table {position}"));
+            }
+        }
+
+        // Checks that each bit lists exactly the tables whose mask has that bit, in creation order
+        for (bit_position, listed) in world.tables_by_type.iter().enumerate() {
+            let bit = ComponentMask::single(bit_position);
+            let expected: Vec<usize> = world
+                .archetypes
+                .iter()
+                .enumerate()
+                .filter(|(_, table)| table.mask().contains_any(bit))
+                .map(|(position, _)| position)
+                .collect();
+            if *listed != expected {
+                violations.push(format!(
+                    "tables {listed:?} listed for bit {bit_position}, not {expected:?}"
+                ));
+            }
+        }
+
+        if rows != live_slots {
+            violations.push(format!(
+                "{rows} rows across every table, {live_slots} live slots"
+            ));
+        }
+        let filed_masks = world.indices.len();
+        let tables = world.archetypes.len();
+        if filed_masks != tables {
+            violations.push(format!("{filed_masks} masks in `indices`, {tables} tables"));
+        }
+        violations
+    }
+
+    /// Adds each violation that `find_violations` finds in `world` to `violations`, labelled with
+    /// the step that it follows.
+    fn record_violations(violations: &mut Vec<String>, step: &str, world: &World) {
+        let found = find_violations(world);
+        violations.extend(
+            found
+                .into_iter()
+                .map(|violation| format!("{step}: {violation}")),
+        );
+    }
+
+    /// Adds a message to `violations` where `found` differs from `expected`.
+    fn record_mismatch<T: PartialEq + Debug>(
+        violations: &mut Vec<String>,
+        label: &str,
+        found: T,
+        expected: T,
+    ) {
+        if found != expected {
+            violations.push(format!("{label}: found {found:?}, expected {expected:?}"));
+        }
+    }
+
+    /// Records what a world holds, in the parts that a new world leaves empty.
+    #[derive(Debug, PartialEq)]
+    struct WorldSummary {
+        tables: usize,
+        empty_table_mask: ComponentMask,
+        empty_table_rows: usize,
+        table_under_empty_mask: Option<usize>,
+        component_types: usize,
+        slots: usize,
+        freed_slots: usize,
+    }
+
+    /// Returns the summary of `world`.
+    fn summarise(world: &World) -> WorldSummary {
+        let empty_table = &world.archetypes[World::EMPTY];
+        WorldSummary {
+            tables: world.archetypes.len(),
+            empty_table_mask: empty_table.mask(),
+            empty_table_rows: empty_table.len(),
+            table_under_empty_mask: world.indices.get(&ComponentMask::EMPTY).copied(),
+            component_types: world.registry.count_types(),
+            slots: world.entities.count_slots(),
+            freed_slots: world.entities.read_free_list().len(),
+        }
+    }
+
+    /// Returns the summary of a world with only the empty table, and no entities or component
+    /// types.
+    fn summarise_new_world() -> WorldSummary {
+        WorldSummary {
+            tables: 1,
+            empty_table_mask: ComponentMask::EMPTY,
+            empty_table_rows: 0,
+            table_under_empty_mask: Some(World::EMPTY),
+            component_types: 0,
+            slots: 0,
+            freed_slots: 0,
+        }
+    }
+
+    /// Checks that `new` builds a world with one table with no columns, and no entities or component
+    /// types
     #[test]
-    fn default_with_no_args_returns_empty_world() {
+    fn new_with_no_args_returns_world_with_only_empty_table() {
+        let expected = summarise_new_world();
+
+        let world = World::new();
+
+        assert_eq!(summarise(&world), expected);
+    }
+
+    /// Checks that `default` builds the same world as `new`
+    #[test]
+    fn default_with_no_args_returns_world_with_only_empty_table() {
+        let expected = summarise_new_world();
+
         let world = World::default();
 
-        assert_eq!(world.archetypes.len(), 1, "number of tables");
-        assert!(world.slots.is_empty(), "slots");
+        assert_eq!(summarise(&world), expected);
     }
 
     /// Checks that a world with no freed slots hands out indices in order, each at version 0
     #[test]
-    fn spawn_ent_with_varying_counts_returns_sequential_handles_at_version_zero() {
+    fn spawn_empty_with_varying_counts_returns_sequential_handles_at_version_zero() {
         let cases = [1_u32, 2, 5];
 
         for count in cases {
             let mut world = World::new();
 
-            let entities: Vec<Entity> = (0..count).map(|_| world.spawn_empty_ent()).collect();
+            let entities: Vec<Entity> = (0..count).map(|_| world.spawn_empty()).collect();
 
             let expected: Vec<Entity> = (0..count).map(|index| Entity::new(index, 0)).collect();
             let rows = world.archetypes[World::EMPTY].len();
@@ -1057,52 +1606,57 @@ mod tests {
         }
     }
 
-    /// Checks that each spawned entity lives in the empty table, at the row of its spawn order
+    /// Checks that the world stores each spawned entity in the empty table, at the row of its spawn
+    /// order
     #[test]
-    fn spawn_ent_with_several_spawns_places_each_in_next_row_of_empty_table() {
+    fn spawn_empty_with_several_spawns_places_each_in_next_row_of_empty_table() {
         let mut world = World::new();
 
         let entities = [
-            world.spawn_empty_ent(),
-            world.spawn_empty_ent(),
-            world.spawn_empty_ent(),
+            world.spawn_empty(),
+            world.spawn_empty(),
+            world.spawn_empty(),
         ];
 
-        for (row, entity) in entities.into_iter().enumerate() {
+        let places = entities.map(|entity| {
             let location = locate_alive(&world, entity);
-            assert_eq!(location.arch_index(), World::EMPTY, "table of entity {row}");
-            assert_eq!(location.row(), row, "row of entity {row}");
-        }
+            (location.arch_index(), location.row())
+        });
+        assert_eq!(
+            places,
+            [(World::EMPTY, 0), (World::EMPTY, 1), (World::EMPTY, 2)],
+            "table and row of each entity"
+        );
     }
 
     /// Checks that a freed slot is reused, at a version one above the dead entity's
     #[test]
-    fn spawn_ent_with_freed_slot_reuses_index_at_raised_version() {
+    fn spawn_empty_with_freed_slot_reuses_index_at_raised_version() {
         let mut world = World::new();
-        let dead = world.spawn_empty_ent();
-        world.despawn_ent(dead);
+        let dead = world.spawn_empty();
+        world.despawn(dead);
 
-        let reborn = world.spawn_empty_ent();
+        let reborn = world.spawn_empty();
 
         assert_eq!(reborn, Entity::new(0, 1), "handle of the new entity");
-        assert_eq!(world.slots.len(), 1, "slots");
-        assert!(world.free_slots.is_empty(), "free slots");
+        assert_eq!(world.entities.count_slots(), 1, "slots");
+        assert!(world.entities.read_free_list().is_empty(), "free slots");
     }
 
     /// Checks that freed slots come back last freed first, since `free_slots` is a stack
     #[test]
-    fn spawn_ent_with_several_freed_slots_reuses_last_freed_first() {
+    fn spawn_empty_with_several_freed_slots_reuses_last_freed_first() {
         let mut world = World::new();
-        let first = world.spawn_empty_ent();
-        let second = world.spawn_empty_ent();
-        world.spawn_empty_ent();
-        world.despawn_ent(first);
-        world.despawn_ent(second);
+        let first = world.spawn_empty();
+        let second = world.spawn_empty();
+        world.spawn_empty();
+        world.despawn(first);
+        world.despawn(second);
 
         let reborn = [
-            world.spawn_empty_ent(),
-            world.spawn_empty_ent(),
-            world.spawn_empty_ent(),
+            world.spawn_empty(),
+            world.spawn_empty(),
+            world.spawn_empty(),
         ];
 
         assert_eq!(
@@ -1113,12 +1667,14 @@ mod tests {
 
     /// Checks that a despawned entity is gone, and that the call reports that it existed
     #[test]
-    fn despawn_ent_with_living_entity_returns_true_and_forgets_entity() {
+    fn despawn_with_living_entity_returns_true_and_forgets_entity() {
         let mut world = World::new();
-        let entity = world.spawn_empty_ent();
-        world.add_component(entity, Health(10));
+        let entity = world.spawn_empty();
+        world
+            .add_component(entity, Health(10))
+            .expect("the entity should be alive");
 
-        let despawned = world.despawn_ent(entity);
+        let despawned = world.despawn(entity);
 
         assert!(despawned, "answer for a living entity");
         assert!(world.locate(entity).is_none(), "location after despawning");
@@ -1127,13 +1683,13 @@ mod tests {
             None,
             "component after despawning"
         );
-        assert_eq!(world.free_slots, [0], "free slots");
+        assert_eq!(world.entities.read_free_list(), [0], "free slots");
     }
 
-    /// Checks that a handle to a despawned entity, to an index never spawned, or at the wrong version
-    /// gives `false`
+    /// Checks that a handle to a despawned entity, to an index never spawned, or at the wrong
+    /// version gives `false`
     #[test]
-    fn despawn_ent_with_handle_of_no_living_entity_returns_false() {
+    fn despawn_with_handle_of_no_living_entity_returns_false() {
         let cases = [
             ("despawned", Entity::new(0, 0)),
             ("index past the last slot", Entity::new(5, 0)),
@@ -1143,31 +1699,37 @@ mod tests {
 
         for (label, handle) in cases {
             let mut world = World::new();
-            let entity = world.spawn_empty_ent();
-            world.despawn_ent(entity);
+            let entity = world.spawn_empty();
+            world.despawn(entity);
 
-            let despawned = world.despawn_ent(handle);
+            let despawned = world.despawn(handle);
 
             assert!(!despawned, "answer for {label}");
-            assert_eq!(world.free_slots, [0], "free slots for {label}");
+            assert_eq!(
+                world.entities.read_free_list(),
+                [0],
+                "free slots for {label}"
+            );
         }
     }
 
     /// Checks that the entity that fills the empty row can still be found, with its own component
     #[test]
-    fn despawn_ent_with_first_row_updates_location_of_filling_entity() {
+    fn despawn_with_first_row_updates_location_of_filling_entity() {
         let mut world = World::new();
         let entities = [
-            world.spawn_empty_ent(),
-            world.spawn_empty_ent(),
-            world.spawn_empty_ent(),
+            world.spawn_empty(),
+            world.spawn_empty(),
+            world.spawn_empty(),
         ];
         for (value, entity) in entities.into_iter().enumerate() {
-            world.add_component(entity, Health(value as u32));
+            world
+                .add_component(entity, Health(value as u32))
+                .expect("the entity should be alive");
         }
         let [first, second, third] = entities;
 
-        world.despawn_ent(first);
+        world.despawn(first);
 
         assert_eq!(
             locate_alive(&world, third).row(),
@@ -1188,50 +1750,90 @@ mod tests {
 
     /// Checks that despawning drops each of the entity's components once, and no others
     #[test]
-    fn despawn_ent_with_drop_counter_drops_component_once() {
+    fn despawn_with_drop_counter_drops_component_once() {
         let drops = Arc::new(AtomicUsize::new(0));
         let mut world = World::new();
-        let doomed = world.spawn_empty_ent();
-        let survivor = world.spawn_empty_ent();
-        world.add_component(doomed, build_counter(&drops));
-        world.add_component(survivor, build_counter(&drops));
+        let doomed = world.spawn_empty();
+        let survivor = world.spawn_empty();
+        world
+            .add_component(doomed, build_counter(&drops))
+            .expect("the entity should be alive");
+        world
+            .add_component(survivor, build_counter(&drops))
+            .expect("the entity should be alive");
 
-        world.despawn_ent(doomed);
+        world.despawn(doomed);
 
         assert_eq!(drops.load(Ordering::Relaxed), 1);
     }
 
-    /// Checks that a slot whose version reaches `u32::MAX` is never reused, since its next version
-    /// would wrap round to one that an old handle may still have
+    /// Checks that a component whose clean-up code panics ends the program during a despawn,
+    /// rather than passing the panic on to the caller
+    ///
+    /// An abort ends the whole test process, which no test can catch. The test therefore runs the
+    /// test binary again as a child process, for this one test, with `ENKI_DESPAWN_ABORTS` set.
+    /// The child sees the variable and despawns the entity, which aborts it. The child prints a
+    /// marker just before the despawn. The parent then checks how the child ended, and that the
+    /// marker came out, which shows that the child reached the despawn rather than ending earlier.
+    ///
+    /// Miri cannot start a child process, so the test runs only under plain `cargo test`.
     #[test]
-    fn despawn_ent_with_version_reaching_max_retires_slot() {
-        let mut world = World::new();
-        world.spawn_empty_ent();
-        world.slots[0].version = u32::MAX - 1;
-        let last_version = Entity::new(0, u32::MAX - 1);
+    #[cfg_attr(miri, ignore)]
+    fn despawn_with_panicking_drop_aborts() {
+        const CHILD_VARIABLE: &str = "ENKI_DESPAWN_ABORTS";
+        const TEST_PATH: &str = "world::tests::despawn_with_panicking_drop_aborts";
+        const MARKER: &str = "ENKI_DESPAWN_STARTS";
 
-        let despawned = world.despawn_ent(last_version);
-        let next = world.spawn_empty_ent();
+        // Despawns the entity in the child process, which should end the child at this call
+        if env::var_os(CHILD_VARIABLE).is_some() {
+            let mut world = World::new();
+            let entity = world.spawn_empty();
+            let volatile = Volatile {
+                id: 1,
+                panics: true,
+            };
+            world
+                .add_component(entity, volatile)
+                .expect("the entity should be alive");
+            // Prints the marker and flushes it, since the abort would discard anything still
+            // buffered
+            println!("{MARKER}");
+            io::stdout().flush().expect("stdout should flush");
+            world.despawn(entity);
+            return;
+        }
 
-        assert!(despawned, "answer for the entity at the last version");
-        assert_eq!(
-            world.slots[0].version,
-            u32::MAX,
-            "version of the retired slot"
-        );
-        assert_eq!(next, Entity::new(1, 0), "handle of the next entity");
+        let test_binary = env::current_exe().expect("the test binary should have a path");
+
+        let output = Command::new(test_binary)
+            .args(["--exact", TEST_PATH, "--nocapture"])
+            .env(CHILD_VARIABLE, "1")
+            .output()
+            .expect("the test binary should start as a child process");
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+
+        // A test that fails through an ordinary panic ends the test binary with exit code 101
+        assert!(stdout.contains(MARKER), "marker printed before the despawn");
+        assert!(!output.status.success(), "child should fail");
+        assert_ne!(output.status.code(), Some(101), "child exit code");
     }
 
     /// Checks that a first component moves the entity out of the empty table, into a new table
     #[test]
-    fn insert_with_new_component_moves_entity_to_new_table() {
+    fn add_component_with_new_component_moves_entity_to_new_table() {
         let mut world = World::new();
-        let entity = world.spawn_empty_ent();
+        let entity = world.spawn_empty();
 
-        world.add_component(entity, Position(1.5));
+        world
+            .add_component(entity, Position(1.5))
+            .expect("the entity should be alive");
 
         let location = locate_alive(&world, entity);
-        let bit = world.component_bits[&TypeId::of::<Position>()];
+        let bit = world
+            .registry
+            .find_bit(TypeId::of::<Position>())
+            .expect("the type should have a bit");
         let mask = world.archetypes[location.arch_index()].mask();
         assert_eq!(world.archetypes.len(), 2, "number of tables");
         assert_eq!(location.arch_index(), 1, "table of the entity");
@@ -1250,12 +1852,16 @@ mod tests {
 
     /// Checks that a second component keeps the first, and moves the entity to a table with both
     #[test]
-    fn insert_with_second_component_keeps_first_component() {
+    fn add_component_with_second_component_keeps_first_component() {
         let mut world = World::new();
-        let entity = world.spawn_empty_ent();
-        world.add_component(entity, Position(1.5));
+        let entity = world.spawn_empty();
+        world
+            .add_component(entity, Position(1.5))
+            .expect("the entity should be alive");
 
-        world.add_component(entity, Health(100));
+        world
+            .add_component(entity, Health(100))
+            .expect("the entity should be alive");
 
         let location = locate_alive(&world, entity);
         let mask = world.archetypes[location.arch_index()].mask();
@@ -1277,15 +1883,19 @@ mod tests {
         );
     }
 
-    /// Checks that a component of a type the entity already has replaces the old one in place
+    /// Checks that a component of a type that the entity already has replaces the old one in place
     #[test]
-    fn insert_with_existing_component_type_replaces_value_in_place() {
+    fn add_component_with_existing_component_type_replaces_value_in_place() {
         let mut world = World::new();
-        let entity = world.spawn_empty_ent();
-        world.add_component(entity, Health(1));
+        let entity = world.spawn_empty();
+        world
+            .add_component(entity, Health(1))
+            .expect("the entity should be alive");
         let before = locate_alive(&world, entity);
 
-        world.add_component(entity, Health(2));
+        world
+            .add_component(entity, Health(2))
+            .expect("the entity should be alive");
 
         let after = locate_alive(&world, entity);
         assert_eq!(world.archetypes.len(), 2, "number of tables");
@@ -1300,26 +1910,34 @@ mod tests {
 
     /// Checks that replacing a component drops the old one, and leaves the new one alive
     #[test]
-    fn insert_with_existing_component_type_drops_old_value_once() {
+    fn add_component_with_existing_component_type_drops_old_value_once() {
         let drops = Arc::new(AtomicUsize::new(0));
         let mut world = World::new();
-        let entity = world.spawn_empty_ent();
-        world.add_component(entity, build_counter(&drops));
+        let entity = world.spawn_empty();
+        world
+            .add_component(entity, build_counter(&drops))
+            .expect("the entity should be alive");
 
-        world.add_component(entity, build_counter(&drops));
+        world
+            .add_component(entity, build_counter(&drops))
+            .expect("the entity should be alive");
 
         assert_eq!(drops.load(Ordering::Relaxed), 1);
     }
 
     /// Checks that entities with the same component types share one table
     #[test]
-    fn insert_with_same_types_on_two_entities_reuses_table() {
+    fn add_component_with_same_types_on_two_entities_reuses_table() {
         let mut world = World::new();
-        let first = world.spawn_empty_ent();
-        let second = world.spawn_empty_ent();
-        world.add_component(first, Health(1));
+        let first = world.spawn_empty();
+        let second = world.spawn_empty();
+        world
+            .add_component(first, Health(1))
+            .expect("the entity should be alive");
 
-        world.add_component(second, Health(2));
+        world
+            .add_component(second, Health(2))
+            .expect("the entity should be alive");
 
         let first_location = locate_alive(&world, first);
         let second_location = locate_alive(&world, second);
@@ -1335,15 +1953,23 @@ mod tests {
 
     /// Checks that an entity ends in the same table, whichever order its components arrive in
     #[test]
-    fn insert_with_types_in_either_order_ends_in_same_table() {
+    fn add_component_with_types_in_either_order_ends_in_same_table() {
         let mut world = World::new();
-        let first = world.spawn_empty_ent();
-        let second = world.spawn_empty_ent();
-        world.add_component(first, Position(1.0));
-        world.add_component(first, Health(1));
+        let first = world.spawn_empty();
+        let second = world.spawn_empty();
+        world
+            .add_component(first, Position(1.0))
+            .expect("the entity should be alive");
+        world
+            .add_component(first, Health(1))
+            .expect("the entity should be alive");
 
-        world.add_component(second, Health(2));
-        world.add_component(second, Position(2.0));
+        world
+            .add_component(second, Health(2))
+            .expect("the entity should be alive");
+        world
+            .add_component(second, Position(2.0))
+            .expect("the entity should be alive");
 
         let first_table = locate_alive(&world, first).arch_index();
         let second_table = locate_alive(&world, second).arch_index();
@@ -1354,19 +1980,23 @@ mod tests {
 
     /// Checks that moving one entity leaves every other entity with its own components
     #[test]
-    fn insert_with_entity_leaving_middle_row_keeps_other_components_in_place() {
+    fn add_component_with_entity_leaving_middle_row_keeps_other_components_in_place() {
         let mut world = World::new();
         let entities = [
-            world.spawn_empty_ent(),
-            world.spawn_empty_ent(),
-            world.spawn_empty_ent(),
+            world.spawn_empty(),
+            world.spawn_empty(),
+            world.spawn_empty(),
         ];
         for (value, entity) in entities.into_iter().enumerate() {
-            world.add_component(entity, Health(value as u32));
+            world
+                .add_component(entity, Health(value as u32))
+                .expect("the entity should be alive");
         }
         let [first, second, third] = entities;
 
-        world.add_component(second, Position(9.0));
+        world
+            .add_component(second, Position(9.0))
+            .expect("the entity should be alive");
 
         assert_eq!(
             locate_alive(&world, third).row(),
@@ -1397,28 +2027,35 @@ mod tests {
 
     /// Checks that moving an entity to a new table does not drop any of its components
     #[test]
-    fn insert_with_drop_counter_moving_tables_drops_nothing() {
+    fn add_component_with_drop_counter_moving_tables_drops_nothing() {
         let drops = Arc::new(AtomicUsize::new(0));
         let mut world = World::new();
-        let entity = world.spawn_empty_ent();
-        world.add_component(entity, build_counter(&drops));
+        let entity = world.spawn_empty();
+        world
+            .add_component(entity, build_counter(&drops))
+            .expect("the entity should be alive");
 
-        world.add_component(entity, Health(1));
+        world
+            .add_component(entity, Health(1))
+            .expect("the entity should be alive");
 
         assert_eq!(drops.load(Ordering::Relaxed), 0);
     }
 
     /// Checks that a component type that takes no memory still moves the entity to its own table
     #[test]
-    fn insert_with_zero_size_type_moves_entity_to_new_table() {
+    fn add_component_with_zero_size_type_moves_entity_to_new_table() {
+        #[derive(Debug)]
         struct Tag;
 
         impl Component for Tag {}
 
         let mut world = World::new();
-        let entity = world.spawn_empty_ent();
+        let entity = world.spawn_empty();
 
-        world.add_component(entity, Tag);
+        world
+            .add_component(entity, Tag)
+            .expect("the entity should be alive");
 
         assert_eq!(
             locate_alive(&world, entity).arch_index(),
@@ -1428,73 +2065,43 @@ mod tests {
         assert!(world.get::<Tag>(entity).is_some(), "component");
     }
 
-    /// Checks that `add_component` returns `false` for an entity that is not alive, since the entity
-    /// has no row to fill
-    #[test]
-    fn add_component_with_despawned_entity_returns_false() {
-        let mut world = World::new();
-        let entity = world.spawn_empty_ent();
-        world.despawn_ent(entity);
-
-        let added = world.add_component(entity, Health(1));
-
-        assert!(!added, "answer for a despawned entity");
-    }
-
     /// Checks that `add_component` panics on a 65th component type, since a mask has room for 64
     /// bits
     #[test]
     #[should_panic]
-    fn insert_with_65th_component_type_panics() {
+    fn add_component_with_65th_component_type_panics() {
         let mut world = World::new();
-        let entity = world.spawn_empty_ent();
+        let entity = world.spawn_empty();
         for type_id in build_64_type_ids() {
-            world.find_or_assign_bit(type_id);
+            world.registry.find_or_assign_bit(type_id);
         }
 
-        world.add_component(entity, Health(1));
+        world
+            .add_component(entity, Health(1))
+            .expect("the entity should be alive");
     }
 
-    /// Checks that 64 component types take every bit of the mask, one bit each
+    /// Checks that removing a component hands it back, and keeps the entity's other components
     #[test]
-    fn find_or_assign_bit_with_64_types_assigns_every_bit_once() {
+    fn remove_component_with_stored_component_returns_component_and_keeps_other_components() {
         let mut world = World::new();
+        let entity = world.spawn_empty();
+        world
+            .add_component(entity, Position(1.5))
+            .expect("the entity should be alive");
+        world
+            .add_component(entity, Health(100))
+            .expect("the entity should be alive");
 
-        let bits = build_64_type_ids().map(|type_id| world.find_or_assign_bit(type_id));
-
-        let expected: [ComponentMask; 64] = array::from_fn(ComponentMask::single);
-        assert_eq!(bits, expected, "one bit each, in order of first sight");
-    }
-
-    /// Checks that a type seen before keeps its first bit, and does not take a new one
-    #[test]
-    fn find_or_assign_bit_with_repeated_type_returns_same_bit() {
-        let mut world = World::new();
-        let first = world.find_or_assign_bit(TypeId::of::<Position>());
-        let other = world.find_or_assign_bit(TypeId::of::<Health>());
-
-        let repeat = world.find_or_assign_bit(TypeId::of::<Position>());
-
-        assert_eq!(repeat, first, "bit for the repeated type");
-        let expected = [ComponentMask::single(0), ComponentMask::single(1)];
-        assert_eq!([first, other], expected, "bits in order of first sight");
-        assert_eq!(world.component_bits.len(), 2, "component types");
-    }
-
-    /// Checks that removing a component drops it, and keeps the entity's other components
-    #[test]
-    fn remove_with_stored_component_returns_true_and_keeps_other_components() {
-        let mut world = World::new();
-        let entity = world.spawn_empty_ent();
-        world.add_component(entity, Position(1.5));
-        world.add_component(entity, Health(100));
-
-        let removed = world.remove::<Health>(entity);
+        let removed = world.remove_component::<Health>(entity);
 
         let location = locate_alive(&world, entity);
-        let position_bit = world.component_bits[&TypeId::of::<Position>()];
+        let position_bit = world
+            .registry
+            .find_bit(TypeId::of::<Position>())
+            .expect("the type should have a bit");
         let mask = world.archetypes[location.arch_index()].mask();
-        assert!(removed, "answer for a stored component");
+        assert_eq!(removed, Some(Health(100)), "returned component");
         assert_eq!(world.get::<Health>(entity), None, "removed component");
         assert_eq!(
             world.get::<Position>(entity),
@@ -1506,30 +2113,38 @@ mod tests {
 
     /// Checks that removing the only component returns the entity to the empty table
     #[test]
-    fn remove_with_only_component_returns_entity_to_empty_table() {
+    fn remove_component_with_only_component_returns_entity_to_empty_table() {
         let mut world = World::new();
-        let entity = world.spawn_empty_ent();
-        world.add_component(entity, Health(1));
+        let entity = world.spawn_empty();
+        world
+            .add_component(entity, Health(1))
+            .expect("the entity should be alive");
 
-        world.remove::<Health>(entity);
+        world.remove_component::<Health>(entity);
 
         let location = locate_alive(&world, entity);
         assert_eq!(location.arch_index(), World::EMPTY, "table of the entity");
         assert_eq!(world.archetypes.len(), 2, "number of tables");
     }
 
-    /// Checks that removal finds the table that `add_component` built, rather than building a second
-    /// one
+    /// Checks that removal finds the table that `add_component` built, rather than building a
+    /// second one
     #[test]
-    fn remove_with_existing_target_table_reuses_table() {
+    fn remove_component_with_existing_target_table_reuses_table() {
         let mut world = World::new();
-        let reference = world.spawn_empty_ent();
-        let entity = world.spawn_empty_ent();
-        world.add_component(reference, Position(1.0));
-        world.add_component(entity, Position(2.0));
-        world.add_component(entity, Health(2));
+        let reference = world.spawn_empty();
+        let entity = world.spawn_empty();
+        world
+            .add_component(reference, Position(1.0))
+            .expect("the entity should be alive");
+        world
+            .add_component(entity, Position(2.0))
+            .expect("the entity should be alive");
+        world
+            .add_component(entity, Health(2))
+            .expect("the entity should be alive");
 
-        world.remove::<Health>(entity);
+        world.remove_component::<Health>(entity);
 
         let reference_table = locate_alive(&world, reference).arch_index();
         let entity_table = locate_alive(&world, entity).arch_index();
@@ -1539,16 +2154,23 @@ mod tests {
 
     /// Checks that removal reaches a table that `add_component` never built, and builds it
     #[test]
-    fn remove_with_new_target_table_creates_table() {
+    fn remove_component_with_new_target_table_creates_table() {
         let mut world = World::new();
-        let entity = world.spawn_empty_ent();
-        world.add_component(entity, Position(1.0));
-        world.add_component(entity, Health(1));
+        let entity = world.spawn_empty();
+        world
+            .add_component(entity, Position(1.0))
+            .expect("the entity should be alive");
+        world
+            .add_component(entity, Health(1))
+            .expect("the entity should be alive");
 
-        world.remove::<Position>(entity);
+        world.remove_component::<Position>(entity);
 
         let location = locate_alive(&world, entity);
-        let health_bit = world.component_bits[&TypeId::of::<Health>()];
+        let health_bit = world
+            .registry
+            .find_bit(TypeId::of::<Health>())
+            .expect("the type should have a bit");
         let mask = world.archetypes[location.arch_index()].mask();
         assert_eq!(world.archetypes.len(), 4, "number of tables");
         assert_eq!(mask, health_bit, "mask of the new table");
@@ -1559,43 +2181,80 @@ mod tests {
         );
     }
 
-    /// Checks that `remove` returns `false` for a missing type, and for an entity that is not alive
+    /// Checks that `remove_component` returns `None` for a missing type, and for an entity that is
+    /// not alive
     #[test]
-    fn remove_with_nothing_to_remove_returns_false() {
+    fn remove_component_with_nothing_to_remove_returns_none() {
         let mut world = World::new();
-        let bare = world.spawn_empty_ent();
-        let with_position = world.spawn_empty_ent();
-        let despawned = world.spawn_empty_ent();
-        world.add_component(with_position, Position(1.0));
-        world.add_component(despawned, Health(1));
-        world.despawn_ent(despawned);
+        let bare = world.spawn_empty();
+        let with_position = world.spawn_empty();
+        let despawned = world.spawn_empty();
+        world
+            .add_component(with_position, Position(1.0))
+            .expect("the entity should be alive");
+        world
+            .add_component(despawned, Health(1))
+            .expect("the entity should be alive");
+        world.despawn(despawned);
 
         let answers = [
-            ("entity with no components", world.remove::<Health>(bare)),
+            (
+                "entity with no components",
+                world.remove_component::<Health>(bare),
+            ),
             (
                 "entity with another type",
-                world.remove::<Health>(with_position),
+                world.remove_component::<Health>(with_position),
             ),
-            ("despawned entity", world.remove::<Health>(despawned)),
+            (
+                "despawned entity",
+                world.remove_component::<Health>(despawned),
+            ),
         ];
 
         let kept = world.get::<Position>(with_position);
         for (label, removed) in answers {
-            assert!(!removed, "answer for {label}");
+            assert!(removed.is_none(), "answer for {label}");
         }
         assert_eq!(kept, Some(&Position(1.0)), "untouched component");
     }
 
+    /// Checks that `remove_component` returns `None` for a type that the world has never met,
+    /// without giving that type a bit or touching the entity's other components
+    #[test]
+    fn remove_component_with_type_never_seen_returns_none() {
+        let mut world = World::new();
+        let entity = world.spawn_empty();
+        world
+            .add_component(entity, Position(1.0))
+            .expect("the entity should be alive");
+
+        let removed = world.remove_component::<Velocity>(entity);
+
+        let velocity_bit = world.registry.find_bit(TypeId::of::<Velocity>());
+        assert_eq!(removed, None, "removed component");
+        assert_eq!(velocity_bit, None, "bit for `Velocity`");
+        assert_eq!(
+            world.get::<Position>(entity),
+            Some(&Position(1.0)),
+            "untouched component"
+        );
+    }
+
     /// Checks that removing a component drops it once, and does not drop anything else
     #[test]
-    fn remove_with_drop_counter_drops_component_once() {
+    fn remove_component_with_drop_counter_drops_component_once() {
         let drops = Arc::new(AtomicUsize::new(0));
         let mut world = World::new();
-        let entity = world.spawn_empty_ent();
-        world.add_component(entity, build_counter(&drops));
-        world.add_component(entity, Health(1));
+        let entity = world.spawn_empty();
+        world
+            .add_component(entity, build_counter(&drops))
+            .expect("the entity should be alive");
+        world
+            .add_component(entity, Health(1))
+            .expect("the entity should be alive");
 
-        world.remove::<DropCounter>(entity);
+        world.remove_component::<DropCounter>(entity);
 
         assert_eq!(drops.load(Ordering::Relaxed), 1);
     }
@@ -1603,16 +2262,20 @@ mod tests {
     /// Checks that moving one entity out leaves the entity that fills its row with its own
     /// components
     #[test]
-    fn remove_with_entity_leaving_first_row_keeps_other_components_in_place() {
+    fn remove_component_with_entity_leaving_first_row_keeps_other_components_in_place() {
         let mut world = World::new();
-        let first = world.spawn_empty_ent();
-        let second = world.spawn_empty_ent();
+        let first = world.spawn_empty();
+        let second = world.spawn_empty();
         for (value, entity) in [first, second].into_iter().enumerate() {
-            world.add_component(entity, Position(value as f32));
-            world.add_component(entity, Health(value as u32));
+            world
+                .add_component(entity, Position(value as f32))
+                .expect("the entity should be alive");
+            world
+                .add_component(entity, Health(value as u32))
+                .expect("the entity should be alive");
         }
 
-        world.remove::<Health>(first);
+        world.remove_component::<Health>(first);
 
         assert_eq!(
             locate_alive(&world, second).row(),
@@ -1640,12 +2303,16 @@ mod tests {
     #[test]
     fn get_with_varying_entities_returns_component_only_where_stored() {
         let mut world = World::new();
-        let stored = world.spawn_empty_ent();
-        let bare = world.spawn_empty_ent();
-        let despawned = world.spawn_empty_ent();
-        world.add_component(stored, Health(5));
-        world.add_component(despawned, Health(6));
-        world.despawn_ent(despawned);
+        let stored = world.spawn_empty();
+        let bare = world.spawn_empty();
+        let despawned = world.spawn_empty();
+        world
+            .add_component(stored, Health(5))
+            .expect("the entity should be alive");
+        world
+            .add_component(despawned, Health(6))
+            .expect("the entity should be alive");
+        world.despawn(despawned);
 
         let cases = [
             ("stored component", stored, Some(Health(5))),
@@ -1660,15 +2327,44 @@ mod tests {
         }
     }
 
+    /// Checks that despawning through a handle kept past an earlier despawn does nothing, and
+    /// leaves alone the living entity that reuses its slot
+    #[test]
+    fn despawn_with_stale_handle_to_reused_slot_returns_false_and_keeps_new_entity() {
+        let mut world = World::new();
+        let stale = world.spawn_empty();
+        world.despawn(stale);
+        let reborn = world.spawn_empty();
+        world
+            .add_component(reborn, Health(2))
+            .expect("the entity should be alive");
+
+        let despawned = world.despawn(stale);
+
+        assert!(!despawned, "answer for the stale handle");
+        assert_eq!(reborn.index(), stale.index(), "slot of the new entity");
+        assert!(world.locate(reborn).is_some(), "location of the new entity");
+        assert_eq!(
+            world.get::<Health>(reborn),
+            Some(&Health(2)),
+            "component of the new entity"
+        );
+        assert!(world.entities.read_free_list().is_empty(), "free slots");
+    }
+
     /// Checks that a handle kept past despawning never reaches the new entity in the same slot
     #[test]
     fn get_with_stale_handle_to_reused_slot_returns_none() {
         let mut world = World::new();
-        let stale = world.spawn_empty_ent();
-        world.add_component(stale, Health(1));
-        world.despawn_ent(stale);
-        let reborn = world.spawn_empty_ent();
-        world.add_component(reborn, Health(2));
+        let stale = world.spawn_empty();
+        world
+            .add_component(stale, Health(1))
+            .expect("the entity should be alive");
+        world.despawn(stale);
+        let reborn = world.spawn_empty();
+        world
+            .add_component(reborn, Health(2))
+            .expect("the entity should be alive");
 
         let through_stale = world.get::<Health>(stale);
         let through_reborn = world.get::<Health>(reborn);
@@ -1685,10 +2381,14 @@ mod tests {
     #[test]
     fn get_mut_with_stored_component_keeps_change() {
         let mut world = World::new();
-        let changed = world.spawn_empty_ent();
-        let untouched = world.spawn_empty_ent();
-        world.add_component(changed, Health(1));
-        world.add_component(untouched, Health(1));
+        let changed = world.spawn_empty();
+        let untouched = world.spawn_empty();
+        world
+            .add_component(changed, Health(1))
+            .expect("the entity should be alive");
+        world
+            .add_component(untouched, Health(1))
+            .expect("the entity should be alive");
 
         if let Some(health) = world.get_mut::<Health>(changed) {
             health.0 = 50;
@@ -1710,10 +2410,12 @@ mod tests {
     #[test]
     fn get_mut_with_nothing_stored_returns_none() {
         let mut world = World::new();
-        let bare = world.spawn_empty_ent();
-        let despawned = world.spawn_empty_ent();
-        world.add_component(despawned, Health(1));
-        world.despawn_ent(despawned);
+        let bare = world.spawn_empty();
+        let despawned = world.spawn_empty();
+        world
+            .add_component(despawned, Health(1))
+            .expect("the entity should be alive");
+        world.despawn(despawned);
 
         let missing_type = world.get_mut::<Health>(bare).is_none();
         let not_alive = world.get_mut::<Health>(despawned).is_none();
@@ -1727,49 +2429,86 @@ mod tests {
     fn drop_with_components_in_several_tables_drops_each_once() {
         let drops = Arc::new(AtomicUsize::new(0));
         let mut world = World::new();
-        let alone = world.spawn_empty_ent();
-        let paired = world.spawn_empty_ent();
-        world.add_component(alone, build_counter(&drops));
-        world.add_component(paired, build_counter(&drops));
-        world.add_component(paired, Health(1));
+        let alone = world.spawn_empty();
+        let paired = world.spawn_empty();
+        world
+            .add_component(alone, build_counter(&drops))
+            .expect("the entity should be alive");
+        world
+            .add_component(paired, build_counter(&drops))
+            .expect("the entity should be alive");
+        world
+            .add_component(paired, Health(1))
+            .expect("the entity should be alive");
 
         drop(world);
 
         assert_eq!(drops.load(Ordering::Relaxed), 2);
     }
 
-    /// Checks that `default` files the empty table under the empty mask, with no types or free slots
+    /// Checks that a type of size zero with clean-up code is dropped once, whether it moves to
+    /// another table, is removed, is despawned, or stays until the world is dropped
     #[test]
-    fn default_with_no_args_files_empty_table_under_empty_mask() {
-        let world = World::default();
+    fn drop_with_zero_size_drop_type_drops_each_component_once() {
+        // Counts the drops outside the type, since a type of size zero has no room for a counter
+        static DROPS: AtomicUsize = AtomicUsize::new(0);
 
-        let empty_index = world.indices.get(&ComponentMask::EMPTY);
-        let empty_mask = world.archetypes[World::EMPTY].mask();
+        #[derive(Debug)]
+        struct Fleeting;
+
+        impl Component for Fleeting {}
+
+        impl Drop for Fleeting {
+            fn drop(&mut self) {
+                DROPS.fetch_add(1, Ordering::Relaxed);
+            }
+        }
+
+        let mut world = World::new();
+        let mover = world.spawn_empty();
+        let removed = world.spawn_empty();
+        let despawned = world.spawn_empty();
+        for entity in [mover, removed, despawned] {
+            world
+                .add_component(entity, Fleeting)
+                .expect("the entity should be alive");
+        }
+
+        world
+            .add_component(mover, Health(1))
+            .expect("the entity should be alive");
+        let drops_after_move = DROPS.load(Ordering::Relaxed);
+        world.remove_component::<Fleeting>(removed);
+        world.despawn(despawned);
+        let drops_after_removals = DROPS.load(Ordering::Relaxed);
+        drop(world);
+        let drops_after_world = DROPS.load(Ordering::Relaxed);
+
+        assert_eq!(drops_after_move, 0, "drops caused by the move");
         assert_eq!(
-            empty_index,
-            Some(&World::EMPTY),
-            "table under the empty mask"
+            drops_after_removals, 2,
+            "drops after `remove_component` and `despawn`"
         );
-        assert_eq!(empty_mask, ComponentMask::EMPTY, "mask of the empty table");
-        assert!(world.component_bits.is_empty(), "component types");
-        assert!(world.free_slots.is_empty(), "free slots");
+        assert_eq!(drops_after_world, 3, "drops after the world is gone");
     }
 
     /// Checks that despawning the entity in the last row leaves every other entity in its row
     #[test]
-    fn despawn_ent_with_last_row_leaves_other_rows_in_place() {
+    fn despawn_with_last_row_leaves_other_rows_in_place() {
         let mut world = World::new();
         let entities = [
-            world.spawn_empty_ent(),
-            world.spawn_empty_ent(),
-            world.spawn_empty_ent(),
+            world.spawn_empty(),
+            world.spawn_empty(),
+            world.spawn_empty(),
         ];
         for (value, entity) in entities.into_iter().enumerate() {
-            world.add_component(entity, Health(value as u32));
+            world
+                .add_component(entity, Health(value as u32))
+                .expect("the entity should be alive");
         }
         let [first, second, third] = entities;
 
-        let despawned = world.despawn_ent(third);
+        let despawned = world.despawn(third);
 
         let table = locate_alive(&world, first).arch_index();
         let rows = [
@@ -1791,11 +2530,12 @@ mod tests {
         );
     }
 
-    /// Checks that `add_component` returns `false` for a handle of no living entity, and leaves the
-    /// world unchanged
+    /// Checks that `add_component` hands the component back for a handle that does not refer to a
+    /// living entity, and leaves the world unchanged
     #[test]
-    fn add_component_with_handle_of_no_living_entity_returns_false() {
+    fn add_component_with_handle_of_no_living_entity_returns_component() {
         let cases = [
+            ("despawned entity", Entity::new(1, 0)),
             ("index past the last slot", Entity::new(5, 0)),
             ("later version", Entity::new(0, 1)),
             ("largest index and version", Entity::new(u32::MAX, u32::MAX)),
@@ -1803,31 +2543,35 @@ mod tests {
 
         for (label, handle) in cases {
             let mut world = World::new();
-            world.spawn_empty_ent();
+            world.spawn_empty();
+            // Spawns and despawns the entity at index 1, which the first case then uses
+            let despawned = world.spawn_empty();
+            world.despawn(despawned);
 
             let added = world.add_component(handle, Health(1));
 
-            assert!(!added, "answer for {label}");
+            assert_eq!(added, Err(Health(1)), "answer for {label}");
             assert_eq!(world.archetypes.len(), 1, "number of tables for {label}");
             assert!(
-                world.component_bits.is_empty(),
+                world.registry.count_types() == 0,
                 "component types for {label}"
             );
         }
     }
 
-    /// Checks that a bundle of new types moves the entity to one new table, with every component
+    /// Checks that a component set of new types moves the entity to one new table, with every
+    /// component
     #[test]
     fn add_components_with_new_types_moves_entity_to_new_table() {
         let mut world = World::new();
-        let entity = world.spawn_empty_ent();
+        let entity = world.spawn_empty();
 
         let added = world.add_components(entity, (Position(1.5), Health(100)));
 
         let location = locate_alive(&world, entity);
         let mask = world.archetypes[location.arch_index()].mask();
         let empty_rows = world.archetypes[World::EMPTY].len();
-        assert!(added, "answer for a living entity");
+        assert_eq!(added, Ok(()), "answer for a living entity");
         assert_eq!(world.archetypes.len(), 2, "number of tables");
         assert_eq!(
             mask,
@@ -1843,10 +2587,10 @@ mod tests {
         assert_eq!(world.get::<Health>(entity), Some(&Health(100)), "health");
     }
 
-    /// Checks that `add_components` returns `false` for a handle of no living entity, and leaves the
-    /// world unchanged
+    /// Checks that `add_components` hands the component set back for a handle that does not refer
+    /// to a living entity, and leaves the world unchanged
     #[test]
-    fn add_components_with_handle_of_no_living_entity_returns_false() {
+    fn add_components_with_handle_of_no_living_entity_returns_set() {
         let cases = [
             ("despawned", Entity::new(0, 0)),
             ("index past the last slot", Entity::new(5, 0)),
@@ -1855,46 +2599,54 @@ mod tests {
 
         for (label, handle) in cases {
             let mut world = World::new();
-            let entity = world.spawn_empty_ent();
-            world.despawn_ent(entity);
+            let entity = world.spawn_empty();
+            world.despawn(entity);
 
             let added = world.add_components(handle, (Position(1.0), Health(1)));
 
-            assert!(!added, "answer for {label}");
+            assert_eq!(added, Err((Position(1.0), Health(1))), "answer for {label}");
             assert_eq!(world.archetypes.len(), 1, "number of tables for {label}");
             assert!(
-                world.component_bits.is_empty(),
+                world.registry.count_types() == 0,
                 "component types for {label}"
             );
         }
     }
 
-    /// Checks that `add_components` drops the bundle once, where the handle refers to no living
-    /// entity
+    /// Checks that `add_components` hands the component set back without dropping it, where the
+    /// handle does not refer to a living entity, and that the component set drops once when the
+    /// caller drops it
     #[test]
-    fn add_components_with_despawned_entity_drops_bundle_once() {
+    fn add_components_with_despawned_entity_returns_set_undropped() {
         let drops = Arc::new(AtomicUsize::new(0));
         let mut world = World::new();
-        let entity = world.spawn_empty_ent();
-        world.despawn_ent(entity);
+        let entity = world.spawn_empty();
+        world.despawn(entity);
 
-        world.add_components(entity, (build_counter(&drops), Health(1)));
+        let returned = world.add_components(entity, (build_counter(&drops), Health(1)));
+        let drops_while_held = drops.load(Ordering::Relaxed);
+        drop(returned);
+        let drops_after = drops.load(Ordering::Relaxed);
 
-        assert_eq!(drops.load(Ordering::Relaxed), 1);
+        assert_eq!(drops_while_held, 0, "drops while the caller holds it");
+        assert_eq!(drops_after, 1, "drops once the caller drops it");
     }
 
-    /// Checks that a bundle of types that the entity already has replaces each value in place
+    /// Checks that a component set of types that the entity already has replaces each value in
+    /// place
     #[test]
     fn add_components_with_every_type_stored_replaces_values_in_place() {
         let mut world = World::new();
-        let entity = world.spawn_empty_ent();
-        world.add_components(entity, (Position(1.0), Health(1)));
+        let entity = world.spawn_empty();
+        world
+            .add_components(entity, (Position(1.0), Health(1)))
+            .expect("the entity should be alive");
         let before = locate_alive(&world, entity);
 
         let added = world.add_components(entity, (Health(2), Position(2.0)));
 
         let after = locate_alive(&world, entity);
-        assert!(added, "answer for a living entity");
+        assert_eq!(added, Ok(()), "answer for a living entity");
         assert_eq!(world.archetypes.len(), 2, "number of tables");
         assert_eq!(
             after.arch_index(),
@@ -1915,27 +2667,33 @@ mod tests {
     fn add_components_with_every_type_stored_drops_old_values_once() {
         let drops = Arc::new(AtomicUsize::new(0));
         let mut world = World::new();
-        let entity = world.spawn_empty_ent();
-        world.add_components(entity, (build_counter(&drops), Health(1)));
+        let entity = world.spawn_empty();
+        world
+            .add_components(entity, (build_counter(&drops), Health(1)))
+            .expect("the entity should be alive");
 
-        world.add_components(entity, (build_counter(&drops), Health(2)));
+        world
+            .add_components(entity, (build_counter(&drops), Health(2)))
+            .expect("the entity should be alive");
 
         assert_eq!(drops.load(Ordering::Relaxed), 1);
     }
 
-    /// Checks that a bundle of new and stored types adds the new ones, replaces the stored ones, and
-    /// keeps every other component
+    /// Checks that a component set of new and stored types adds the new ones, replaces the stored
+    /// ones, and keeps every other component
     #[test]
     fn add_components_with_new_and_stored_types_keeps_one_value_per_type() {
         let mut world = World::new();
-        let entity = world.spawn_empty_ent();
-        world.add_components(entity, (Position(1.0), Health(1)));
+        let entity = world.spawn_empty();
+        world
+            .add_components(entity, (Position(1.0), Health(1)))
+            .expect("the entity should be alive");
 
         let added = world.add_components(entity, (Health(5), Velocity(2.0)));
 
         let location = locate_alive(&world, entity);
         let mask = world.archetypes[location.arch_index()].mask();
-        assert!(added, "answer for a living entity");
+        assert_eq!(added, Ok(()), "answer for a living entity");
         assert_eq!(world.archetypes.len(), 3, "number of tables");
         assert_eq!(
             mask,
@@ -1959,17 +2717,91 @@ mod tests {
         );
     }
 
-    /// Checks that a bundle that moves the entity drops only the component that it replaces
+    /// Checks that a component set that moves the entity drops only the component that it replaces
     #[test]
     fn add_components_with_new_and_stored_types_drops_only_replaced_value() {
         let drops = Arc::new(AtomicUsize::new(0));
         let mut world = World::new();
-        let entity = world.spawn_empty_ent();
-        world.add_component(entity, build_counter(&drops));
+        let entity = world.spawn_empty();
+        world
+            .add_component(entity, build_counter(&drops))
+            .expect("the entity should be alive");
 
-        world.add_components(entity, (build_counter(&drops), Health(1)));
+        world
+            .add_components(entity, (build_counter(&drops), Health(1)))
+            .expect("the entity should be alive");
 
         assert_eq!(drops.load(Ordering::Relaxed), 1);
+    }
+
+    /// Checks that a component set that moves the entity, and replaces a component whose `Drop`
+    /// panics, leaves each handle on its own entity once the caller catches the panic
+    #[test]
+    fn add_components_with_panicking_replaced_component_keeps_each_handle_on_its_own_entity() {
+        let mut world = World::new();
+        let moving = world.spawn_empty();
+        let filling = world.spawn_empty();
+        world
+            .add_components(
+                moving,
+                (
+                    Volatile {
+                        id: 1,
+                        panics: true,
+                    },
+                    Position(1.0),
+                ),
+            )
+            .expect("the entity should be alive");
+        world
+            .add_components(
+                filling,
+                (
+                    Volatile {
+                        id: 2,
+                        panics: false,
+                    },
+                    Position(2.0),
+                ),
+            )
+            .expect("the entity should be alive");
+
+        let outcome = panic::catch_unwind(AssertUnwindSafe(|| {
+            world.add_components(
+                moving,
+                (
+                    Volatile {
+                        id: 3,
+                        panics: false,
+                    },
+                    Velocity(9.0),
+                ),
+            )
+        }));
+
+        let read_volatile = |entity| world.get::<Volatile>(entity).map(|volatile| volatile.id);
+        assert!(outcome.is_err(), "panic from the replaced component");
+        assert_eq!(read_volatile(moving), Some(3), "moved entity's replacement");
+        assert_eq!(
+            world.get::<Position>(moving),
+            Some(&Position(1.0)),
+            "moved entity's kept component"
+        );
+        assert_eq!(
+            world.get::<Velocity>(moving),
+            Some(&Velocity(9.0)),
+            "moved entity's new component"
+        );
+        assert_eq!(
+            read_volatile(filling),
+            Some(2),
+            "filling entity's component"
+        );
+        assert_eq!(
+            world.get::<Position>(filling),
+            Some(&Position(2.0)),
+            "filling entity's position"
+        );
     }
 
     /// Checks that the entity that fills the row left behind keeps its own component, at that row
@@ -1977,16 +2809,20 @@ mod tests {
     fn add_components_with_entity_leaving_first_row_updates_filling_entity() {
         let mut world = World::new();
         let entities = [
-            world.spawn_empty_ent(),
-            world.spawn_empty_ent(),
-            world.spawn_empty_ent(),
+            world.spawn_empty(),
+            world.spawn_empty(),
+            world.spawn_empty(),
         ];
         for (value, entity) in entities.into_iter().enumerate() {
-            world.add_component(entity, Health(value as u32));
+            world
+                .add_component(entity, Health(value as u32))
+                .expect("the entity should be alive");
         }
         let [first, second, third] = entities;
 
-        world.add_components(first, (Position(9.0),));
+        world
+            .add_components(first, (Position(9.0),))
+            .expect("the entity should be alive");
 
         assert_eq!(
             locate_alive(&world, third).row(),
@@ -2015,15 +2851,19 @@ mod tests {
         );
     }
 
-    /// Checks that two bundles with the same types in either order reach the same table
+    /// Checks that two component sets with the same types in either order reach the same table
     #[test]
     fn add_components_with_types_in_either_order_ends_in_same_table() {
         let mut world = World::new();
-        let first = world.spawn_empty_ent();
-        let second = world.spawn_empty_ent();
+        let first = world.spawn_empty();
+        let second = world.spawn_empty();
 
-        world.add_components(first, (Position(1.0), Health(1)));
-        world.add_components(second, (Health(2), Position(2.0)));
+        world
+            .add_components(first, (Position(1.0), Health(1)))
+            .expect("the entity should be alive");
+        world
+            .add_components(second, (Health(2), Position(2.0)))
+            .expect("the entity should be alive");
 
         let first_table = locate_alive(&world, first).arch_index();
         let second_table = locate_alive(&world, second).arch_index();
@@ -2031,41 +2871,59 @@ mod tests {
         assert_eq!(world.archetypes.len(), 2, "number of tables");
     }
 
-    /// Checks that a bundle with a type of size zero stores every component that it contains
+    /// Checks that a component set with a type of size zero stores every component that it contains
     #[test]
     fn add_components_with_zero_size_type_stores_every_component() {
         let mut world = World::new();
-        let entity = world.spawn_empty_ent();
+        let entity = world.spawn_empty();
 
         let added = world.add_components(entity, (Marker, Health(3)));
 
-        assert!(added, "answer for a living entity");
+        assert_eq!(added, Ok(()), "answer for a living entity");
         assert_eq!(world.get::<Marker>(entity), Some(&Marker), "marker");
         assert_eq!(world.get::<Health>(entity), Some(&Health(3)), "health");
     }
 
-    /// Checks that `add_components` panics on a bundle that lists one type twice
+    /// Checks the largest component set, of thirty-two fields, which moves the entity to one table
+    /// with a column for each field
+    #[test]
+    fn add_components_with_32_fields_stores_every_component() {
+        let mut world = World::new();
+        let entity = world.spawn_empty();
+
+        let added = world.add_components(entity, build_set_32()).is_ok();
+
+        let location = locate_alive(&world, entity);
+        let mask = world.archetypes[location.arch_index()].mask();
+        let positions: Vec<usize> = (0..32).collect();
+        assert!(added, "answer for a living entity");
+        assert_eq!(
+            mask,
+            ComponentMask::from_positions(&positions),
+            "mask of the entity's table"
+        );
+        assert_eq!(
+            world.get::<Numbered<0>>(entity),
+            Some(&Numbered(0)),
+            "first component"
+        );
+        assert_eq!(
+            world.get::<Numbered<31>>(entity),
+            Some(&Numbered(31)),
+            "last component"
+        );
+    }
+
+    /// Checks that `add_components` panics on a component set that lists one type twice
     #[test]
     #[should_panic]
     fn add_components_with_same_type_twice_panics() {
         let mut world = World::new();
-        let entity = world.spawn_empty_ent();
+        let entity = world.spawn_empty();
 
-        world.add_components(entity, (Health(1), Health(2)));
-    }
-
-    /// Checks that `add_components` panics on a 65th component type, since a mask has room for 64
-    /// bits
-    #[test]
-    #[should_panic]
-    fn add_components_with_65th_component_type_panics() {
-        let mut world = World::new();
-        let entity = world.spawn_empty_ent();
-        for type_id in build_64_type_ids() {
-            world.find_or_assign_bit(type_id);
-        }
-
-        world.add_components(entity, (Health(1),));
+        world
+            .add_components(entity, (Health(1), Health(2)))
+            .expect("the entity should be alive");
     }
 
     /// Checks that `reserve` creates an empty table for new types, and gives each type a bit
@@ -2075,34 +2933,43 @@ mod tests {
 
         world.reserve::<(Position, Health)>(4);
 
-        let position_bit = world.component_bits[&TypeId::of::<Position>()];
-        let health_bit = world.component_bits[&TypeId::of::<Health>()];
+        let position_bit = world
+            .registry
+            .find_bit(TypeId::of::<Position>())
+            .expect("the type should have a bit");
+        let health_bit = world
+            .registry
+            .find_bit(TypeId::of::<Health>())
+            .expect("the type should have a bit");
         let table = &world.archetypes[1];
         let table_index = world.indices.get(&(position_bit | health_bit));
         assert_eq!(world.archetypes.len(), 2, "number of tables");
         assert_eq!(
             [position_bit, health_bit],
             [ComponentMask::single(0), ComponentMask::single(1)],
-            "bits in order of the bundle"
+            "bits in order of the component set"
         );
         assert_eq!(table.mask(), position_bit | health_bit, "mask of the table");
         assert_eq!(table_index, Some(&1), "table under its mask");
         assert_eq!(table.len(), 0, "rows in the table");
-        assert!(world.slots.capacity() >= 4, "room in the list of slots");
+        assert!(
+            world.entities.slot_capacity() >= 4,
+            "room in the list of slots"
+        );
     }
 
-    /// Checks that `reserve` makes room for each entity that a freed slot will not take
+    /// Checks that `reserve` gives every column of the reserved table room for the entities that
+    /// it asks for, before any entity arrives
     #[test]
-    fn reserve_with_freed_slots_makes_room_for_remaining_slots() {
+    fn reserve_with_new_types_gives_each_column_reserved_capacity() {
         let mut world = World::new();
-        let first = world.spawn_empty_ent();
-        let second = world.spawn_empty_ent();
-        world.despawn_ent(first);
-        world.despawn_ent(second);
 
-        world.reserve::<(Health,)>(5);
+        world.reserve::<(Position, Name)>(10);
 
-        assert!(world.slots.capacity() >= 5, "room in the list of slots");
+        let table = &world.archetypes[1];
+        let capacities = [TypeId::of::<Position>(), TypeId::of::<Name>()]
+            .map(|type_id| table.components_of(type_id).map(ComponentVec::capacity));
+        assert_eq!(capacities, [Some(10), Some(10)], "capacity of each column");
     }
 
     /// Checks that entities spawned after `reserve` reach the reserved table, with their own values
@@ -2116,8 +2983,10 @@ mod tests {
 
             let entities: Vec<Entity> = (0..count)
                 .map(|value| {
-                    let entity = world.spawn_empty_ent();
-                    world.add_components(entity, (Position(value as f32), Health(value as u32)));
+                    let entity = world.spawn_empty();
+                    world
+                        .add_components(entity, (Position(value as f32), Health(value as u32)))
+                        .expect("the entity should be alive");
                     entity
                 })
                 .collect();
@@ -2141,8 +3010,10 @@ mod tests {
     #[test]
     fn reserve_with_existing_table_reuses_table() {
         let mut world = World::new();
-        let entity = world.spawn_empty_ent();
-        world.add_components(entity, (Position(1.0), Health(1)));
+        let entity = world.spawn_empty();
+        world
+            .add_components(entity, (Position(1.0), Health(1)))
+            .expect("the entity should be alive");
 
         world.reserve::<(Health, Position)>(3);
 
@@ -2154,7 +3025,7 @@ mod tests {
         );
     }
 
-    /// Checks that `reserve` panics on a bundle type that lists one type twice
+    /// Checks that `reserve` panics on a component set type that lists one type twice
     #[test]
     #[should_panic]
     fn reserve_with_same_type_twice_panics() {
@@ -2172,46 +3043,21 @@ mod tests {
         world.reserve::<(Health,)>(usize::MAX);
     }
 
-    /// Checks that a type seen before keeps its bit, even once every bit is taken
-    #[test]
-    fn find_or_assign_bit_with_full_world_and_known_type_returns_its_bit() {
-        let mut world = World::new();
-        let type_ids = build_64_type_ids();
-        for type_id in type_ids {
-            world.find_or_assign_bit(type_id);
-        }
-
-        let last = world.find_or_assign_bit(type_ids[63]);
-
-        assert_eq!(last, ComponentMask::single(63), "bit of the last type");
-        assert_eq!(world.component_bits.len(), 64, "component types");
-    }
-
-    /// Checks that `find_or_assign_bit` panics on a 65th type, since a mask has room for 64 bits
-    #[test]
-    #[should_panic]
-    fn find_or_assign_bit_with_65th_type_panics() {
-        let mut world = World::new();
-        for type_id in build_64_type_ids() {
-            world.find_or_assign_bit(type_id);
-        }
-
-        world.find_or_assign_bit(TypeId::of::<Health>());
-    }
-
     /// Checks that `get` returns `None` for a type that the world has never met
     #[test]
     fn get_with_type_never_seen_returns_none() {
         let mut world = World::new();
-        let entity = world.spawn_empty_ent();
-        world.add_component(entity, Health(1));
+        let entity = world.spawn_empty();
+        world
+            .add_component(entity, Health(1))
+            .expect("the entity should be alive");
 
         let found = world.get::<Velocity>(entity);
 
         assert_eq!(found, None);
     }
 
-    /// Checks that a handle at another version of a living entity's slot reaches nothing
+    /// Checks that a handle at another version of a living entity's slot does not reach an entity
     #[test]
     fn get_with_other_version_of_living_slot_returns_none() {
         let cases = [
@@ -2219,8 +3065,10 @@ mod tests {
             ("largest version", Entity::new(0, u32::MAX)),
         ];
         let mut world = World::new();
-        let entity = world.spawn_empty_ent();
-        world.add_component(entity, Health(1));
+        let entity = world.spawn_empty();
+        world
+            .add_component(entity, Health(1))
+            .expect("the entity should be alive");
 
         let answers = cases.map(|(label, handle)| (label, world.get::<Health>(handle)));
 
@@ -2238,8 +3086,10 @@ mod tests {
             ("largest index and version", Entity::new(u32::MAX, u32::MAX)),
         ];
         let mut world = World::new();
-        let entity = world.spawn_empty_ent();
-        world.add_component(entity, Health(1));
+        let entity = world.spawn_empty();
+        world
+            .add_component(entity, Health(1))
+            .expect("the entity should be alive");
 
         let answers =
             cases.map(|(label, handle)| (label, world.get_mut::<Health>(handle).is_none()));
@@ -2253,8 +3103,10 @@ mod tests {
     #[test]
     fn get_mut_with_type_never_seen_returns_none() {
         let mut world = World::new();
-        let entity = world.spawn_empty_ent();
-        world.add_component(entity, Health(1));
+        let entity = world.spawn_empty();
+        world
+            .add_component(entity, Health(1))
+            .expect("the entity should be alive");
 
         let missing = world.get_mut::<Velocity>(entity).is_none();
 
@@ -2265,14 +3117,22 @@ mod tests {
     #[test]
     fn query_mut_with_several_tables_visits_only_entities_with_every_type() {
         let mut world = World::new();
-        let alone = world.spawn_empty_ent();
-        let paired = world.spawn_empty_ent();
-        let tripled = world.spawn_empty_ent();
-        let health_only = world.spawn_empty_ent();
-        world.add_component(alone, Position(1.0));
-        world.add_components(paired, (Position(2.0), Health(2)));
-        world.add_components(tripled, (Position(3.0), Health(3), Velocity(3.0)));
-        world.add_component(health_only, Health(4));
+        let alone = world.spawn_empty();
+        let paired = world.spawn_empty();
+        let tripled = world.spawn_empty();
+        let health_only = world.spawn_empty();
+        world
+            .add_component(alone, Position(1.0))
+            .expect("the entity should be alive");
+        world
+            .add_components(paired, (Position(2.0), Health(2)))
+            .expect("the entity should be alive");
+        world
+            .add_components(tripled, (Position(3.0), Health(3), Velocity(3.0)))
+            .expect("the entity should be alive");
+        world
+            .add_component(health_only, Health(4))
+            .expect("the entity should be alive");
 
         let mut found: Vec<(f32, u32)> = world
             .query_mut::<(&Position, &Health)>()
@@ -2289,15 +3149,17 @@ mod tests {
     fn query_mut_with_one_table_returns_items_in_row_order() {
         let mut world = World::new();
         let entities = [
-            world.spawn_empty_ent(),
-            world.spawn_empty_ent(),
-            world.spawn_empty_ent(),
-            world.spawn_empty_ent(),
+            world.spawn_empty(),
+            world.spawn_empty(),
+            world.spawn_empty(),
+            world.spawn_empty(),
         ];
         for (value, entity) in entities.into_iter().enumerate() {
-            world.add_component(entity, Health(value as u32));
+            world
+                .add_component(entity, Health(value as u32))
+                .expect("the entity should be alive");
         }
-        world.despawn_ent(entities[0]);
+        world.despawn(entities[0]);
 
         let found: Vec<u32> = world
             .query_mut::<&Health>()
@@ -2311,10 +3173,14 @@ mod tests {
     #[test]
     fn query_mut_with_mutable_query_keeps_changes_for_get() {
         let mut world = World::new();
-        let alone = world.spawn_empty_ent();
-        let paired = world.spawn_empty_ent();
-        world.add_component(alone, Health(1));
-        world.add_components(paired, (Position(2.0), Health(2)));
+        let alone = world.spawn_empty();
+        let paired = world.spawn_empty();
+        world
+            .add_component(alone, Health(1))
+            .expect("the entity should be alive");
+        world
+            .add_components(paired, (Position(2.0), Health(2)))
+            .expect("the entity should be alive");
 
         for health in world.query_mut::<&mut Health>() {
             health.0 += 10;
@@ -2332,10 +3198,14 @@ mod tests {
     #[test]
     fn query_mut_with_nested_pair_returns_each_part() {
         let mut world = World::new();
-        let first = world.spawn_empty_ent();
-        let second = world.spawn_empty_ent();
-        world.add_components(first, (Position(1.0), Health(1), Velocity(1.5)));
-        world.add_components(second, (Position(2.0), Health(2), Velocity(2.5)));
+        let first = world.spawn_empty();
+        let second = world.spawn_empty();
+        world
+            .add_components(first, (Position(1.0), Health(1), Velocity(1.5)))
+            .expect("the entity should be alive");
+        world
+            .add_components(second, (Position(2.0), Health(2), Velocity(2.5)))
+            .expect("the entity should be alive");
 
         let found: Vec<(f32, u32, f32)> = world
             .query_mut::<((&Position, &mut Health), &Velocity)>()
@@ -2345,12 +3215,40 @@ mod tests {
         assert_eq!(found, [(1.0, 1, 1.5), (2.0, 2, 2.5)]);
     }
 
+    /// Checks that a flat tuple returns the component for each field, from the same entity, and
+    /// skips an entity that lacks one of the types
+    #[test]
+    fn query_mut_with_flat_tuple_returns_each_field() {
+        let mut world = World::new();
+        let first = world.spawn_empty();
+        let second = world.spawn_empty();
+        let partial = world.spawn_empty();
+        world
+            .add_components(first, (Position(1.0), Health(1), Velocity(1.5)))
+            .expect("the entity should be alive");
+        world
+            .add_components(second, (Position(2.0), Health(2), Velocity(2.5)))
+            .expect("the entity should be alive");
+        world
+            .add_components(partial, (Position(3.0), Health(3)))
+            .expect("the entity should be alive");
+
+        let found: Vec<(f32, u32, f32)> = world
+            .query_mut::<(&Position, &mut Health, &Velocity)>()
+            .map(|(position, health, velocity)| (position.0, health.0, velocity.0))
+            .collect();
+
+        assert_eq!(found, [(1.0, 1, 1.5), (2.0, 2, 2.5)]);
+    }
+
     /// Checks that a query that reads one type twice returns that component in both parts
     #[test]
     fn query_mut_with_two_reads_of_same_type_returns_both() {
         let mut world = World::new();
-        let entity = world.spawn_empty_ent();
-        world.add_component(entity, Position(4.0));
+        let entity = world.spawn_empty();
+        world
+            .add_component(entity, Position(4.0))
+            .expect("the entity should be alive");
 
         let found: Vec<(f32, f32)> = world
             .query_mut::<(&Position, &Position)>()
@@ -2364,8 +3262,10 @@ mod tests {
     #[test]
     fn query_mut_with_type_never_seen_returns_nothing() {
         let mut world = World::new();
-        let entity = world.spawn_empty_ent();
-        world.add_component(entity, Position(1.0));
+        let entity = world.spawn_empty();
+        world
+            .add_component(entity, Position(1.0))
+            .expect("the entity should be alive");
 
         let found = world.query_mut::<&Velocity>().count();
 
@@ -2387,13 +3287,19 @@ mod tests {
     fn query_mut_with_zero_size_type_visits_each_entity_with_it() {
         let mut world = World::new();
         let entities = [
-            world.spawn_empty_ent(),
-            world.spawn_empty_ent(),
-            world.spawn_empty_ent(),
+            world.spawn_empty(),
+            world.spawn_empty(),
+            world.spawn_empty(),
         ];
-        world.add_components(entities[0], (Marker, Health(0)));
-        world.add_components(entities[1], (Marker, Health(1)));
-        world.add_component(entities[2], Health(2));
+        world
+            .add_components(entities[0], (Marker, Health(0)))
+            .expect("the entity should be alive");
+        world
+            .add_components(entities[1], (Marker, Health(1)))
+            .expect("the entity should be alive");
+        world
+            .add_component(entities[2], Health(2))
+            .expect("the entity should be alive");
 
         let found: Vec<u32> = world
             .query_mut::<(&Marker, &mut Health)>()
@@ -2408,42 +3314,40 @@ mod tests {
     #[should_panic]
     fn query_mut_with_write_and_read_of_same_type_panics() {
         let mut world = World::new();
-        let entity = world.spawn_empty_ent();
-        world.add_component(entity, Position(1.0));
+        let entity = world.spawn_empty();
+        world
+            .add_component(entity, Position(1.0))
+            .expect("the entity should be alive");
 
         let _items = world.query_mut::<(&mut Position, &Position)>();
     }
 
-    /// Checks that `query_mut` panics on a 65th component type, since a mask has room for 64 bits
-    #[test]
-    #[should_panic]
-    fn query_mut_with_65th_component_type_panics() {
-        let mut world = World::new();
-        for type_id in build_64_type_ids() {
-            world.find_or_assign_bit(type_id);
-        }
-
-        let _items = world.query_mut::<&Health>();
-    }
-
-    /// Checks that `query_tables_mut` returns one item for each matching table, with its whole
+    /// Checks that `query_archetype_mut` returns one item for each matching table, with its whole
     /// column
     #[test]
-    fn query_tables_mut_with_several_matching_tables_returns_one_column_per_table() {
+    fn query_archetype_mut_with_several_matching_tables_returns_one_column_per_table() {
         let mut world = World::new();
         let entities = [
-            world.spawn_empty_ent(),
-            world.spawn_empty_ent(),
-            world.spawn_empty_ent(),
-            world.spawn_empty_ent(),
+            world.spawn_empty(),
+            world.spawn_empty(),
+            world.spawn_empty(),
+            world.spawn_empty(),
         ];
-        world.add_component(entities[0], Position(1.0));
-        world.add_component(entities[1], Position(2.0));
-        world.add_components(entities[2], (Position(3.0), Health(3)));
-        world.add_component(entities[3], Health(4));
+        world
+            .add_component(entities[0], Position(1.0))
+            .expect("the entity should be alive");
+        world
+            .add_component(entities[1], Position(2.0))
+            .expect("the entity should be alive");
+        world
+            .add_components(entities[2], (Position(3.0), Health(3)))
+            .expect("the entity should be alive");
+        world
+            .add_component(entities[3], Health(4))
+            .expect("the entity should be alive");
 
         let mut lengths: Vec<usize> = world
-            .query_tables_mut::<&Position>()
+            .query_archetype_mut::<&Position>()
             .map(|positions| positions.len())
             .collect();
         lengths.sort_unstable();
@@ -2451,34 +3355,42 @@ mod tests {
         assert_eq!(lengths, [1, 2]);
     }
 
-    /// Checks that `query_tables_mut` skips a matching table once its last entity has left
+    /// Checks that `query_archetype_mut` skips a matching table once its last entity has left
     #[test]
-    fn query_tables_mut_with_emptied_table_skips_it() {
+    fn query_archetype_mut_with_emptied_table_skips_it() {
         let mut world = World::new();
-        let leaver = world.spawn_empty_ent();
-        let stayer = world.spawn_empty_ent();
-        world.add_component(leaver, Position(1.0));
-        world.remove::<Position>(leaver);
-        world.add_components(stayer, (Position(2.0), Health(2)));
+        let leaver = world.spawn_empty();
+        let stayer = world.spawn_empty();
+        world
+            .add_component(leaver, Position(1.0))
+            .expect("the entity should be alive");
+        world.remove_component::<Position>(leaver);
+        world
+            .add_components(stayer, (Position(2.0), Health(2)))
+            .expect("the entity should be alive");
 
         let columns: Vec<Vec<f32>> = world
-            .query_tables_mut::<&Position>()
+            .query_archetype_mut::<&Position>()
             .map(|positions| positions.iter().map(|position| position.0).collect())
             .collect();
 
         assert_eq!(columns, [[2.0]]);
     }
 
-    /// Checks that a change to a column from `query_tables_mut` stays in the world
+    /// Checks that a change to a column from `query_archetype_mut` stays in the world
     #[test]
-    fn query_tables_mut_with_mutable_column_keeps_changes_for_get() {
+    fn query_archetype_mut_with_mutable_column_keeps_changes_for_get() {
         let mut world = World::new();
-        let first = world.spawn_empty_ent();
-        let second = world.spawn_empty_ent();
-        world.add_components(first, (Position(1.0), Health(10)));
-        world.add_components(second, (Position(2.0), Health(20)));
+        let first = world.spawn_empty();
+        let second = world.spawn_empty();
+        world
+            .add_components(first, (Position(1.0), Health(10)))
+            .expect("the entity should be alive");
+        world
+            .add_components(second, (Position(2.0), Health(20)))
+            .expect("the entity should be alive");
 
-        for (positions, healths) in world.query_tables_mut::<(&mut Position, &Health)>() {
+        for (positions, healths) in world.query_archetype_mut::<(&mut Position, &Health)>() {
             for (position, health) in positions.iter_mut().zip(healths) {
                 position.0 += health.0 as f32;
             }
@@ -2496,15 +3408,362 @@ mod tests {
         );
     }
 
-    /// Checks that `query_tables_mut` panics on a nested query that changes a type it also reads
+    /// Checks that `query_archetype_mut` panics on a nested query that changes a type it also reads
     #[test]
     #[should_panic]
-    fn query_tables_mut_with_nested_write_of_read_type_panics() {
+    fn query_archetype_mut_with_nested_write_of_read_type_panics() {
         let mut world = World::new();
-        let entity = world.spawn_empty_ent();
-        world.add_components(entity, (Position(1.0), Health(1)));
+        let entity = world.spawn_empty();
+        world
+            .add_components(entity, (Position(1.0), Health(1)))
+            .expect("the entity should be alive");
 
-        let _columns = world.query_tables_mut::<((&Position, &Health), &mut Position)>();
+        let _columns = world.query_archetype_mut::<((&Position, &Health), &mut Position)>();
+    }
+
+    /// Checks that `&mut` items collected from `query_mut` across two tables can all be held at
+    /// once, and that a change through each one reaches its own entity
+    #[test]
+    fn query_mut_with_items_collected_together_changes_each_entity() {
+        let mut world = World::new();
+        let entities = [
+            world.spawn_empty(),
+            world.spawn_empty(),
+            world.spawn_empty(),
+            world.spawn_empty(),
+        ];
+        world
+            .add_component(entities[0], Health(1))
+            .expect("the entity should be alive");
+        world
+            .add_component(entities[1], Health(2))
+            .expect("the entity should be alive");
+        world
+            .add_components(entities[2], (Position(3.0), Health(3)))
+            .expect("the entity should be alive");
+        world
+            .add_components(entities[3], (Position(4.0), Health(4)))
+            .expect("the entity should be alive");
+
+        let mut healths: Vec<&mut Health> = world.query_mut::<&mut Health>().collect();
+        for health in &mut healths {
+            health.0 += 10;
+        }
+
+        let expected = [11, 12, 13, 14];
+        for (index, (entity, value)) in entities.into_iter().zip(expected).enumerate() {
+            let found = world.get::<Health>(entity);
+            assert_eq!(found, Some(&Health(value)), "health of entity {index}");
+        }
+    }
+
+    /// Checks that `query_mut` finds a component type at bit 63, the last bit that a mask has
+    #[test]
+    fn query_mut_with_component_at_bit_63_visits_entity() {
+        let mut world = World::new();
+        for type_id in &build_64_type_ids()[..63] {
+            world.registry.find_or_assign_bit(*type_id);
+        }
+        let entity = world.spawn_empty();
+        world
+            .add_component(entity, Health(1))
+            .expect("the entity should be alive");
+
+        let found: Vec<u32> = world
+            .query_mut::<&mut Health>()
+            .map(|health| {
+                health.0 += 10;
+                health.0
+            })
+            .collect();
+
+        let health_bit = world.registry.find_bit(TypeId::of::<Health>());
+        assert_eq!(
+            health_bit,
+            Some(ComponentMask::single(63)),
+            "bit for `Health`"
+        );
+        assert_eq!(found, [11], "visited components");
+        assert_eq!(
+            world.get::<Health>(entity),
+            Some(&Health(11)),
+            "stored component"
+        );
+    }
+
+    /// Checks the largest query, of twelve fields, which reads eleven types and changes the last
+    #[test]
+    fn query_mut_with_12_fields_returns_every_field() {
+        let mut world = World::new();
+        let entity = world.spawn_empty();
+        world
+            .add_components(entity, build_set_32())
+            .unwrap_or_else(|_| panic!("the entity should be alive"));
+
+        let found: Vec<(usize, usize, usize)> = world
+            .query_mut::<Query12>()
+            .map(|item| {
+                item.11.0 += 100;
+                (item.0.0, item.10.0, item.11.0)
+            })
+            .collect();
+
+        assert_eq!(found, [(0, 10, 111)], "first, next to last and last fields");
+        assert_eq!(
+            world.get::<Numbered<11>>(entity),
+            Some(&Numbered(111)),
+            "changed component"
+        );
+    }
+
+    /// Checks that `query` visits only the entities with every type in the query, across tables
+    #[test]
+    fn query_with_several_tables_visits_only_entities_with_every_type() {
+        let mut world = World::new();
+        let alone = world.spawn_empty();
+        let paired = world.spawn_empty();
+        let tripled = world.spawn_empty();
+        let health_only = world.spawn_empty();
+        world
+            .add_component(alone, Position(1.0))
+            .expect("the entity should be alive");
+        world
+            .add_components(paired, (Position(2.0), Health(2)))
+            .expect("the entity should be alive");
+        world
+            .add_components(tripled, (Position(3.0), Health(3), Velocity(3.0)))
+            .expect("the entity should be alive");
+        world
+            .add_component(health_only, Health(4))
+            .expect("the entity should be alive");
+
+        let mut found: Vec<(f32, u32)> = world
+            .query::<(&Position, &Health)>()
+            .map(|(position, health)| (position.0, health.0))
+            .collect();
+        found.sort_by(|left, right| left.0.total_cmp(&right.0));
+
+        assert_eq!(found, [(2.0, 2), (3.0, 3)]);
+    }
+
+    /// Checks that a nested pair returns the component for each part, from the same entity
+    #[test]
+    fn query_with_nested_pair_returns_each_part() {
+        let mut world = World::new();
+        let first = world.spawn_empty();
+        let second = world.spawn_empty();
+        world
+            .add_components(first, (Position(1.0), Health(1), Velocity(1.5)))
+            .expect("the entity should be alive");
+        world
+            .add_components(second, (Position(2.0), Health(2), Velocity(2.5)))
+            .expect("the entity should be alive");
+
+        let found: Vec<(f32, u32, f32)> = world
+            .query::<((&Position, &Health), &Velocity)>()
+            .map(|((position, health), velocity)| (position.0, health.0, velocity.0))
+            .collect();
+
+        assert_eq!(found, [(1.0, 1, 1.5), (2.0, 2, 2.5)]);
+    }
+
+    /// Checks that a query that reads one type twice returns that component in both parts
+    #[test]
+    fn query_with_two_reads_of_same_type_returns_both() {
+        let mut world = World::new();
+        let entity = world.spawn_empty();
+        world
+            .add_component(entity, Position(4.0))
+            .expect("the entity should be alive");
+
+        let found: Vec<(f32, f32)> = world
+            .query::<(&Position, &Position)>()
+            .map(|(first, second)| (first.0, second.0))
+            .collect();
+
+        assert_eq!(found, [(4.0, 4.0)]);
+    }
+
+    /// Checks that a query for a type that the world has never met returns nothing
+    #[test]
+    fn query_with_type_never_seen_returns_nothing() {
+        let mut world = World::new();
+        let entity = world.spawn_empty();
+        world
+            .add_component(entity, Position(1.0))
+            .expect("the entity should be alive");
+
+        let found = world.query::<&Velocity>().count();
+
+        assert_eq!(found, 0);
+    }
+
+    /// Checks that a query on a world with no entities returns nothing
+    #[test]
+    fn query_with_empty_world_returns_nothing() {
+        let world = World::new();
+
+        let found = world.query::<&Position>().count();
+
+        assert_eq!(found, 0);
+    }
+
+    /// Checks that `query` skips a matching table once its last entity has left
+    #[test]
+    fn query_with_emptied_table_skips_it() {
+        let mut world = World::new();
+        let leaver = world.spawn_empty();
+        let stayer = world.spawn_empty();
+        world
+            .add_component(leaver, Position(1.0))
+            .expect("the entity should be alive");
+        world.remove_component::<Position>(leaver);
+        world
+            .add_components(stayer, (Position(2.0), Health(2)))
+            .expect("the entity should be alive");
+
+        let found: Vec<f32> = world
+            .query::<&Position>()
+            .map(|position| position.0)
+            .collect();
+
+        assert_eq!(found, [2.0]);
+    }
+
+    /// Checks that `query_archetype` returns one item for each matching table, with its whole
+    /// column
+    #[test]
+    fn query_archetype_with_several_matching_tables_returns_one_column_per_table() {
+        let mut world = World::new();
+        let entities = [
+            world.spawn_empty(),
+            world.spawn_empty(),
+            world.spawn_empty(),
+            world.spawn_empty(),
+        ];
+        world
+            .add_component(entities[0], Position(1.0))
+            .expect("the entity should be alive");
+        world
+            .add_component(entities[1], Position(2.0))
+            .expect("the entity should be alive");
+        world
+            .add_components(entities[2], (Position(3.0), Health(3)))
+            .expect("the entity should be alive");
+        world
+            .add_component(entities[3], Health(4))
+            .expect("the entity should be alive");
+
+        let mut lengths: Vec<usize> = world
+            .query_archetype::<&Position>()
+            .map(|positions| positions.len())
+            .collect();
+        lengths.sort_unstable();
+
+        assert_eq!(lengths, [1, 2]);
+    }
+
+    /// Checks that `query_archetype` skips a matching table once its last entity has left
+    #[test]
+    fn query_archetype_with_emptied_table_skips_it() {
+        let mut world = World::new();
+        let leaver = world.spawn_empty();
+        let stayer = world.spawn_empty();
+        world
+            .add_component(leaver, Position(1.0))
+            .expect("the entity should be alive");
+        world.remove_component::<Position>(leaver);
+        world
+            .add_components(stayer, (Position(2.0), Health(2)))
+            .expect("the entity should be alive");
+
+        let columns: Vec<Vec<f32>> = world
+            .query_archetype::<&Position>()
+            .map(|positions| positions.iter().map(|position| position.0).collect())
+            .collect();
+
+        assert_eq!(columns, [[2.0]]);
+    }
+
+    /// Checks that `query_archetype` for a type that the world has never met returns nothing
+    #[test]
+    fn query_archetype_with_type_never_seen_returns_nothing() {
+        let mut world = World::new();
+        let entity = world.spawn_empty();
+        world
+            .add_component(entity, Position(1.0))
+            .expect("the entity should be alive");
+
+        let found = world.query_archetype::<&Velocity>().count();
+
+        assert_eq!(found, 0);
+    }
+
+    /// Checks that two threads can run a query over one shared world at the same time, and that
+    /// each reads every component
+    #[test]
+    fn query_with_two_threads_over_shared_world_returns_same_items() {
+        let mut world = World::new();
+        for value in 1..=4 {
+            let entity = world.spawn_empty();
+            world
+                .add_components(entity, (Health(value), Name(format!("entity {value}"))))
+                .expect("the entity should be alive");
+        }
+        let lone = world.spawn_empty();
+        world
+            .add_component(lone, Health(10))
+            .expect("the entity should be alive");
+        let shared = &world;
+
+        // Adds up every health, and counts every name, through a shared borrow of the world
+        let read_world = || {
+            let total: u32 = shared.query::<&Health>().map(|health| health.0).sum();
+            let names = shared.query::<(&Name, &Health)>().count();
+            (total, names)
+        };
+        let results = thread::scope(|scope| {
+            let handles = [scope.spawn(read_world), scope.spawn(read_world)];
+            handles.map(|handle| handle.join().unwrap())
+        });
+
+        assert_eq!(results, [(20, 4), (20, 4)]);
+    }
+
+    /// Checks that the columns from `query_archetype_mut` can each move to a thread of their own,
+    /// and that the changes made there reach the world
+    #[test]
+    fn query_archetype_mut_with_columns_moved_to_threads_keeps_changes() {
+        let mut world = World::new();
+        let alone = world.spawn_empty();
+        world
+            .add_component(alone, Position(1.0))
+            .expect("the entity should be alive");
+        let paired = world.spawn_empty();
+        world
+            .add_components(paired, (Position(2.0), Name(String::from("Ada"))))
+            .expect("the entity should be alive");
+
+        thread::scope(|scope| {
+            for positions in world.query_archetype_mut::<&mut Position>() {
+                scope.spawn(move || {
+                    for position in positions {
+                        position.0 *= 10.0;
+                    }
+                });
+            }
+        });
+
+        assert_eq!(
+            world.get::<Position>(alone),
+            Some(&Position(10.0)),
+            "position in the first table"
+        );
+        assert_eq!(
+            world.get::<Position>(paired),
+            Some(&Position(20.0)),
+            "position in the second table"
+        );
     }
 
     /// Checks that a location keeps the table and the row that it receives, up to `u32::MAX`
@@ -2556,5 +3815,381 @@ mod tests {
         let mut location = Location::new(2, 5);
 
         location.set_row(u32::MAX as usize + 1);
+    }
+
+    /// Checks that the slots, the tables, `indices` and `tables_by_type` agree after every step of a
+    /// sequence that spawns, adds, queries, removes, despawns, reuses a slot and retires one
+    ///
+    /// The checks behind `locate` are the ones that would break first, so the test takes its name
+    /// from that method.
+    #[test]
+    fn locate_with_mixed_operation_sequence_keeps_slots_and_rows_consistent() {
+        let mut world = World::new();
+        let mut violations = Vec::new();
+
+        let first = world.spawn_empty();
+        record_violations(&mut violations, "spawn first", &world);
+        let second = world.spawn_empty();
+        record_violations(&mut violations, "spawn second", &world);
+        let third = world.spawn_empty();
+        record_violations(&mut violations, "spawn third", &world);
+        world
+            .add_component(first, Position(1.0))
+            .expect("the entity should be alive");
+        record_violations(&mut violations, "add a position to first", &world);
+        world
+            .add_components(second, (Position(2.0), Health(20)))
+            .expect("the entity should be alive");
+        record_violations(&mut violations, "add two components to second", &world);
+        world
+            .add_component(third, Health(30))
+            .expect("the entity should be alive");
+        record_violations(&mut violations, "add health to third", &world);
+        world
+            .add_component(first, Health(10))
+            .expect("the entity should be alive");
+        record_violations(&mut violations, "add health to first", &world);
+        let pairs = world.query::<(&Position, &Health)>().count();
+        record_violations(&mut violations, "query", &world);
+        let removed = world.remove_component::<Position>(second);
+        record_violations(&mut violations, "remove a position from second", &world);
+        world
+            .add_components(third, (Velocity(3.0), Marker))
+            .expect("the entity should be alive");
+        record_violations(&mut violations, "add two components to third", &world);
+        world.despawn(first);
+        record_violations(&mut violations, "despawn first", &world);
+        let reborn = world.spawn_empty();
+        record_violations(&mut violations, "spawn into the freed slot", &world);
+        world
+            .add_component(reborn, Velocity(4.0))
+            .expect("the entity should be alive");
+        record_violations(&mut violations, "add a velocity to the reused slot", &world);
+
+        // Frees a new slot, then sets it one version short of `u32::MAX`
+        let doomed = world.spawn_empty();
+        world.despawn(doomed);
+        world.entities.set_version(doomed.index(), u32::MAX - 1);
+        record_violations(&mut violations, "raise a freed version", &world);
+        // Fills the slot with the last entity that it can serve, then despawns that entity, which
+        // retires the slot
+        let last = world.spawn_empty();
+        record_violations(&mut violations, "spawn the last entity in a slot", &world);
+        world
+            .add_component(last, Health(99))
+            .expect("the entity should be alive");
+        record_violations(&mut violations, "add health to the last entity", &world);
+        world.despawn(last);
+        record_violations(&mut violations, "retire the slot", &world);
+
+        let after = world.spawn_empty();
+        record_violations(&mut violations, "spawn after the retired slot", &world);
+        world.remove_component::<Health>(third);
+        record_violations(&mut violations, "remove health from third", &world);
+        world.despawn(second);
+        record_violations(&mut violations, "despawn second", &world);
+
+        assert_eq!(
+            violations,
+            Vec::<String>::new(),
+            "violations after each step"
+        );
+        assert_eq!(pairs, 2, "entities with a position and health");
+        assert_eq!(removed, Some(Position(2.0)), "removed component");
+        assert_eq!(
+            reborn,
+            Entity::new(0, 1),
+            "handle that reuses the first slot"
+        );
+        assert_eq!(
+            last.version(),
+            u32::MAX - 1,
+            "version of the last entity in its slot"
+        );
+        assert_eq!(after, Entity::new(4, 0), "handle after the retired slot");
+        assert_eq!(world.entities.read_free_list(), [1], "free slots");
+        assert_eq!(
+            world.get::<Health>(first),
+            None,
+            "component of the despawned entity"
+        );
+        assert_eq!(
+            world.get::<Velocity>(reborn),
+            Some(&Velocity(4.0)),
+            "component of the entity in the reused slot"
+        );
+        assert_eq!(
+            world.get::<Velocity>(third),
+            Some(&Velocity(3.0)),
+            "kept component of the third entity"
+        );
+        assert_eq!(
+            world.get::<Health>(third),
+            None,
+            "removed component of the third entity"
+        );
+        assert_eq!(
+            world.get::<Marker>(third),
+            Some(&Marker),
+            "marker of the third entity"
+        );
+    }
+
+    /// Checks that thousands of random operations give the same answers as a `HashMap` that
+    /// stores each living entity's components, and leave the slots and tables consistent
+    ///
+    /// One component type owns memory on the heap, which makes Miri check each drop. Miri runs far
+    /// more slowly than a plain run, so the test takes fewer steps under Miri. The test reads every
+    /// answer back through `get`, and takes its name from that method.
+    #[test]
+    fn get_with_random_operations_matches_hashmap_model() {
+        /// Sets the number of random operations, fewer under Miri.
+        const STEPS: usize = if cfg!(miri) { 300 } else { 5000 };
+        /// Sets how often the test checks every handle and the whole world.
+        const CHECK_EVERY: usize = if cfg!(miri) { 50 } else { 250 };
+
+        /// Stores the components that the model expects one entity to have.
+        #[derive(Clone, Debug, Default, PartialEq)]
+        struct Expected {
+            position: Option<f32>,
+            health: Option<u32>,
+            velocity: Option<f32>,
+            name: Option<String>,
+            marker: bool,
+        }
+
+        /// Generates numbers with a 64-bit xorshift, which repeats the same run for one seed.
+        struct Xorshift(u64);
+
+        impl Xorshift {
+            /// Advances the state, and returns a number in `0..bound`.
+            fn next_below(&mut self, bound: usize) -> usize {
+                self.0 ^= self.0 << 13;
+                self.0 ^= self.0 >> 7;
+                self.0 ^= self.0 << 17;
+                (self.0 % bound as u64) as usize
+            }
+        }
+
+        /// Reads the components that `entity` has in `world`, in the form that the model stores.
+        fn read_actual(world: &World, entity: Entity) -> Expected {
+            Expected {
+                position: world.get::<Position>(entity).map(|position| position.0),
+                health: world.get::<Health>(entity).map(|health| health.0),
+                velocity: world.get::<Velocity>(entity).map(|velocity| velocity.0),
+                name: world.get::<Name>(entity).map(|name| name.0.clone()),
+                marker: world.get::<Marker>(entity).is_some(),
+            }
+        }
+
+        /// Adds a message to `violations` for each handle in `handles` that reaches different
+        /// components in `world` than the model expects. A handle missing from the model expects
+        /// none.
+        fn record_model_mismatches(
+            violations: &mut Vec<String>,
+            world: &World,
+            handles: &[Entity],
+            model: &HashMap<Entity, Expected>,
+            step: usize,
+        ) {
+            for &entity in handles {
+                let expected = model.get(&entity).cloned().unwrap_or_default();
+                let alive = world.locate(entity).is_some();
+                let label = format!("{entity:?} at step {step}");
+                record_mismatch(violations, &label, alive, model.contains_key(&entity));
+                record_mismatch(violations, &label, read_actual(world, entity), expected);
+            }
+        }
+
+        let mut world = World::new();
+        let mut model: HashMap<Entity, Expected> = HashMap::new();
+        let mut handles: Vec<Entity> = Vec::new();
+        let mut rng = Xorshift(0x2545_F491_4F6C_DD1D);
+        let mut violations = Vec::new();
+
+        for step in 0..STEPS {
+            // Spawns where no handle exists yet, and otherwise picks one of the fourteen operations
+            let operation = if handles.is_empty() {
+                0
+            } else {
+                rng.next_below(14)
+            };
+            let entity = if handles.is_empty() {
+                Entity::new(0, 0)
+            } else {
+                handles[rng.next_below(handles.len())]
+            };
+            let value = rng.next_below(1000);
+            let components = model.get_mut(&entity);
+
+            let entity = match operation {
+                0 | 1 => {
+                    let spawned = world.spawn_empty();
+                    let reused = handles.contains(&spawned);
+                    record_mismatch(
+                        &mut violations,
+                        &format!("new handle at step {step}"),
+                        reused,
+                        false,
+                    );
+                    model.insert(spawned, Expected::default());
+                    handles.push(spawned);
+                    spawned
+                }
+                2 => {
+                    let answer = world.despawn(entity);
+                    let expected = model.remove(&entity).is_some();
+                    record_mismatch(
+                        &mut violations,
+                        &format!("despawn at step {step}"),
+                        answer,
+                        expected,
+                    );
+                    entity
+                }
+                3 => {
+                    let position = value as f32;
+                    let answer = world.add_component(entity, Position(position));
+                    let expected = components
+                        .map(|components| components.position = Some(position))
+                        .ok_or(Position(position));
+                    let label = format!("add_component of a position at step {step}");
+                    record_mismatch(&mut violations, &label, answer, expected);
+                    entity
+                }
+                4 => {
+                    let health = value as u32;
+                    let answer = world.add_component(entity, Health(health));
+                    let expected = components
+                        .map(|components| components.health = Some(health))
+                        .ok_or(Health(health));
+                    let label = format!("add_component of health at step {step}");
+                    record_mismatch(&mut violations, &label, answer, expected);
+                    entity
+                }
+                5 => {
+                    let velocity = value as f32;
+                    let answer = world.add_component(entity, Velocity(velocity));
+                    let expected = components
+                        .map(|components| components.velocity = Some(velocity))
+                        .ok_or(Velocity(velocity));
+                    let label = format!("add_component of a velocity at step {step}");
+                    record_mismatch(&mut violations, &label, answer, expected);
+                    entity
+                }
+                6 => {
+                    let (health, velocity) = (value as u32, value as f32);
+                    let answer = world.add_components(entity, (Health(health), Velocity(velocity)));
+                    let expected = components
+                        .map(|components| {
+                            components.health = Some(health);
+                            components.velocity = Some(velocity);
+                        })
+                        .ok_or((Health(health), Velocity(velocity)));
+                    let label = format!("add_components at step {step}");
+                    record_mismatch(&mut violations, &label, answer, expected);
+                    entity
+                }
+                7 => {
+                    let position = value as f32;
+                    let answer = world.add_components(entity, (Position(position), Marker));
+                    let expected = components
+                        .map(|components| {
+                            components.position = Some(position);
+                            components.marker = true;
+                        })
+                        .ok_or((Position(position), Marker));
+                    let label = format!("add_components with a marker at step {step}");
+                    record_mismatch(&mut violations, &label, answer, expected);
+                    entity
+                }
+                8 => {
+                    let answer = world.remove_component::<Position>(entity);
+                    let expected = components
+                        .and_then(|components| components.position.take())
+                        .map(Position);
+                    let label = format!("remove_component of a position at step {step}");
+                    record_mismatch(&mut violations, &label, answer, expected);
+                    entity
+                }
+                9 => {
+                    let answer = world.remove_component::<Health>(entity);
+                    let expected = components
+                        .and_then(|components| components.health.take())
+                        .map(Health);
+                    let label = format!("remove_component of health at step {step}");
+                    record_mismatch(&mut violations, &label, answer, expected);
+                    entity
+                }
+                10 => {
+                    let answer = world.remove_component::<Velocity>(entity);
+                    let expected = components
+                        .and_then(|components| components.velocity.take())
+                        .map(Velocity);
+                    let label = format!("remove_component of a velocity at step {step}");
+                    record_mismatch(&mut violations, &label, answer, expected);
+                    entity
+                }
+                11 => {
+                    let answer = world.remove_component::<Marker>(entity);
+                    let expected = components.and_then(|components| {
+                        let had_marker = components.marker;
+                        components.marker = false;
+                        had_marker.then_some(Marker)
+                    });
+                    let label = format!("remove_component of a marker at step {step}");
+                    record_mismatch(&mut violations, &label, answer, expected);
+                    entity
+                }
+                12 => {
+                    let name = format!("entity {value}");
+                    let answer = world.add_component(entity, Name(name.clone()));
+                    let expected = components
+                        .map(|components| components.name = Some(name.clone()))
+                        .ok_or(Name(name));
+                    let label = format!("add_component of a name at step {step}");
+                    record_mismatch(&mut violations, &label, answer, expected);
+                    entity
+                }
+                _ => {
+                    let answer = world.remove_component::<Name>(entity);
+                    let expected = components
+                        .and_then(|components| components.name.take())
+                        .map(Name);
+                    let label = format!("remove_component of a name at step {step}");
+                    record_mismatch(&mut violations, &label, answer, expected);
+                    entity
+                }
+            };
+
+            // Reads back the entity that the operation touched, and checks the whole world at
+            // regular steps
+            record_model_mismatches(&mut violations, &world, &[entity], &model, step);
+            if step % CHECK_EVERY == 0 {
+                record_violations(&mut violations, &format!("step {step}"), &world);
+                record_model_mismatches(&mut violations, &world, &handles, &model, step);
+            }
+        }
+
+        let healthy = model.values().filter(|expected| expected.health.is_some());
+        let moving = healthy
+            .clone()
+            .filter(|expected| expected.velocity.is_some());
+        let expected_counts = (healthy.count(), moving.count());
+        let found_counts = (
+            world.query::<&Health>().count(),
+            world.query::<(&Health, &Velocity)>().count(),
+        );
+        record_violations(&mut violations, "the end", &world);
+        record_model_mismatches(&mut violations, &world, &handles, &model, STEPS);
+        assert_eq!(
+            violations,
+            Vec::<String>::new(),
+            "violations across every step"
+        );
+        assert_eq!(
+            found_counts, expected_counts,
+            "entities that each query visits"
+        );
     }
 }

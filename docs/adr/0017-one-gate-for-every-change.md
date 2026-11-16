@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: proposed
 date: 2026-10-18
 decision-makers: Kheagen Haskins
 ---
@@ -17,9 +17,9 @@ village, and through each rival faction.
 
 A level also sets rules. Each rule limits what those actors may do.
 
-A player can switch on cosy mode. In cosy mode, no faction attacks the player, and the player
-attacks no one. Cosy mode is the clearest of the rules that a level sets. A hostile action, a trade or any approach to a possible ally switches
-cosy mode off.
+A player can switch on cosy mode, the clearest of the rules that a level sets. In cosy mode, no
+faction attacks the player, and the player does not attack anyone. A hostile action, a trade or any
+approach to a possible ally switches cosy mode off.
 
 A rule of this kind applies to the player and the AI at once. It also touches several kinds of
 change to the world.
@@ -33,7 +33,7 @@ check?
   player breaks the rule as surely as an attack by the player on a faction.
 - One rule can cover several kinds of change. Cosy mode ends on a hostile action, a trade or an
   approach to a possible ally.
-- The rules of the level will grow. The README lists two ways to stop a player from exploiting cosy
+- The rules of the level will grow. The [feature list](../feature-list.md) gives two ways to stop a player from exploiting cosy
   mode, and the choice between them remains open. One way fixes cosy mode for the whole level. The
   other allows only the actions that keep the civilisation going. Either one adds a rule for the code
   to enforce.
@@ -80,8 +80,8 @@ Several points remain open. The developer settles them once the simulation has c
 
 ### Confirmation
 
-Nothing in the code embodies this decision yet. `zurvan` is the crate for the simulation, and it
-contains only the function that `cargo new` generates.
+Nothing in the code embodies this decision yet. `zurvan`, the crate for the simulation, moves the
+god's hand towards the cursor, and does not make any other change to the world.
 
 Once the simulation changes the world, a reviewer confirms three points:
 

@@ -99,13 +99,10 @@ type is one of `feat`, `fix`, `docs`, `style`, `refactor`, `test` and `chore`.
 
 ## Branches
 
-The developer develops on the `dev` branch, which keeps the full history of the work. The `main`
-branch is the stable changelog. Each commit on `main` describes one finished piece of work, such as
-a crate or the decision records.
-
-A commit on `main` contains the finished files from `dev`, without the history behind them. Each
-commit on `main` therefore appears in its history as an independent piece of work, rather than as a
-merge from `dev`.
+The developer develops on the `dev` branch, which keeps the full history of the work. That history
+records the author of every commit, so anyone can audit which work came from an agent. The `main`
+branch is the stable changelog. Each commit on `main` is one update, which brings in everything
+that is new on `dev` since the update before.
 
 ### Bringing main up to date
 
@@ -113,59 +110,35 @@ GitHub accepts a change to `main` only through a pull request. The pull request 
 checks on `enki`, `cargo test` and `cargo miri test`. The workflow in `.github/workflows/enki.yml`
 runs both checks on every pull request into `main`, and on every push to it.
 
-A developer brings `main` up to date in five steps, starting from a clean working tree.
+A developer brings `main` up to date in four steps, starting from a clean working tree on `dev`.
 
-1. Create a branch from `main` for the update:
+1. Push `dev`, then open a pull request from `dev` into `main`:
 
    ```bash
-   git switch -c stage/<name> main
+   git push origin dev
+   gh pr create --base main --head dev
    ```
 
-2. Make one commit for each piece of work. Each commit copies the finished files from `dev`. Where
-   the work replaces files on `main`, such as a crate under a new name, the same commit deletes the
-   old files:
+2. Once both checks pass, merge the pull request with **Squash and merge**, and give the squash
+   commit a message in the Conventional Commits format.
+
+   A squash merge combines every commit in the pull request into one commit. GitHub signs that
+   commit with its own key, and the commit therefore shows a Verified badge. The squash commit names
+   the developer as its author, even where it contains an agent's work, since the developer opened
+   the pull request.
+3. Merge `main` back into `dev`, keeping the files on `dev` as they are:
 
    ```bash
-   git rm -r crates/<old-crate>
-   git checkout dev -- crates/<new-crate>
-   git commit
+   git fetch origin
+   git merge -s ours origin/main
+   git push origin dev
    ```
 
-   The commits go in an order in which each one builds. A crate comes after every crate that it
-   depends on. A workflow arrives in the same commit as the code that it tests.
-
-   Every commit on `main` names the developer in its git author field, even where the commit
-   contains an agent's work.
-3. Run `cargo test --workspace` on the branch. Then push the branch to GitHub, and open a pull
-   request into `main`.
-4. Once both checks pass, merge the pull request. The merge method depends on how many pieces of
-   work the update brings in. One crate is one piece of work, as are the files in `docs/` and the
-   files at the root of the repository.
-
-   | Update                           | Merge method         | Result on `main`                       |
-   |----------------------------------|----------------------|----------------------------------------|
-   | Brings in one piece of work      | **Squash and merge** | One commit, which shows Verified       |
-   | Brings in several pieces of work | **Rebase and merge** | One commit per piece of work, unsigned |
-
-   A squash merge combines the commits on the branch into one commit. GitHub signs that commit with
-   its own key, and the commit therefore shows a Verified badge. Give the squash commit a message in
-   the Conventional Commits format.
-
-   A rebase merge writes a new copy of each commit onto `main`, keeping the commits apart. GitHub
-   does not sign those copies. As a result, the commits on `main` do not show a Verified badge, even
-   though the commits on the branch were signed.
-
-   An update with several pieces of work therefore needs a rebase merge, since a squash merge would
-   combine them into one commit.
-5. Return to `dev`, delete the branch, and move the local `main` to match GitHub:
+   The squash commit holds the same files as `dev`, so the merge changes no file. It adds the squash
+   commit to the history of `dev`, and the next pull request from `dev` therefore shows only the
+   commits made since.
+4. Move the local `main` to match GitHub:
 
    ```bash
-   git switch dev
-   git push origin --delete stage/<name>
-   git branch -D stage/<name>
-   git fetch --prune origin
    git branch -f main origin/main
    ```
-
-   Both merge methods give the commits on `main` new IDs. The last command therefore points the
-   local `main` at the commits on GitHub, in place of the commits on the branch.

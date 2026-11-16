@@ -51,7 +51,9 @@ the screen allows. As a result, a laptop with a 60 Hz screen plays the same game
 
 The loop keeps a running total of the real time that has passed. It adds at most 250 ms to that
 total in any one frame, and discards any time beyond that. At the proposed rate of 60 steps per
-second, this cap allows 15 steps in one frame.
+second, this cap allows 14 steps in one frame. A step lasts 16,666,667 ns, which is one sixtieth of
+a second rounded up, and 15 such steps come to 5 ns more than the cap. The 14 steps leave 16,666,662
+ns in the total, which the next frame uses.
 
 The cap matters on a slow device. Such a device takes longer to compute a step than the game time
 that the step covers. With the cap, it runs the game in slow motion. Without the cap, it would fall

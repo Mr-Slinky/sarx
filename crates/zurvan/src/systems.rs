@@ -1,21 +1,21 @@
 use crate::components::{Position, Speed, Target, Velocity};
 use enki::World;
 
-pub(crate) fn movement(world: &mut World, step: f32) {
+pub(crate) fn movement(world: &mut World, step_seconds: f32) {
     for (position, velocity) in world.query_mut::<(&mut Position, &Velocity)>() {
-        position.0 += velocity.0 * step;
+        position.0 += velocity.0 * step_seconds;
     }
 }
 
-pub(crate) fn steering(world: &mut World, step: f32) {
+pub(crate) fn steering(world: &mut World, step_seconds: f32) {
     // Guards callers inside this crate, which can pass any step. A step of 0 would divide the
     // offset by 0 and give every entity an infinite or NaN velocity
-    assert!(step > 0.0, "the step must be longer than 0 seconds");
+    assert!(step_seconds > 0.0, "the step must be longer than 0 seconds");
     for (velocity, position, target, speed) in
         world.query_mut::<(&mut Velocity, &Position, &Target, &Speed)>()
     {
         let offset = target.0 - position.0;
-        velocity.0 = (offset / step).clamp_length_max(speed.0);
+        velocity.0 = (offset / step_seconds).clamp_length_max(speed.0);
     }
 }
 

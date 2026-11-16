@@ -17,8 +17,19 @@ pub fn read_mesh(file: &[u8]) -> Result<MeshData, GltfError> {
     let positions = read_vec3s(&document, glb.binary, primitive.attributes.position)?;
     let normal_index = primitive.attributes.normal.ok_or(GltfError::MissingNormals)?;
     let normals = read_vec3s(&document, glb.binary, normal_index)?;
+    // glTF requires every attribute of a primitive to hold one value for each vertex
+    if normals.len() != positions.len() {
+        return Err(GltfError::NormalCountMismatch { positions: positions.len(), normals: normals.len() });
+    }
+
     let indices_index = primitive.indices.ok_or(GltfError::MissingIndices)?;
     let indices = read_indices(&document, glb.binary, indices_index)?;
+    let vertex_count = positions.len();
+    let out_of_range = indices.iter().find(|&&index| !usize::try_from(index).is_ok_and(|index| index < vertex_count));
+    if let Some(&index) = out_of_range {
+        return Err(GltfError::IndexOutOfRange { index, vertex_count });
+    }
+
     Ok(MeshData { positions, normals, indices })
 }
 
@@ -29,10 +40,7 @@ pub fn read_mesh(file: &[u8]) -> Result<MeshData, GltfError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// The GLB file that Blender exported for the hand model
-    const HAND_MODEL: &[u8] =
-        include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/hand-model.glb"));
+    use crate::test_support::{HAND_MODEL, build_glb, pad_to_four};
 
     /// The positions of the triangle that the fixture file stores
     const TRIANGLE_POSITIONS: [[f32; 3]; 3] = [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]];
@@ -43,6 +51,11 @@ mod tests {
     /// The indices of the triangle that the fixture file stores
     const TRIANGLE_INDICES: [u16; 3] = [0, 1, 2];
 
+    /// Two triangles of indices that the fixture file stores after the triangle, each with one
+    /// index past the last of the three vertices: one equal to the vertex count, and the largest
+    /// 16-bit index
+    const OUT_OF_RANGE_INDICES: [u16; 6] = [0, 1, 3, 0, 1, u16::MAX];
+
     /// The meshes of a fixture file with one mesh, whose only primitive points to the accessors
     /// for the triangle
     const TRIANGLE_MESHES: &str =
@@ -52,7 +65,9 @@ mod tests {
     /// unsupported type `VEC2`, accessor 4 counts more vec3s than the binary chunk contains, and
     /// accessors 5 and 6 have a count of zero. Accessor 7 points to buffer view 9, which does not
     /// exist, and accessor 8 counts more indices than the binary chunk contains. Accessors 4 and 8 stay
-    /// inside their buffer views, so that the binary chunk is the bound that they cross
+    /// inside their buffer views, so that the binary chunk is the bound that they cross. Accessor 9
+    /// reads the first two normals alone. Accessors 10 and 11 read the two triangles of
+    /// `OUT_OF_RANGE_INDICES`
     const FIXTURE_ACCESSORS: &str = r#"[
         {"bufferView":0,"componentType":5126,"count":3,"type":"VEC3"},
         {"bufferView":1,"componentType":5126,"count":3,"type":"VEC3"},
@@ -62,54 +77,27 @@ mod tests {
         {"bufferView":0,"componentType":5126,"count":0,"type":"VEC3"},
         {"bufferView":2,"componentType":5123,"count":0,"type":"SCALAR"},
         {"bufferView":9,"componentType":5126,"count":3,"type":"VEC3"},
-        {"bufferView":4,"componentType":5123,"count":100,"type":"SCALAR"}
+        {"bufferView":4,"componentType":5123,"count":100,"type":"SCALAR"},
+        {"bufferView":1,"componentType":5126,"count":2,"type":"VEC3"},
+        {"bufferView":5,"componentType":5123,"count":3,"type":"SCALAR"},
+        {"bufferView":5,"byteOffset":6,"componentType":5123,"count":3,"type":"SCALAR"}
     ]"#;
 
     /// The buffer views of the fixture file: the positions, the normals, then the indices. Views 3
-    /// and 4 start where the positions and the indices start, and run past the 80-byte binary
-    /// chunk: view 3 has room for 100 vec3s, and view 4 for 100 indices
+    /// and 4 start where the positions and the indices start, and run past the 92-byte binary
+    /// chunk: view 3 has room for 100 vec3s, and view 4 for 100 indices. View 5 holds
+    /// `OUT_OF_RANGE_INDICES`
     const FIXTURE_BUFFER_VIEWS: &str = r#"[
         {"buffer":0,"byteOffset":0,"byteLength":36},
         {"buffer":0,"byteOffset":36,"byteLength":36},
         {"buffer":0,"byteOffset":72,"byteLength":6},
         {"buffer":0,"byteOffset":0,"byteLength":1200},
-        {"buffer":0,"byteOffset":72,"byteLength":200}
+        {"buffer":0,"byteOffset":72,"byteLength":200},
+        {"buffer":0,"byteOffset":78,"byteLength":12}
     ]"#;
 
-    /// Pads `bytes` with `fill` until its length is a multiple of 4, as the glTF specification
-    /// asks of each chunk
-    fn pad_to_four(bytes: &mut Vec<u8>, fill: u8) {
-        while bytes.len() % 4 != 0 {
-            bytes.push(fill);
-        }
-    }
-
-    /// Appends a chunk to `file`: its length, its type, then its data
-    fn append_chunk(file: &mut Vec<u8>, kind: u32, data: &[u8]) {
-        let length = data.len() as u32;
-        file.extend_from_slice(&length.to_le_bytes());
-        file.extend_from_slice(&kind.to_le_bytes());
-        file.extend_from_slice(data);
-    }
-
-    /// Returns a GLB file that contains `json` in its JSON chunk and `binary` in its binary chunk.
-    /// The function pads the JSON with spaces, and the binary data with zeros
-    fn build_glb(json: &str, binary: &[u8]) -> Vec<u8> {
-        let mut json_chunk = json.as_bytes().to_vec();
-        pad_to_four(&mut json_chunk, b' ');
-        let mut binary_chunk = binary.to_vec();
-        pad_to_four(&mut binary_chunk, 0);
-
-        // Counts the 12-byte header, then the 8-byte header and the data of each chunk
-        let total_length = 12 + 8 + json_chunk.len() + 8 + binary_chunk.len();
-        let mut file = Vec::with_capacity(total_length);
-        file.extend_from_slice(&0x4654_6C67_u32.to_le_bytes());
-        file.extend_from_slice(&2_u32.to_le_bytes());
-        file.extend_from_slice(&(total_length as u32).to_le_bytes());
-        append_chunk(&mut file, 0x4E4F_534A, &json_chunk);
-        append_chunk(&mut file, 0x004E_4942, &binary_chunk);
-        file
-    }
+    /// Names a case, then gives the file and a check that the error is the one expected
+    type ErrorCase = (&'static str, Vec<u8>, fn(&GltfError) -> bool);
 
     /// Returns the bytes of `values`, each component as a little-endian `f32`
     fn encode_vec3s(values: &[[f32; 3]]) -> Vec<u8> {
@@ -126,15 +114,20 @@ mod tests {
     }
 
     /// Returns a fixture GLB file with the given `meshes` JSON, and the fixture accessors, buffer
-    /// views and triangle data
+    /// views and triangle data. The function pads the JSON with spaces, and the binary data with
+    /// zeros
     fn build_fixture_glb(meshes: &str) -> Vec<u8> {
         let json = format!(
             r#"{{"meshes":{meshes},"accessors":{FIXTURE_ACCESSORS},"bufferViews":{FIXTURE_BUFFER_VIEWS}}}"#
         );
+        let mut json_chunk = json.into_bytes();
+        pad_to_four(&mut json_chunk, b' ');
         let mut binary = encode_vec3s(&TRIANGLE_POSITIONS);
         binary.extend(encode_vec3s(&TRIANGLE_NORMALS));
         binary.extend(encode_u16s(&TRIANGLE_INDICES));
-        build_glb(&json, &binary)
+        binary.extend(encode_u16s(&OUT_OF_RANGE_INDICES));
+        pad_to_four(&mut binary, 0);
+        build_glb(&json_chunk, &binary)
     }
 
     /// Checks that the hand model gives one normal per position, and whole triangles of indices
@@ -310,7 +303,7 @@ mod tests {
     fn read_mesh_with_no_meshes_key_returns_missing_mesh() {
         // Builds the smallest JSON that the glTF specification accepts. Since the specification
         // forbids an empty array, a file without meshes leaves the key out
-        let file = build_glb(r#"{"asset":{"version":"2.0"}}"#, &[]);
+        let file = build_glb(br#"{"asset":{"version":"2.0"}}"#, &[]);
 
         let result = read_mesh(&file);
 
@@ -336,7 +329,7 @@ mod tests {
         let stated_length = length_one_more.len() as u32 + 1;
         length_one_more[8..12].copy_from_slice(&stated_length.to_le_bytes());
 
-        let cases: [(&str, Vec<u8>, fn(&GltfError) -> bool); 20] = [
+        let cases: [ErrorCase; 24] = [
             ("wrong magic", wrong_magic, |error| matches!(error, GltfError::NotGlb)),
             ("version 1", version_one, |error| matches!(error, GltfError::UnsupportedVersion(1))),
             ("BIN chunk type in place of JSON", binary_chunk_first, |error| {
@@ -350,7 +343,7 @@ mod tests {
             ("total length one byte more than the file", length_one_more, |error| {
                 matches!(error, GltfError::LengthMismatch { stated, actual } if *stated as usize == actual + 1)
             }),
-            ("malformed JSON", build_glb("{", &[]), |error| matches!(error, GltfError::Json(_))),
+            ("malformed JSON", build_glb(b"{", &[]), |error| matches!(error, GltfError::Json(_))),
             (
                 "accessor index as text",
                 build_fixture_glb(
@@ -437,6 +430,34 @@ mod tests {
                     r#"[{"primitives":[{"attributes":{"POSITION":7,"NORMAL":1},"indices":2}]}]"#,
                 ),
                 |error| matches!(error, GltfError::MissingBufferView(9)),
+            ),
+            (
+                "fewer normals than positions",
+                build_fixture_glb(
+                    r#"[{"primitives":[{"attributes":{"POSITION":0,"NORMAL":9},"indices":2}]}]"#,
+                ),
+                |error| matches!(error, GltfError::NormalCountMismatch { positions: 3, normals: 2 }),
+            ),
+            (
+                "more normals than positions",
+                build_fixture_glb(
+                    r#"[{"primitives":[{"attributes":{"POSITION":9,"NORMAL":1},"indices":2}]}]"#,
+                ),
+                |error| matches!(error, GltfError::NormalCountMismatch { positions: 2, normals: 3 }),
+            ),
+            (
+                "index equal to the vertex count",
+                build_fixture_glb(
+                    r#"[{"primitives":[{"attributes":{"POSITION":0,"NORMAL":1},"indices":10}]}]"#,
+                ),
+                |error| matches!(error, GltfError::IndexOutOfRange { index: 3, vertex_count: 3 }),
+            ),
+            (
+                "largest 16-bit index",
+                build_fixture_glb(
+                    r#"[{"primitives":[{"attributes":{"POSITION":0,"NORMAL":1},"indices":11}]}]"#,
+                ),
+                |error| matches!(error, GltfError::IndexOutOfRange { index: 65_535, vertex_count: 3 }),
             ),
         ];
 

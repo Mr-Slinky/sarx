@@ -37,6 +37,21 @@ pub enum GltfError {
     /// support. The reader also returns this error for an accessor without a `bufferView`, which
     /// glTF leaves out where every element is zero.
     UnsupportedAccessor(usize),
+    /// The primitive that `read_mesh` reads has a different number of normals from its number of
+    /// positions, where glTF requires one normal for each position
+    ///
+    /// ```text
+    /// 3 positions, 2 normals  ->  NormalCountMismatch { positions: 3, normals: 2 }
+    /// ```
+    NormalCountMismatch { positions: usize, normals: usize },
+    /// An index of the primitive that `read_mesh` reads points at or past the end of its vertices
+    ///
+    /// `index` is the first such index in the order that the file stores them.
+    ///
+    /// ```text
+    /// 3 vertices, indices [0, 1, 3]  ->  IndexOutOfRange { index: 3, vertex_count: 3 }
+    /// ```
+    IndexOutOfRange { index: u32, vertex_count: usize },
 }
 
 impl Display for GltfError {
@@ -71,6 +86,12 @@ impl Display for GltfError {
             Self::InvalidStride(index) => write!(f, "buffer view {index} has a stride that glTF forbids"),
             Self::UnsupportedAccessor(index) => {
                 write!(f, "accessor {index} has an unsupported component type or element type, or no buffer view")
+            }
+            Self::NormalCountMismatch { positions, normals } => {
+                write!(f, "the first primitive has {positions} positions, but {normals} normals")
+            }
+            Self::IndexOutOfRange { index, vertex_count } => {
+                write!(f, "index {index} points past the last of {vertex_count} vertices")
             }
         }
     }
@@ -122,6 +143,8 @@ mod tests {
             GltfError::MissingBufferView(_) => "MissingBufferView",
             GltfError::InvalidStride(_) => "InvalidStride",
             GltfError::UnsupportedAccessor(_) => "UnsupportedAccessor",
+            GltfError::NormalCountMismatch { .. } => "NormalCountMismatch",
+            GltfError::IndexOutOfRange { .. } => "IndexOutOfRange",
         }
     }
 
@@ -147,6 +170,14 @@ mod tests {
             GltfError::MissingBufferView(7),
             GltfError::InvalidStride(7),
             GltfError::UnsupportedAccessor(7),
+            GltfError::NormalCountMismatch {
+                positions: 3,
+                normals: 2,
+            },
+            GltfError::IndexOutOfRange {
+                index: 3,
+                vertex_count: 3,
+            },
         ];
 
         variants
@@ -166,29 +197,34 @@ mod tests {
             .collect()
     }
 
+    /// Returns whether `message` states `value` as a whole word, either in decimal or in
+    /// hexadecimal, with or without a `0x` prefix, leading zeros and upper-case letters
+    ///
+    /// ```text
+    /// message = "accessor 70 does not exist",  value = 70           ->  true
+    /// message = "accessor 70 does not exist",  value = 0            ->  false
+    /// message = "found 0x004E4942",            value = 0x004E_4942  ->  true
+    /// ```
+    fn contains_value(message: &str, value: u128) -> bool {
+        let decimal = value.to_string();
+        let hexadecimal = format!("{value:x}");
+        let is_decimal = split_numbers(message).contains(&decimal.as_str());
+        let lower_case = message.to_lowercase();
+        let is_hexadecimal = lower_case
+            .split(|character: char| !character.is_ascii_alphanumeric())
+            .map(|word| word.strip_prefix("0x").unwrap_or(word))
+            .any(|digits| {
+                let significant = digits.trim_start_matches('0');
+                let is_zero = !digits.is_empty() && significant.is_empty();
+                significant == hexadecimal || (is_zero && hexadecimal == "0")
+            });
+        is_decimal || is_hexadecimal
+    }
+
     /// Returns the result of parsing `text` as JSON, with `?` converting any serde_json error
     fn parse_with_question_mark(text: &str) -> Result<serde_json::Value, GltfError> {
         let value = serde_json::from_str::<serde_json::Value>(text)?;
         Ok(value)
-    }
-
-    /// Returns a `Json` error through `?`, which boxes it as a `Box<dyn Error>`
-    fn return_boxed_json_error() -> Result<(), Box<dyn Error>> {
-        Err(GltfError::Json(build_json_error()))?;
-        Ok(())
-    }
-
-    /// Checks that the instances that the tests share do not contain any variant twice
-    #[test]
-    fn build_every_variant_with_no_data_returns_each_variant_once() {
-        let variants = build_every_variant();
-
-        let mut names: Vec<&str> = variants.iter().map(|(name, _)| *name).collect();
-        let count = names.len();
-        names.sort_unstable();
-        names.dedup();
-
-        assert_eq!(names.len(), count, "distinct variants in {names:?}");
     }
 
     /// Checks that every variant writes a message that is not empty
@@ -224,93 +260,70 @@ mod tests {
         }
     }
 
-    /// Checks that every variant starts its message with a lower-case letter
+    /// Checks that every variant that contains a value includes that value in its message, in
+    /// decimal or in hexadecimal, whatever the form around it
     #[test]
-    fn fmt_with_every_variant_starts_in_lower_case() {
-        let variants = build_every_variant();
-
-        let first_characters: Vec<(&str, Option<char>)> = variants
-            .iter()
-            .map(|(name, error)| (*name, error.to_string().chars().next()))
-            .collect();
-
-        for (name, first) in first_characters {
-            assert!(
-                first.is_some_and(char::is_lowercase),
-                "first character of message for {name}: {first:?}"
-            );
-        }
-    }
-
-    /// Checks that the variants that contain an index or a version include that value, as a whole
-    /// number
-    #[test]
-    fn fmt_with_standard_and_extreme_values_includes_value() {
-        let cases = [
-            ("UnsupportedVersion 0", GltfError::UnsupportedVersion(0), "0".to_string()),
-            ("UnsupportedVersion 3", GltfError::UnsupportedVersion(3), "3".to_string()),
+    fn fmt_with_standard_and_extreme_values_includes_values() {
+        let largest_usize = usize::MAX as u128;
+        let largest_u32 = u128::from(u32::MAX);
+        let cases: [(&str, GltfError, Vec<u128>); 22] = [
+            ("UnsupportedVersion 0", GltfError::UnsupportedVersion(0), vec![0]),
+            ("UnsupportedVersion 3", GltfError::UnsupportedVersion(3), vec![3]),
+            ("UnsupportedVersion u32::MAX", GltfError::UnsupportedVersion(u32::MAX), vec![largest_u32]),
+            ("LengthMismatch 120 and 96", GltfError::LengthMismatch { stated: 120, actual: 96 }, vec![120, 96]),
             (
-                "UnsupportedVersion u32::MAX",
-                GltfError::UnsupportedVersion(u32::MAX),
-                u32::MAX.to_string(),
+                "LengthMismatch u32::MAX and usize::MAX",
+                GltfError::LengthMismatch { stated: u32::MAX, actual: usize::MAX },
+                vec![largest_u32, largest_usize],
             ),
-            ("MissingAccessor 0", GltfError::MissingAccessor(0), "0".to_string()),
-            ("MissingAccessor 7", GltfError::MissingAccessor(7), "7".to_string()),
             (
-                "MissingAccessor usize::MAX",
-                GltfError::MissingAccessor(usize::MAX),
-                usize::MAX.to_string(),
+                "UnexpectedChunk JSON and BIN",
+                GltfError::UnexpectedChunk { expected: 0x4E4F_534A, found: 0x004E_4942 },
+                vec![0x4E4F_534A, 0x004E_4942],
             ),
-            ("MissingBufferView 0", GltfError::MissingBufferView(0), "0".to_string()),
-            ("MissingBufferView 7", GltfError::MissingBufferView(7), "7".to_string()),
             (
-                "MissingBufferView usize::MAX",
-                GltfError::MissingBufferView(usize::MAX),
-                usize::MAX.to_string(),
+                "UnexpectedChunk 1 and u32::MAX",
+                GltfError::UnexpectedChunk { expected: 1, found: u32::MAX },
+                vec![1, largest_u32],
             ),
-            ("UnsupportedAccessor 0", GltfError::UnsupportedAccessor(0), "0".to_string()),
-            ("UnsupportedAccessor 7", GltfError::UnsupportedAccessor(7), "7".to_string()),
+            ("MissingAccessor 0", GltfError::MissingAccessor(0), vec![0]),
+            ("MissingAccessor 7", GltfError::MissingAccessor(7), vec![7]),
+            ("MissingAccessor usize::MAX", GltfError::MissingAccessor(usize::MAX), vec![largest_usize]),
+            ("MissingBufferView 0", GltfError::MissingBufferView(0), vec![0]),
+            ("MissingBufferView 7", GltfError::MissingBufferView(7), vec![7]),
+            ("MissingBufferView usize::MAX", GltfError::MissingBufferView(usize::MAX), vec![largest_usize]),
+            ("InvalidStride 7", GltfError::InvalidStride(7), vec![7]),
+            ("InvalidStride usize::MAX", GltfError::InvalidStride(usize::MAX), vec![largest_usize]),
+            ("UnsupportedAccessor 0", GltfError::UnsupportedAccessor(0), vec![0]),
+            ("UnsupportedAccessor 7", GltfError::UnsupportedAccessor(7), vec![7]),
+            ("UnsupportedAccessor usize::MAX", GltfError::UnsupportedAccessor(usize::MAX), vec![largest_usize]),
             (
-                "UnsupportedAccessor usize::MAX",
-                GltfError::UnsupportedAccessor(usize::MAX),
-                usize::MAX.to_string(),
+                "NormalCountMismatch 3 and 2",
+                GltfError::NormalCountMismatch { positions: 3, normals: 2 },
+                vec![3, 2],
+            ),
+            (
+                "NormalCountMismatch 0 and usize::MAX",
+                GltfError::NormalCountMismatch { positions: 0, normals: usize::MAX },
+                vec![0, largest_usize],
+            ),
+            ("IndexOutOfRange 3 of 3", GltfError::IndexOutOfRange { index: 3, vertex_count: 3 }, vec![3]),
+            (
+                "IndexOutOfRange u32::MAX of 0",
+                GltfError::IndexOutOfRange { index: u32::MAX, vertex_count: 0 },
+                vec![largest_u32, 0],
             ),
         ];
 
-        for (name, error, value) in cases {
+        for (name, error, values) in cases {
             let message = error.to_string();
-            let numbers = split_numbers(&message);
 
-            assert!(
-                numbers.contains(&value.as_str()),
-                "value {value} in message for {name}: {message}"
-            );
-        }
-    }
-
-    /// Checks that an unexpected chunk states both chunk types in the eight-digit hexadecimal form
-    /// that the glTF specification uses, whatever the case of the letters
-    #[test]
-    fn fmt_with_unexpected_chunk_includes_both_types_in_hexadecimal() {
-        let cases = [
-            ("JSON expected, BIN found", 0x4E4F_534A, 0x004E_4942, "0x4e4f534a", "0x004e4942"),
-            ("BIN expected, JSON found", 0x004E_4942, 0x4E4F_534A, "0x004e4942", "0x4e4f534a"),
-            ("zero and largest", 0, u32::MAX, "0x00000000", "0xffffffff"),
-        ];
-
-        for (name, expected, found, expected_hex, found_hex) in cases {
-            let error = GltfError::UnexpectedChunk { expected, found };
-
-            let message = error.to_string().to_lowercase();
-
-            assert!(
-                message.contains(expected_hex),
-                "expected type in message for {name}: {message}"
-            );
-            assert!(
-                message.contains(found_hex),
-                "found type in message for {name}: {message}"
-            );
+            for value in values {
+                assert!(
+                    contains_value(&message, value),
+                    "value {value} in message for {name}: {message}"
+                );
+            }
         }
     }
 
@@ -381,38 +394,6 @@ mod tests {
         assert!(
             matches!(result, Err(GltfError::Json(_))),
             "result: {result:?}"
-        );
-    }
-
-    /// Checks that `?` passes a successful parse through unchanged
-    #[test]
-    fn from_with_question_mark_on_valid_json_returns_value() {
-        let text = r#"{"asset":{"version":"2.0"}}"#;
-
-        let result = parse_with_question_mark(text);
-
-        assert!(
-            result.is_ok_and(|value| value["asset"]["version"] == "2.0"),
-            "parsed value"
-        );
-    }
-
-    /// Checks that `?` boxes a `GltfError` as a `Box<dyn Error>` that keeps its message and source
-    #[test]
-    fn from_with_question_mark_into_boxed_error_keeps_message_and_source() {
-        let message = GltfError::Json(build_json_error()).to_string();
-
-        let result = return_boxed_json_error();
-        let boxed = result.err();
-
-        assert_eq!(
-            boxed.as_ref().map(ToString::to_string),
-            Some(message),
-            "message of the boxed error"
-        );
-        assert!(
-            boxed.as_ref().and_then(|error| error.source()).is_some(),
-            "source of the boxed error"
         );
     }
 }

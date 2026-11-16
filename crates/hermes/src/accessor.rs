@@ -98,7 +98,8 @@ struct Layout {
 fn find_layout(document: &Document, accessor: &Accessor, view_index: usize, element_size: usize) -> Result<Layout, GltfError> {
     let view = document.buffer_views.get(view_index).ok_or(GltfError::MissingBufferView(view_index))?;
     if let Some(stride) = view.byte_stride {
-        // Applies the limits that glTF sets on `byteStride`
+        // Applies the limits that glTF sets on `byteStride`. `MIN_STRIDE` changes no result, since the
+        // multiple-of-4 and element-size checks already reject every stride below 4
         let is_valid = (MIN_STRIDE..=MAX_STRIDE).contains(&stride) && stride % 4 == 0 && stride >= element_size;
         if !is_valid {
             return Err(GltfError::InvalidStride(view_index));
@@ -142,10 +143,7 @@ fn ensure_fit(layout: &Layout, count: usize, element_size: usize, binary_len: us
 mod tests {
     use super::*;
     use crate::glb::split_glb;
-
-    /// Contains the GLB file that Blender exported for the hand model
-    const HAND_MODEL: &[u8] =
-        include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/hand-model.glb"));
+    use crate::test_support::HAND_MODEL;
 
     /// Returns the document whose JSON lists the given accessors and buffer views, and no meshes
     fn parse_document(accessors: &str, buffer_views: &str) -> Document {
@@ -200,10 +198,10 @@ mod tests {
     fn read_vec3s_with_packed_data_returns_every_element() {
         let document = parse_document(&write_accessor(5126, 3, "VEC3"), &write_view(0, 36));
         let binary = write_f32s(&[1.0, 2.0, 3.0, -4.5, 5.25, -6.0, 0.0, 0.5, 100.0]);
+        let expected = vec![[1.0, 2.0, 3.0], [-4.5, 5.25, -6.0], [0.0, 0.5, 100.0]];
 
         let result = read_vec3s(&document, &binary, 0);
 
-        let expected = vec![[1.0, 2.0, 3.0], [-4.5, 5.25, -6.0], [0.0, 0.5, 100.0]];
         assert!(matches!(result, Ok(values) if values == expected), "vec3s from a packed view");
     }
 
@@ -217,10 +215,10 @@ mod tests {
         // Twelve bytes of padding come before the data, and four bytes after it. Each padding float
         // differs, and a start in the wrong place therefore reads different values
         let binary = write_f32s(&[-1.0, -2.0, -3.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, -4.0]);
+        let expected = vec![[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]];
 
         let result = read_vec3s(&document, &binary, 0);
 
-        let expected = vec![[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]];
         assert!(matches!(result, Ok(values) if values == expected), "vec3s after both offsets");
     }
 
@@ -234,12 +232,12 @@ mod tests {
         );
         // Each vertex stores a position, then a normal
         let binary = write_f32s(&[1.0, 2.0, 3.0, 0.0, 1.0, 0.0, 4.0, 5.0, 6.0, 0.0, 0.0, -1.0]);
+        let expected_positions = vec![[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]];
+        let expected_normals = vec![[0.0, 1.0, 0.0], [0.0, 0.0, -1.0]];
 
         let positions = read_vec3s(&document, &binary, 0);
         let normals = read_vec3s(&document, &binary, 1);
 
-        let expected_positions = vec![[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]];
-        let expected_normals = vec![[0.0, 1.0, 0.0], [0.0, 0.0, -1.0]];
         assert!(
             matches!(positions, Ok(values) if values == expected_positions),
             "interleaved positions"
@@ -248,6 +246,22 @@ mod tests {
             matches!(normals, Ok(values) if values == expected_normals),
             "interleaved normals"
         );
+    }
+
+    /// Checks that a view whose stated stride equals the size of a vec3 reads like a packed view,
+    /// and states that it is strided
+    #[test]
+    fn read_vec3s_with_stride_equal_to_element_size_returns_every_element() {
+        let document = parse_document(
+            &write_accessor(5126, 2, "VEC3"),
+            r#"{"byteLength": 24, "byteStride": 12}"#,
+        );
+        let binary = write_f32s(&[1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
+        let expected = vec![[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]];
+
+        let result = read_vec3s(&document, &binary, 0);
+
+        assert!(matches!(result, Ok(values) if values == expected), "vec3s with a stride of 12");
     }
 
     /// Checks that an accessor with no elements gives an empty list, even from an empty chunk
@@ -275,10 +289,10 @@ mod tests {
             &write_view(16, 20),
         );
         let binary = write_f32s(&[1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0]);
+        let expected = vec![[7.0, 8.0, 9.0]];
 
         let result = read_vec3s(&document, &binary, 0);
 
-        let expected = vec![[7.0, 8.0, 9.0]];
         assert!(matches!(result, Ok(values) if values == expected), "vec3 at the end of the chunk");
     }
 
@@ -293,11 +307,11 @@ mod tests {
             [f32::NAN, f32::MIN, f32::EPSILON],
         ];
         let binary = write_f32s(stored.as_flattened());
+        let expected = read_bits(&stored);
 
         let result = read_vec3s(&document, &binary, 0);
 
         let bits = result.map(|values| read_bits(&values));
-        let expected = read_bits(&stored);
         assert!(matches!(bits, Ok(bits) if bits == expected), "bits of the special floats");
     }
 
@@ -390,7 +404,9 @@ mod tests {
     fn read_vec3s_with_invalid_stride_returns_invalid_stride() {
         let binary = vec![0; 64];
         let cases = [
-            ("stride below the smallest", 2),
+            // No stride below `MIN_STRIDE` passes the other two checks, so these cases fail more than one
+            ("zero stride, below the smallest and smaller than a vec3", 0),
+            ("stride of two, below the smallest and not a multiple of four", 2),
             ("stride not a multiple of four", 13),
             ("stride above the largest", 256),
             ("stride smaller than a vec3", 8),
@@ -424,6 +440,7 @@ mod tests {
             ("stride past the end", 0, 44, 0, Some(16), 3, 36),
             ("empty chunk", 0, 12, 0, None, 1, 0),
             ("view one byte short", 0, 35, 0, None, 3, 36),
+            ("view at an offset one byte short", 12, 35, 0, None, 3, 48),
         ];
 
         for (name, view_offset, view_length, accessor_offset, stride, count, length) in cases {
@@ -445,19 +462,25 @@ mod tests {
         }
     }
 
-    /// Checks that offsets whose sum overflows a `usize` fail as truncated, rather than panic
+    /// Checks that offsets and lengths whose sums overflow a `usize` fail as truncated, rather than
+    /// panic, at each of the four sums that can overflow
     #[test]
     fn read_vec3s_with_largest_offsets_returns_truncated() {
+        // Each case gives the view offset, view length, accessor offset and count. Each overflows
+        // one sum alone, and every sum before it fits
         let cases = [
-            ("largest view offset", usize::MAX, 1),
-            ("largest accessor offset", 1, usize::MAX),
+            ("view offset and accessor offset", usize::MAX, 36, 1, 1),
+            ("accessor offset and view offset", 1, 36, usize::MAX, 1),
+            ("view offset and view length", usize::MAX, 1, 0, 1),
+            ("start of the last element", usize::MAX - 4, 4, 0, 2),
+            ("end of the last element", usize::MAX - 4, 4, 0, 1),
         ];
 
-        for (name, view_offset, accessor_offset) in cases {
+        for (name, view_offset, view_length, accessor_offset, count) in cases {
             let accessor = format!(
-                r#"{{"bufferView": 0, "byteOffset": {accessor_offset}, "componentType": 5126, "count": 1, "type": "VEC3"}}"#
+                r#"{{"bufferView": 0, "byteOffset": {accessor_offset}, "componentType": 5126, "count": {count}, "type": "VEC3"}}"#
             );
-            let document = parse_document(&accessor, &write_view(view_offset, 36));
+            let document = parse_document(&accessor, &write_view(view_offset, view_length));
             let binary = vec![0; 36];
 
             let result = read_vec3s(&document, &binary, 0);
@@ -541,10 +564,10 @@ mod tests {
     fn read_indices_with_u16_indices_returns_widened_values() {
         let document = parse_document(&write_accessor(5123, 6, "SCALAR"), &write_view(0, 12));
         let binary = write_u16s(&[0, 1, 2, 2, 1, 300]);
+        let expected = vec![0, 1, 2, 2, 1, 300];
 
         let result = read_indices(&document, &binary, 0);
 
-        let expected = vec![0, 1, 2, 2, 1, 300];
         assert!(matches!(result, Ok(indices) if indices == expected), "16-bit indices");
     }
 
@@ -553,10 +576,10 @@ mod tests {
     fn read_indices_with_u32_indices_returns_values() {
         let document = parse_document(&write_accessor(5125, 3, "SCALAR"), &write_view(0, 12));
         let binary = write_u32s(&[70_000, 3, 1_000_000]);
+        let expected = vec![70_000, 3, 1_000_000];
 
         let result = read_indices(&document, &binary, 0);
 
-        let expected = vec![70_000, 3, 1_000_000];
         assert!(matches!(result, Ok(indices) if indices == expected), "32-bit indices");
     }
 
@@ -769,6 +792,7 @@ mod tests {
             ("32-bit accessor offset one byte past", 5125, 0, 13, 9, 1, 12),
             ("empty chunk", 5123, 0, 2, 0, 1, 0),
             ("32-bit view one byte short", 5125, 0, 11, 0, 3, 12),
+            ("16-bit view at an offset one byte short", 5123, 4, 5, 0, 3, 10),
         ];
 
         for (name, component_type, view_offset, view_length, accessor_offset, count, length) in cases {
@@ -875,6 +899,15 @@ mod tests {
             ),
             ("largest stride", r#"{"byteLength": 252, "byteStride": 252}"#, 0, 0, 12, (0, 252, 252, true)),
             (
+                "stride equal to the element size",
+                r#"{"byteLength": 36, "byteStride": 12}"#,
+                0,
+                0,
+                12,
+                (0, 12, 36, true),
+            ),
+            ("smallest stride", r#"{"byteLength": 16, "byteStride": 4}"#, 0, 0, 4, (0, 4, 16, true)),
+            (
                 "second of two views",
                 r#"{"byteOffset": 40, "byteLength": 60}, {"byteOffset": 100, "byteLength": 32, "byteStride": 16}"#,
                 1,
@@ -908,5 +941,48 @@ mod tests {
         let layout = find_layout(&document, &document.accessors[0], 2, 12);
 
         assert!(matches!(layout, Err(GltfError::MissingBufferView(2))), "error for view 2");
+    }
+
+    /// Checks that `ensure_fit` accepts every layout whose elements lie inside both the view and
+    /// the chunk, up to an element that ends on the last byte of each
+    #[test]
+    fn ensure_fit_with_standard_and_extreme_layouts_returns_ok() {
+        // Each case gives the start, stride, view end, count, element size and chunk length
+        let cases = [
+            ("packed vec3s", 0, 12, 36, 3, 12, 36),
+            ("strided vec3s ending at the view end", 4, 16, 48, 3, 12, 48),
+            ("view ending before the chunk", 8, 2, 14, 3, 2, 100),
+            ("no elements past the chunk", usize::MAX, 12, 0, 0, 12, 0),
+            ("one element filling the chunk", 0, 4, 4, 1, 4, 4),
+        ];
+
+        for (name, start, stride, view_end, count, element_size, binary_len) in cases {
+            let layout = Layout { start, stride, view_end, is_strided: false };
+
+            let result = ensure_fit(&layout, count, element_size, binary_len);
+
+            assert!(result.is_ok(), "result for {name}");
+        }
+    }
+
+    /// Checks that `ensure_fit` fails as truncated, rather than panic, where the position of the
+    /// last element overflows a `usize`, at each of its three steps
+    #[test]
+    fn ensure_fit_with_overflowing_sums_returns_truncated() {
+        // Each case gives the start, stride and count, with an element size of 12. The view and
+        // the chunk end at `usize::MAX`, so only an overflow can fail
+        let cases = [
+            ("count times stride", 0, 12, usize::MAX),
+            ("start plus the span to the last element", usize::MAX - 4, 12, 2),
+            ("start of the last element plus its size", usize::MAX - 4, 12, 1),
+        ];
+
+        for (name, start, stride, count) in cases {
+            let layout = Layout { start, stride, view_end: usize::MAX, is_strided: false };
+
+            let result = ensure_fit(&layout, count, 12, usize::MAX);
+
+            assert!(matches!(result, Err(GltfError::Truncated)), "error for {name}");
+        }
     }
 }

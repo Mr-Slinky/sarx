@@ -7,12 +7,12 @@
 use crate::GltfError;
 use crate::bytes::read_bytes_from;
 
-const MAGIC: u32 = 0x4654_6C67;
-const VERSION: u32 = 2;
-const HEADER_LENGTH: usize = 12;
+pub(crate) const MAGIC: u32 = 0x4654_6C67;
+pub(crate) const VERSION: u32 = 2;
+pub(crate) const HEADER_LENGTH: usize = 12;
 const CHUNK_HEADER_LENGTH: usize = 8;
-const JSON_CHUNK: u32 = 0x4E4F_534A;
-const BINARY_CHUNK: u32 = 0x004E_4942;
+pub(crate) const JSON_CHUNK: u32 = 0x4E4F_534A;
+pub(crate) const BINARY_CHUNK: u32 = 0x004E_4942;
 
 pub(crate) struct Glb<'a> {
     pub(crate) json: &'a [u8],
@@ -33,7 +33,12 @@ pub(crate) fn split_glb(file: &[u8]) -> Result<Glb<'_>, GltfError> {
 
     let stated_length = u32::from_le_bytes(read_bytes_from(file, 8)?);
     let (json, json_end) = read_chunk(file, HEADER_LENGTH, JSON_CHUNK)?;
-    let (binary, _) = read_chunk(file, json_end, BINARY_CHUNK)?;
+    // glTF makes the BIN chunk optional, so a file that ends after its JSON chunk has no binary data
+    let binary = if json_end == file.len() {
+        &[]
+    } else {
+        read_chunk(file, json_end, BINARY_CHUNK)?.0
+    };
 
     // Checks the length last, so that a file cut short inside a chunk reports `Truncated`
     let actual_length = file.len();
@@ -47,13 +52,16 @@ pub(crate) fn split_glb(file: &[u8]) -> Result<Glb<'_>, GltfError> {
 
 fn read_chunk(file: &[u8], offset: usize, expected: u32) -> Result<(&[u8], usize), GltfError> {
     let length = u32::from_le_bytes(read_bytes_from(file, offset)?) as usize;
-    let found = u32::from_le_bytes(read_bytes_from(file, offset + 4)?);
+    // Fails rather than wrapping round where an offset or a length from a corrupt file nears
+    // `usize::MAX`, which a 32-bit target can reach
+    let type_offset = offset.checked_add(4).ok_or(GltfError::Truncated)?;
+    let found = u32::from_le_bytes(read_bytes_from(file, type_offset)?);
     if found != expected {
         return Err(GltfError::UnexpectedChunk {expected, found });
     }
 
-    let data_start = offset + CHUNK_HEADER_LENGTH;
-    let data_end = data_start + length;
+    let data_start = offset.checked_add(CHUNK_HEADER_LENGTH).ok_or(GltfError::Truncated)?;
+    let data_end = data_start.checked_add(length).ok_or(GltfError::Truncated)?;
     let data = file.get(data_start..data_end).ok_or(GltfError::Truncated)?;
 
     Ok((data, data_end))
@@ -62,57 +70,15 @@ fn read_chunk(file: &[u8], offset: usize, expected: u32) -> Result<(&[u8], usize
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// Contains the bytes of the GLB file that Blender exported for the hand model
-    const HAND_MODEL: &[u8] = include_bytes!(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../../assets/hand-model.glb"
-    ));
+    use crate::test_support::{
+        HAND_MODEL, append_chunk, append_chunk_with_length, build_glb, build_header, write_total_length,
+    };
 
     /// Represents a chunk type that the glTF specification does not define
     const UNKNOWN_CHUNK: u32 = 0x5458_4554;
 
-    /// Returns the 12-byte GLB header with the given `magic`, `version` and total `length`
-    fn build_header(magic: u32, version: u32, length: u32) -> Vec<u8> {
-        let mut header = Vec::with_capacity(HEADER_LENGTH);
-        header.extend_from_slice(&magic.to_le_bytes());
-        header.extend_from_slice(&version.to_le_bytes());
-        header.extend_from_slice(&length.to_le_bytes());
-        header
-    }
-
-    /// Appends a chunk whose header states `length`, whatever the true length of `data` is
-    fn append_chunk_with_length(file: &mut Vec<u8>, length: u32, chunk_type: u32, data: &[u8]) {
-        file.extend_from_slice(&length.to_le_bytes());
-        file.extend_from_slice(&chunk_type.to_le_bytes());
-        file.extend_from_slice(data);
-    }
-
-    /// Appends a chunk whose header states the true length of `data`
-    fn append_chunk(file: &mut Vec<u8>, chunk_type: u32, data: &[u8]) {
-        let length = u32::try_from(data.len()).expect("test chunk fits in a u32");
-        append_chunk_with_length(file, length, chunk_type, data);
-    }
-
-    /// Writes the true length of `file` into the total length field of its header
-    fn write_total_length(file: &mut [u8]) {
-        let length = u32::try_from(file.len()).expect("test file fits in a u32");
-        file[8..HEADER_LENGTH].copy_from_slice(&length.to_le_bytes());
-    }
-
-    /// Returns a GLB file with a JSON chunk that contains `json`, and a BIN chunk that contains
-    /// `binary`
-    ///
-    /// Each chunk contains its bytes exactly as given. The specification pads every chunk to a
-    /// multiple of four bytes. A caller that passes a length of 2 therefore builds a file that a
-    /// strict reader would reject. `split_glb` does not check the padding, and the tests rely on that.
-    fn build_glb(json: &[u8], binary: &[u8]) -> Vec<u8> {
-        let mut file = build_header(MAGIC, VERSION, 0);
-        append_chunk(&mut file, JSON_CHUNK, json);
-        append_chunk(&mut file, BINARY_CHUNK, binary);
-        write_total_length(&mut file);
-        file
-    }
+    /// Names a case, then gives the file, the JSON chunk and the BIN chunk that `split_glb` returns
+    type ChunkCase = (&'static str, Vec<u8>, &'static [u8], &'static [u8]);
 
     /// Checks that the hand model splits into a JSON chunk of JSON text, and a BIN chunk of the
     /// length that the JSON states for its buffer
@@ -148,19 +114,26 @@ mod tests {
     }
 
     /// Checks that `split_glb` returns the bytes of each chunk unchanged, including empty chunks
+    /// and a file that has no BIN chunk, which the glTF specification allows
     #[test]
     fn split_glb_with_standard_and_extreme_chunks_returns_chunk_data() {
-        let cases: [(&str, &[u8], &[u8]); 5] = [
-            ("standard chunks", b"{\"asset\":{}}", &[1, 2, 3, 4, 5, 6, 7, 8]),
-            ("single byte chunks", b"{", &[0xFF]),
-            ("empty JSON chunk", b"", &[1, 2, 3, 4]),
-            ("empty BIN chunk", b"{}  ", b""),
-            ("both chunks empty", b"", b""),
+        let mut json_only = build_header(MAGIC, VERSION, 0);
+        append_chunk(&mut json_only, JSON_CHUNK, b"{}  ");
+        write_total_length(&mut json_only);
+        let mut empty_json_only = build_header(MAGIC, VERSION, 0);
+        append_chunk(&mut empty_json_only, JSON_CHUNK, b"");
+        write_total_length(&mut empty_json_only);
+        let cases: [ChunkCase; 7] = [
+            ("standard chunks", build_glb(b"{\"asset\":{}}", &[1, 2, 3, 4, 5, 6, 7, 8]), b"{\"asset\":{}}", &[1, 2, 3, 4, 5, 6, 7, 8]),
+            ("single byte chunks", build_glb(b"{", &[0xFF]), b"{", &[0xFF]),
+            ("empty JSON chunk", build_glb(b"", &[1, 2, 3, 4]), b"", &[1, 2, 3, 4]),
+            ("empty BIN chunk", build_glb(b"{}  ", b""), b"{}  ", b""),
+            ("both chunks empty", build_glb(b"", b""), b"", b""),
+            ("JSON chunk alone", json_only, b"{}  ", b""),
+            ("empty JSON chunk alone", empty_json_only, b"", b""),
         ];
 
-        for (name, json, binary) in cases {
-            let file = build_glb(json, binary);
-
+        for (name, file, json, binary) in cases {
             let result = split_glb(&file);
 
             assert!(
@@ -386,16 +359,17 @@ mod tests {
         }
     }
 
-    /// Checks that a file which ends before the header of its BIN chunk is complete is rejected
+    /// Checks that a file which ends part-way through the header of its BIN chunk is rejected
     #[test]
-    fn split_glb_with_missing_binary_chunk_returns_truncated() {
+    fn split_glb_with_binary_chunk_header_cut_short_returns_truncated() {
         let valid = build_glb(b"{}  ", &[1, 2, 3, 4]);
         let json_end = HEADER_LENGTH + CHUNK_HEADER_LENGTH + 4;
         let cases = [
-            ("file ending after the JSON chunk", json_end),
+            ("first byte of the BIN chunk length", json_end + 1),
             ("part of the BIN chunk length", json_end + 2),
             ("BIN chunk length alone", json_end + 4),
             ("part of the BIN chunk type", json_end + 6),
+            ("all but the last byte of the BIN chunk header", json_end + 7),
         ];
 
         for (name, length) in cases {
@@ -405,6 +379,26 @@ mod tests {
 
             assert!(matches!(result, Err(GltfError::Truncated)), "error for {name}");
         }
+    }
+
+    /// Checks that a file cut short just after its JSON chunk, whose header still states the
+    /// length of the whole file, is rejected with both lengths in the error
+    #[test]
+    fn split_glb_with_file_cut_after_json_chunk_returns_length_mismatch() {
+        let valid = build_glb(b"{}  ", &[1, 2, 3, 4]);
+        let stated_length = u32::try_from(valid.len()).expect("test file fits in a u32");
+        let json_end = HEADER_LENGTH + CHUNK_HEADER_LENGTH + 4;
+        let file = &valid[..json_end];
+
+        let result = split_glb(file);
+
+        assert!(
+            matches!(
+                result,
+                Err(GltfError::LengthMismatch { stated, actual }) if stated == stated_length && actual == json_end
+            ),
+            "error for a file cut after its JSON chunk"
+        );
     }
 
     /// Checks that `read_chunk` returns the data of a chunk and the offset just past its end,
@@ -435,7 +429,7 @@ mod tests {
     #[test]
     fn read_chunk_with_offset_past_end_returns_truncated() {
         let file = build_glb(b"{}", &[1, 2, 3, 4]);
-        let offsets = [file.len() - 4, file.len(), file.len() + 1, file.len() + 100];
+        let offsets = [file.len() - 4, file.len(), file.len() + 1, file.len() + 100, usize::MAX];
 
         for offset in offsets {
             let result = read_chunk(&file, offset, BINARY_CHUNK);

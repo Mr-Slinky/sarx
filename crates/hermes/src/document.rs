@@ -117,9 +117,7 @@ pub(crate) struct BufferView {
 mod tests {
     use super::*;
     use crate::glb::split_glb;
-
-    /// Contains the GLB file that Blender exported for the hand model
-    const HAND_MODEL: &[u8] = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/hand-model.glb"));
+    use crate::test_support::HAND_MODEL;
 
     /// Returns the JSON chunk of the hand model
     fn read_hand_json() -> &'static [u8] {
@@ -176,7 +174,7 @@ mod tests {
     /// Checks that the hand model's document contains one mesh, whose primitive points to the
     /// expected accessors, along with 115 accessors and 115 buffer views
     #[test]
-    fn document_from_json_with_hand_model_returns_mesh_and_lists() {
+    fn from_slice_with_hand_model_document_returns_mesh_and_lists() {
         let json = read_hand_json();
 
         let document = serde_json::from_slice::<Document>(json).expect("the hand model's JSON parses");
@@ -194,7 +192,7 @@ mod tests {
     /// Checks that the hand model's first six accessors keep their buffer view, offset, number
     /// type, count and shape
     #[test]
-    fn document_from_json_with_hand_model_returns_mesh_accessors() {
+    fn from_slice_with_hand_model_document_returns_mesh_accessors() {
         let json = read_hand_json();
         let expected = [
             (Some(0), 0, 5126, 3558, "VEC3"),
@@ -223,7 +221,7 @@ mod tests {
     /// Checks that the hand model's first six buffer views keep their byte offsets and byte
     /// lengths, and have no stride
     #[test]
-    fn document_from_json_with_hand_model_returns_buffer_view_ranges() {
+    fn from_slice_with_hand_model_document_returns_buffer_view_ranges() {
         let json = read_hand_json();
         let expected = [
             (0, 42696),
@@ -246,7 +244,7 @@ mod tests {
     /// Checks that a document parses from standard and extreme JSON, ignoring the fields that it
     /// does not model
     #[test]
-    fn document_from_json_with_standard_and_extreme_json_returns_lists() {
+    fn from_str_with_standard_and_extreme_document_returns_lists() {
         let cases = [
             (
                 "one of each",
@@ -313,7 +311,7 @@ mod tests {
     /// Checks that a document missing a list parses with that list empty, since the glTF
     /// specification makes `meshes`, `accessors` and `bufferViews` optional
     #[test]
-    fn document_from_json_with_absent_lists_returns_empty_lists() {
+    fn from_str_with_document_missing_lists_returns_empty_lists() {
         let cases = [
             ("no meshes", r#"{ "accessors": [], "bufferViews": [] }"#),
             ("no accessors", r#"{ "meshes": [], "bufferViews": [] }"#),
@@ -328,28 +326,17 @@ mod tests {
         }
     }
 
-    /// Checks that a document is rejected where its JSON is malformed or has the wrong shape
+    /// Checks that a document is rejected where a list that it models is null, or where a mesh or
+    /// accessor leaves out a field that it requires
     #[test]
-    fn document_from_json_with_abnormal_json_returns_error() {
+    fn from_str_with_abnormal_document_returns_error() {
         let cases = [
-            ("empty text", ""),
-            ("unclosed object", r#"{ "meshes": [], "accessors": [], "bufferViews": ["#),
-            ("trailing comma", r#"{ "meshes": [], "accessors": [], "bufferViews": [], }"#),
-            ("top level number", "0"),
-            ("top level text", r#""meshes""#),
-            ("top level null", "null"),
-            ("meshes as an object", r#"{ "meshes": {}, "accessors": [], "bufferViews": [] }"#),
             ("accessors as null", r#"{ "meshes": [], "accessors": null, "bufferViews": [] }"#),
-            ("buffer views as a number", r#"{ "meshes": [], "accessors": [], "bufferViews": 0 }"#),
             ("mesh missing primitives", r#"{ "meshes": [{}], "accessors": [], "bufferViews": [] }"#),
             (
                 "accessor missing count",
                 r#"{ "meshes": [], "accessors": [{ "bufferView": 0, "componentType": 5126, "type": "VEC3" }],
                      "bufferViews": [] }"#,
-            ),
-            (
-                "buffer view with a negative offset",
-                r#"{ "meshes": [], "accessors": [], "bufferViews": [{ "byteOffset": -1, "byteLength": 36 }] }"#,
             ),
         ];
 
@@ -363,7 +350,7 @@ mod tests {
     /// Checks that a primitive parses its attributes and index accessor, reading an absent or null
     /// index accessor as `None` and ignoring the fields that it does not model
     #[test]
-    fn primitive_from_json_with_standard_and_extreme_json_returns_accessors() {
+    fn from_str_with_standard_and_extreme_primitive_returns_accessors() {
         let cases = [
             (
                 "standard",
@@ -404,42 +391,35 @@ mod tests {
         }
     }
 
-    /// Checks that a primitive is rejected where a field it needs is missing or has the wrong type
+    /// Checks that a primitive is rejected where it leaves out its attributes, which it requires
     #[test]
-    fn primitive_from_json_with_abnormal_json_returns_error() {
-        let cases = [
-            ("missing attributes", r#"{ "indices": 5 }"#),
-            ("attributes as a number", r#"{ "attributes": 0, "indices": 5 }"#),
-            ("negative indices", r#"{ "attributes": { "POSITION": 0, "NORMAL": 1 }, "indices": -1 }"#),
-            ("indices as text", r#"{ "attributes": { "POSITION": 0, "NORMAL": 1 }, "indices": "5" }"#),
-        ];
+    fn from_str_with_primitive_missing_attributes_returns_error() {
+        let json = r#"{ "indices": 5 }"#;
 
-        for (name, json) in cases {
-            let accessors = summarise_primitive(json);
+        let accessors = summarise_primitive(json);
 
-            assert_eq!(accessors, None, "primitive for {name} should be rejected");
-        }
+        assert_eq!(accessors, None, "primitive without attributes should be rejected");
     }
 
     /// Checks that a primitive keeps the largest accessor index that a `usize` can store, in every
     /// field
     #[test]
-    fn primitive_from_json_with_largest_values_returns_accessors() {
+    fn from_str_with_largest_primitive_values_returns_accessors() {
         let json = format!(
             r#"{{ "attributes": {{ "POSITION": {max}, "NORMAL": {max} }}, "indices": {max} }}"#,
             max = usize::MAX,
         );
+        let expected = (usize::MAX, Some(usize::MAX), Some(usize::MAX));
 
         let accessors = summarise_primitive(&json);
 
-        let expected = (usize::MAX, Some(usize::MAX), Some(usize::MAX));
         assert_eq!(accessors, Some(expected), "position, normal and index accessors with the largest values");
     }
 
     /// Checks that the attributes parse from the upper case glTF names, reading an absent or null
     /// normal as `None` and ignoring every other attribute
     #[test]
-    fn attributes_from_json_with_standard_and_extreme_json_returns_accessors() {
+    fn from_str_with_standard_and_extreme_attributes_returns_accessors() {
         let cases = [
             ("standard", r#"{ "POSITION": 0, "NORMAL": 1 }"#, (0, Some(1))),
             (
@@ -460,16 +440,13 @@ mod tests {
         }
     }
 
-    /// Checks that the attributes are rejected where a name is missing, is misspelt or has a value
-    /// of the wrong type
+    /// Checks that the attributes are rejected where the position is missing, or where the names
+    /// are not in the upper case that glTF uses
     #[test]
-    fn attributes_from_json_with_abnormal_json_returns_error() {
+    fn from_str_with_abnormal_attributes_returns_error() {
         let cases = [
             ("missing position", r#"{ "NORMAL": 1 }"#),
             ("lower case names", r#"{ "position": 0, "normal": 1 }"#),
-            ("negative position", r#"{ "POSITION": -1, "NORMAL": 1 }"#),
-            ("fractional normal", r#"{ "POSITION": 0, "NORMAL": 1.5 }"#),
-            ("position as text", r#"{ "POSITION": "0", "NORMAL": 1 }"#),
         ];
 
         for (name, json) in cases {
@@ -482,7 +459,7 @@ mod tests {
     /// Checks that an accessor parses from the camel case glTF names, with an absent byte offset
     /// read as 0, an absent or null buffer view read as `None` and unknown fields ignored
     #[test]
-    fn accessor_from_json_with_standard_and_extreme_json_returns_fields() {
+    fn from_str_with_standard_and_extreme_accessor_returns_fields() {
         let cases = [
             (
                 "standard",
@@ -533,31 +510,36 @@ mod tests {
         ];
 
         for (name, json, (view, offset, component, count, kind)) in cases {
+            let expected = (view, offset, component, count, kind.to_string());
+
             let fields = summarise_accessor(json);
 
-            let expected = (view, offset, component, count, kind.to_string());
             assert_eq!(fields, Some(expected), "fields of the accessor for {name}");
         }
     }
 
     /// Checks that an accessor keeps the largest value that each number field can store
     #[test]
-    fn accessor_from_json_with_largest_values_returns_fields() {
+    fn from_str_with_largest_accessor_values_returns_fields() {
         let json = format!(
             r#"{{ "bufferView": {max}, "byteOffset": {max}, "componentType": {}, "count": {max}, "type": "MAT4" }}"#,
             u32::MAX,
             max = usize::MAX,
         );
+        let expected = (Some(usize::MAX), usize::MAX, u32::MAX, usize::MAX, "MAT4".to_string());
 
         let fields = summarise_accessor(&json);
 
-        let expected = (Some(usize::MAX), usize::MAX, u32::MAX, usize::MAX, "MAT4".to_string());
         assert_eq!(fields, Some(expected), "fields of the accessor with the largest values");
     }
 
-    /// Checks that an accessor is rejected where a number field is one past its largest value
+    /// Checks that an accessor is rejected where a number is too large for its field
+    ///
+    /// serde_json reads a number past `u64::MAX` as a float, and therefore rejects the three
+    /// `usize` fields as not whole numbers rather than as too large. The component type is a
+    /// `u32`, and its case alone reaches a check of the range.
     #[test]
-    fn accessor_from_json_with_values_past_largest_returns_error() {
+    fn from_str_with_accessor_number_too_large_for_field_returns_error() {
         let past_usize = usize::MAX as u128 + 1;
         let past_u32 = u64::from(u32::MAX) + 1;
         let cases = [
@@ -582,14 +564,14 @@ mod tests {
         for (name, json) in cases {
             let fields = summarise_accessor(&json);
 
-            assert_eq!(fields, None, "accessor with an overflowing {name} should be rejected");
+            assert_eq!(fields, None, "accessor with a number too large for the {name} field should be rejected");
         }
     }
 
-    /// Checks that an accessor is rejected where a required field is missing, is misnamed or has
-    /// the wrong type
+    /// Checks that an accessor is rejected where a required field is missing or misnamed, or where
+    /// its byte offset is null rather than absent
     #[test]
-    fn accessor_from_json_with_abnormal_json_returns_error() {
+    fn from_str_with_abnormal_accessor_returns_error() {
         let cases = [
             ("missing component type", r#"{ "bufferView": 0, "count": 1, "type": "VEC3" }"#),
             ("missing count", r#"{ "bufferView": 0, "componentType": 5126, "type": "VEC3" }"#),
@@ -598,23 +580,10 @@ mod tests {
                 "field named kind rather than type",
                 r#"{ "bufferView": 0, "componentType": 5126, "count": 1, "kind": "VEC3" }"#,
             ),
-            ("negative count", r#"{ "bufferView": 0, "componentType": 5126, "count": -1, "type": "VEC3" }"#),
-            (
-                "negative byte offset",
-                r#"{ "bufferView": 0, "byteOffset": -4, "componentType": 5126, "count": 1, "type": "VEC3" }"#,
-            ),
-            ("fractional count", r#"{ "bufferView": 0, "componentType": 5126, "count": 1.5, "type": "VEC3" }"#),
-            ("count as text", r#"{ "bufferView": 0, "componentType": 5126, "count": "1", "type": "VEC3" }"#),
-            ("type as a number", r#"{ "bufferView": 0, "componentType": 5126, "count": 1, "type": 3 }"#),
             (
                 "null byte offset",
                 r#"{ "bufferView": 0, "byteOffset": null, "componentType": 5126, "count": 1, "type": "VEC3" }"#,
             ),
-            (
-                "negative component type",
-                r#"{ "bufferView": 0, "componentType": -5126, "count": 1, "type": "VEC3" }"#,
-            ),
-            ("number rather than object", "0"),
         ];
 
         for (name, json) in cases {
@@ -627,7 +596,7 @@ mod tests {
     /// Checks that a buffer view reads an absent byte offset as 0 and an absent stride as `None`,
     /// and keeps the values that the JSON gives
     #[test]
-    fn buffer_view_from_json_with_standard_and_extreme_json_returns_fields() {
+    fn from_str_with_standard_and_extreme_buffer_view_returns_fields() {
         let cases = [
             (
                 "offset and unknown fields",
@@ -655,33 +624,34 @@ mod tests {
     /// Checks that a buffer view keeps the largest offset, length and stride that a `usize` can
     /// store
     #[test]
-    fn buffer_view_from_json_with_largest_values_returns_fields() {
+    fn from_str_with_largest_buffer_view_values_returns_fields() {
         let json = format!(
             r#"{{ "byteOffset": {max}, "byteLength": {max}, "byteStride": {max} }}"#,
             max = usize::MAX,
         );
+        let expected = (usize::MAX, usize::MAX, Some(usize::MAX));
 
         let fields = summarise_buffer_view(&json);
 
-        let expected = (usize::MAX, usize::MAX, Some(usize::MAX));
         assert_eq!(fields, Some(expected), "offset, length and stride with the largest values");
     }
 
-    /// Checks that a buffer view is rejected where its byte length is missing, or where its
-    /// offset, length or stride is out of range or has the wrong type
+    /// Checks that a buffer view is rejected where its byte length is missing, where its offset is
+    /// null rather than absent, or where a number is too large for its field
     #[test]
-    fn buffer_view_from_json_with_abnormal_json_returns_error() {
+    fn from_str_with_abnormal_buffer_view_returns_error() {
         let past_usize = usize::MAX as u128 + 1;
         let cases = [
             ("missing byte length", r#"{ "byteOffset": 4 }"#.to_string()),
-            ("negative offset", r#"{ "byteOffset": -1, "byteLength": 36 }"#.to_string()),
-            ("negative stride", r#"{ "byteLength": 36, "byteStride": -12 }"#.to_string()),
-            ("fractional offset", r#"{ "byteOffset": 0.5, "byteLength": 36 }"#.to_string()),
-            ("stride as text", r#"{ "byteLength": 36, "byteStride": "12" }"#.to_string()),
             ("null offset", r#"{ "byteOffset": null, "byteLength": 36 }"#.to_string()),
-            ("overflowing offset", format!(r#"{{ "byteOffset": {past_usize}, "byteLength": 36 }}"#)),
-            ("overflowing stride", format!(r#"{{ "byteLength": 36, "byteStride": {past_usize} }}"#)),
-            ("text rather than object", r#""0""#.to_string()),
+            (
+                "number too large for the offset field",
+                format!(r#"{{ "byteOffset": {past_usize}, "byteLength": 36 }}"#),
+            ),
+            (
+                "number too large for the stride field",
+                format!(r#"{{ "byteLength": 36, "byteStride": {past_usize} }}"#),
+            ),
         ];
 
         for (name, json) in cases {

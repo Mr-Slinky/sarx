@@ -353,7 +353,7 @@ mod tests {
 
     /// Checks that `contains_any` returns `true` only where the two masks share a type
     #[test]
-    fn intersects_with_standard_and_extreme_masks_returns_expected() {
+    fn contains_any_with_standard_and_extreme_masks_returns_expected() {
         let table = ComponentMask::from_positions(&[0, 2, 63]);
 
         let cases = [
@@ -384,7 +384,7 @@ mod tests {
         for (name, mask, other, expected) in cases {
             let result = mask.contains_any(other);
 
-            assert_eq!(result, expected, "intersects for {name}");
+            assert_eq!(result, expected, "contains_any for {name}");
         }
     }
 
@@ -525,5 +525,38 @@ mod tests {
         let text = format!("{mask:#b}");
 
         assert_eq!(text, "0b101", "prefixed binary text");
+    }
+
+    /// Checks that `read_positions` yields each set bit once, lowest first, whatever order the bits
+    /// were set in, from no bits up to all 64
+    #[test]
+    fn read_positions_with_standard_and_extreme_masks_yields_set_bits_lowest_first() {
+        let every_position: Vec<usize> = (0..ComponentMask::CAPACITY).collect();
+
+        // Pairs each mask with the positions that it should yield, in order
+        let cases = [
+            ("empty", ComponentMask::EMPTY, vec![]),
+            ("bit 0 alone", ComponentMask::single(0), vec![0]),
+            ("bit 63 alone", ComponentMask::single(63), vec![63]),
+            (
+                "bits set out of order",
+                ComponentMask::from_positions(&[40, 3, 63, 0, 17]),
+                vec![0, 3, 17, 40, 63],
+            ),
+            (
+                "all 64 bits",
+                ComponentMask::from_positions(&every_position),
+                every_position.clone(),
+            ),
+        ];
+
+        let found = cases.map(|(name, mask, expected)| {
+            let positions: Vec<usize> = mask.read_positions().collect();
+            (name, positions, expected)
+        });
+
+        for (name, positions, expected) in found {
+            assert_eq!(positions, expected, "positions for {name}");
+        }
     }
 }

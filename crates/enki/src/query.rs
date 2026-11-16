@@ -630,6 +630,7 @@ mod tests {
     use crate::Entity;
     use crate::component::ComponentInfo;
     use crate::mask::ComponentMask;
+    use std::thread;
 
     #[derive(Debug, PartialEq)]
     struct Position(f32);
@@ -867,6 +868,57 @@ mod tests {
 
         for check in cases {
             check();
+        }
+    }
+
+    /// Checks that `check_permissions` returns the entries that the query pushes, in the same
+    /// order, for single types, repeated reads, nested pairs and flat tuples
+    #[test]
+    fn check_permissions_with_valid_queries_returns_entries_in_query_order() {
+        let position = TypeId::of::<Position>();
+        let velocity = TypeId::of::<Velocity>();
+        let tag = TypeId::of::<Tag>();
+        let name = TypeId::of::<Name>();
+
+        // Lists each query, the entries that the check returns, and the entries it should return
+        let cases = [
+            (
+                "&Position",
+                check_permissions::<&Position>(),
+                vec![(position, Permission::Read)],
+            ),
+            (
+                "&mut Position",
+                check_permissions::<&mut Position>(),
+                vec![(position, Permission::Write)],
+            ),
+            (
+                "(&Position, &Position)",
+                check_permissions::<(&Position, &Position)>(),
+                vec![(position, Permission::Read), (position, Permission::Read)],
+            ),
+            (
+                "((&mut Position, &Velocity), &mut Tag)",
+                check_permissions::<((&mut Position, &Velocity), &mut Tag)>(),
+                vec![
+                    (position, Permission::Write),
+                    (velocity, Permission::Read),
+                    (tag, Permission::Write),
+                ],
+            ),
+            (
+                "(&mut Tag, &Name, &mut Velocity)",
+                check_permissions::<(&mut Tag, &Name, &mut Velocity)>(),
+                vec![
+                    (tag, Permission::Write),
+                    (name, Permission::Read),
+                    (velocity, Permission::Write),
+                ],
+            ),
+        ];
+
+        for (label, permissions, expected) in cases {
+            assert_eq!(permissions, expected, "entries for {label}");
         }
     }
 
@@ -1264,5 +1316,28 @@ mod tests {
         }
 
         assert_eq!(positions, [1.0, 2.0, 3.0]);
+    }
+
+    /// Checks that the rows of a `&mut T` query can move to another thread, and that the changes
+    /// made there reach the table
+    #[test]
+    fn split_rows_with_write_query_moved_to_other_thread_changes_reach_table() {
+        let mut table = build_table(&[1.0, 2.0, 3.0]);
+        let columns = find_checked::<(&mut Position, &Velocity)>(&mut table)
+            .expect("the table should store `Position` and `Velocity`");
+        let rows = <(&mut Position, &Velocity)>::split_rows(columns);
+
+        thread::scope(|scope| {
+            scope.spawn(move || {
+                for (position, velocity) in rows {
+                    position.0 += velocity.0;
+                }
+            });
+        });
+
+        assert_eq!(
+            read_column::<Position>(&table),
+            [Position(11.0), Position(22.0), Position(33.0)]
+        );
     }
 }

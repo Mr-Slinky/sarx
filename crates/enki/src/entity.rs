@@ -322,6 +322,21 @@ mod tests {
         hasher.finish()
     }
 
+    /// Returns the table and the row that `location` records.
+    fn read_place(location: Location) -> (usize, usize) {
+        (location.arch_index(), location.row())
+    }
+
+    /// Returns an allocator with `count` living entities, where entity `n` occupies row `n` of
+    /// table 0, along with their handles.
+    fn build_entities(count: usize) -> (Entities, Vec<Entity>) {
+        let mut entities = Entities::new();
+        let handles = (0..count)
+            .map(|row| entities.alloc(Location::new(0, row)))
+            .collect();
+        (entities, handles)
+    }
+
     /// Checks that a handle returns the index and the version that it was created with, at both ends
     /// of the `u32` range
     #[test]
@@ -421,5 +436,246 @@ mod tests {
         set.insert(Entity::new(3, 0));
 
         assert_eq!(set.len(), 2);
+    }
+
+    /// Checks that an allocator with no freed slots hands out indices in order, each at version 0
+    #[test]
+    fn alloc_with_no_freed_slots_returns_sequential_handles_at_version_zero() {
+        let cases = [1_u32, 2, 5];
+
+        let found = cases.map(|count| {
+            let expected: Vec<Entity> = (0..count).map(|index| Entity::new(index, 0)).collect();
+            let mut entities = Entities::new();
+            let handles: Vec<Entity> = (0..count)
+                .map(|row| entities.alloc(Location::new(0, row as usize)))
+                .collect();
+            (count, handles, expected, entities.count_slots())
+        });
+
+        for (count, handles, expected, slots) in found {
+            assert_eq!(handles, expected, "handles for {count} allocations");
+            assert_eq!(slots, count as usize, "slots for {count} allocations");
+        }
+    }
+
+    /// Checks that freed slots come back last freed first, each at its raised version, before any
+    /// new slot is added
+    #[test]
+    fn alloc_with_freed_slots_reuses_last_freed_first_at_raised_version() {
+        let (mut entities, handles) = build_entities(3);
+        entities.free(handles[0]);
+        entities.free(handles[1]);
+
+        let reused = [
+            entities.alloc(Location::new(1, 0)),
+            entities.alloc(Location::new(1, 1)),
+            entities.alloc(Location::new(1, 2)),
+        ];
+
+        assert_eq!(
+            reused,
+            [Entity::new(1, 1), Entity::new(0, 1), Entity::new(3, 0)],
+            "handles"
+        );
+        assert!(entities.read_free_list().is_empty(), "free slots");
+        assert_eq!(entities.count_slots(), 4, "slots");
+    }
+
+    /// Checks that a new handle records the location that `alloc` received, in a new slot and in a
+    /// reused one
+    #[test]
+    fn alloc_with_location_records_location_for_locate() {
+        let (mut entities, handles) = build_entities(1);
+        entities.free(handles[0]);
+
+        let reused = entities.alloc(Location::new(2, 7));
+        let added = entities.alloc(Location::new(3, 9));
+
+        let reused_place = entities.locate(reused).map(read_place);
+        let added_place = entities.locate(added).map(read_place);
+        assert_eq!(reused_place, Some((2, 7)), "location of the reused slot");
+        assert_eq!(added_place, Some((3, 9)), "location of the new slot");
+    }
+
+    /// Checks that freeing an entity raises the version in its slot and puts the slot on the free
+    /// list, after which `locate` refuses the old handle
+    #[test]
+    fn free_with_living_entity_raises_version_and_frees_slot() {
+        let (mut entities, handles) = build_entities(3);
+
+        entities.free(handles[1]);
+
+        assert_eq!(entities.read_slot(1).0, 1, "version of the freed slot");
+        assert_eq!(entities.read_free_list(), [1], "free slots");
+        assert!(entities.locate(handles[1]).is_none(), "freed handle");
+        assert!(entities.locate(handles[0]).is_some(), "first handle");
+        assert!(entities.locate(handles[2]).is_some(), "third handle");
+    }
+
+    /// Checks that a slot whose version reaches `u32::MAX` is retired rather than freed, since its
+    /// next version would wrap round to one that an old handle may still have
+    #[test]
+    fn free_with_version_reaching_max_retires_slot() {
+        let (mut entities, _) = build_entities(1);
+        entities.set_version(0, u32::MAX - 1);
+        let last_version = Entity::new(0, u32::MAX - 1);
+
+        entities.free(last_version);
+        let next = entities.alloc(Location::new(0, 0));
+
+        assert_eq!(
+            entities.read_slot(0).0,
+            u32::MAX,
+            "version of the retired slot"
+        );
+        assert!(entities.read_free_list().is_empty(), "free slots");
+        assert_eq!(next, Entity::new(1, 0), "handle of the next entity");
+    }
+
+    /// Checks that a debug build catches a second free of the same handle, which would otherwise
+    /// end the life of whichever entity holds the slot next
+    #[test]
+    #[cfg(debug_assertions)]
+    #[should_panic]
+    fn free_with_freed_handle_panics() {
+        let (mut entities, handles) = build_entities(1);
+        entities.free(handles[0]);
+
+        entities.free(handles[0]);
+    }
+
+    /// Checks that `locate` finds a living entity, and refuses a freed handle, an index past the
+    /// last slot and a version that differs from the slot's
+    #[test]
+    fn locate_with_living_and_dead_handles_returns_location_only_for_living() {
+        let (mut entities, handles) = build_entities(3);
+        entities.free(handles[2]);
+
+        // Pairs each handle with the table and row that `locate` should find
+        let cases = [
+            ("first living entity", handles[0], Some((0, 0))),
+            ("second living entity", handles[1], Some((0, 1))),
+            ("freed entity", handles[2], None),
+            ("index past the last slot", Entity::new(3, 0), None),
+            ("later version", Entity::new(0, 1), None),
+            (
+                "largest index and version",
+                Entity::new(u32::MAX, u32::MAX),
+                None,
+            ),
+        ];
+
+        let found = cases.map(|(label, handle, expected)| {
+            let place = entities.locate(handle).map(read_place);
+            (label, place, expected)
+        });
+
+        for (label, place, expected) in found {
+            assert_eq!(place, expected, "location for {label}");
+        }
+    }
+
+    /// Checks that `set_location` moves one entity to a new table and row, and leaves the others
+    #[test]
+    fn set_location_with_living_entity_changes_only_its_location() {
+        let (mut entities, handles) = build_entities(2);
+
+        entities.set_location(handles[0], Location::new(4, 2));
+
+        let moved = entities.locate(handles[0]).map(read_place);
+        let other = entities.locate(handles[1]).map(read_place);
+        assert_eq!(moved, Some((4, 2)), "location of the moved entity");
+        assert_eq!(other, Some((0, 1)), "location of the other entity");
+    }
+
+    /// Checks that `set_row` changes the row of one entity, and keeps its table
+    #[test]
+    fn set_row_with_living_entity_keeps_table() {
+        let (mut entities, handles) = build_entities(2);
+        entities.set_location(handles[1], Location::new(3, 8));
+
+        entities.set_row(handles[1], 0);
+
+        let place = entities.locate(handles[1]).map(read_place);
+        assert_eq!(place, Some((3, 0)));
+    }
+
+    /// Checks that `set_row` panics on a row past `u32::MAX`
+    #[cfg(target_pointer_width = "64")]
+    #[test]
+    #[should_panic]
+    fn set_row_with_row_past_u32_max_panics() {
+        let (mut entities, handles) = build_entities(1);
+
+        entities.set_row(handles[0], u32::MAX as usize + 1);
+    }
+
+    /// Checks that `reserve` makes room for every entity that the free list cannot take
+    #[test]
+    fn reserve_with_no_freed_slots_makes_room_for_every_entity() {
+        let cases = [0, 1, 10];
+
+        let found = cases.map(|additional| {
+            let (mut entities, _) = build_entities(2);
+            entities.reserve(additional);
+            (additional, entities.slot_capacity())
+        });
+
+        for (additional, capacity) in found {
+            assert!(
+                capacity >= 2 + additional,
+                "capacity {capacity} after reserving {additional}"
+            );
+        }
+    }
+
+    /// Checks that `reserve` adds room only for the entities that the freed slots cannot take
+    ///
+    /// The list of slots starts full, with two of its slots freed. A reserve of 102 then needs
+    /// room for 100 new slots. The request is far above double the capacity, meaning the list grows
+    /// to exactly what it needs, and room for all 102 would show in the capacity
+    #[test]
+    fn reserve_with_partial_free_list_makes_room_beyond_freed_slots() {
+        let mut entities = Entities::new();
+        let mut handles = vec![entities.alloc(Location::new(0, 0))];
+        while entities.count_slots() < entities.slot_capacity() {
+            let row = entities.count_slots();
+            handles.push(entities.alloc(Location::new(0, row)));
+        }
+        entities.free(handles[0]);
+        entities.free(handles[1]);
+        let slots = entities.count_slots();
+
+        entities.reserve(102);
+
+        let capacity = entities.slot_capacity();
+        assert!(
+            (slots + 100..slots + 102).contains(&capacity),
+            "capacity {capacity} for {slots} slots"
+        );
+    }
+
+    /// Checks that `reserve` leaves the list of slots at its capacity, where the freed slots can
+    /// take every entity that it makes room for
+    #[test]
+    fn reserve_with_enough_freed_slots_keeps_slot_capacity() {
+        let mut entities = Entities::new();
+        let mut handles = vec![entities.alloc(Location::new(0, 0))];
+        while entities.count_slots() < entities.slot_capacity() {
+            let row = entities.count_slots();
+            handles.push(entities.alloc(Location::new(0, row)));
+        }
+        for &handle in &handles {
+            entities.free(handle);
+        }
+        let capacity = entities.slot_capacity();
+
+        entities.reserve(handles.len());
+
+        assert_eq!(
+            entities.slot_capacity(),
+            capacity,
+            "room in the list of slots"
+        );
     }
 }

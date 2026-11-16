@@ -201,7 +201,9 @@ pub trait ComponentSet: sealed::Sealed + Send + Sync + 'static {
 /// # Panics
 ///
 /// Panics where `table` has no column for `T`, or where `existing` has the bit for `T` and the
-/// column has no component at `row`.
+/// column has no component at `row`. A debug build also panics where `existing` lacks the bit for
+/// `T` and `row` differs from the length of the column, since the push would then land at a row
+/// other than `row`.
 ///
 /// # Examples
 ///
@@ -229,6 +231,8 @@ fn push_or_replace<T: Component>(
         return Some(mem::replace(slot, value));
     }
 
+    // Panics in a debug build where the push would land at a row other than `row`
+    debug_assert_eq!(row, column.len(), "a push must land at the entity's row");
     // Moves `value` onto the end of the column
     column.push_typed(value);
     None
@@ -451,6 +455,7 @@ mod tests {
     use super::*;
     use crate::component::ComponentVec;
     use crate::mask::ComponentMask;
+    use crate::registry::build_64_type_ids;
     use std::panic::{self, AssertUnwindSafe};
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -547,11 +552,6 @@ mod tests {
         ($($n:literal)*) => { [$(TypeId::of::<Marker<$n>>()),*] };
     }
 
-    /// Builds an array with the `TypeId` of each array type `[u8; N]`, for every `N` listed.
-    macro_rules! array_type_ids {
-        ($($length:literal)*) => { [$(TypeId::of::<[u8; $length]>()),*] };
-    }
-
     /// Returns a `Set32` whose field of type `Marker<N>` contains `N`.
     fn build_set_32() -> Set32 {
         (
@@ -587,16 +587,6 @@ mod tests {
             Marker(29),
             Marker(30),
             Marker(31),
-        )
-    }
-
-    /// Returns 64 distinct `TypeId`s, enough to take every bit that a world can hand out.
-    fn build_64_type_ids() -> [TypeId; 64] {
-        array_type_ids!(
-             0  1  2  3  4  5  6  7  8  9 10 11 12 13 14 15
-            16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31
-            32 33 34 35 36 37 38 39 40 41 42 43 44 45 46 47
-            48 49 50 51 52 53 54 55 56 57 58 59 60 61 62 63
         )
     }
 
@@ -781,6 +771,19 @@ mod tests {
         assert_eq!(read_types_and_bits(&infos), expected);
     }
 
+    /// Checks that a registry with every bit taken panics on a component set with a type that it
+    /// has not met, since no bit is left for that type
+    #[test]
+    #[should_panic]
+    fn infos_with_full_registry_and_new_type_panics() {
+        let mut registry = ComponentRegistry::new();
+        for type_id in build_64_type_ids() {
+            registry.find_or_assign_bit(type_id);
+        }
+
+        <(Health,) as ComponentSet>::infos(&mut registry);
+    }
+
     /// Checks that a world with every bit taken still describes a component set of types that it
     /// has met
     #[test]
@@ -880,6 +883,30 @@ mod tests {
             "returned component for the replacement"
         );
         assert_eq!(read_column::<Tag>(&table).len(), 1, "column length");
+    }
+
+    /// Checks that a replacement at a row past the end of the column panics, rather than writing
+    /// past the last component
+    #[test]
+    #[should_panic]
+    fn push_or_replace_with_existing_bit_and_row_past_column_end_panics() {
+        let mut table = Archetype::new(&[ComponentInfo::of::<Health>(ComponentMask::single(0))]);
+        push_component(&mut table, Health(1));
+
+        push_or_replace(&mut table, 1, Health(2), ComponentMask::single(0));
+    }
+
+    /// Checks that a debug build catches a push for a row other than the end of the column, where
+    /// the push would land at the wrong row
+    #[test]
+    #[cfg(debug_assertions)]
+    #[should_panic]
+    fn push_or_replace_with_row_before_column_end_panics() {
+        let mut table = Archetype::new(&[ComponentInfo::of::<Health>(ComponentMask::single(0))]);
+        push_component(&mut table, Health(1));
+        push_component(&mut table, Health(2));
+
+        push_or_replace(&mut table, 0, Health(3), ComponentMask::EMPTY);
     }
 
     /// Checks that a table with no column for the type panics

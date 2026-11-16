@@ -295,9 +295,9 @@ impl Archetype {
     ///
     /// # Examples
     ///
-    /// The test `reserve_with_varying_additional_rows_fits_rows_without_moving_blocks` makes room
-    /// for a number of entities, pushes that many, and checks that neither the entity list nor any
-    /// column moved to a larger block.
+    /// The test `reserve_with_varying_additional_rows_fits_rows_without_growing` makes room for a
+    /// number of entities, pushes that many, and checks that neither the entity list nor any column
+    /// grew its capacity.
     pub(crate) fn reserve(&mut self, additional: usize) {
         for components in &mut self.components {
             components.reserve(additional);
@@ -650,6 +650,14 @@ mod tests {
         column.as_slice::<T>()
     }
 
+    /// Returns how many components the column that stores `T` has room for before it next grows.
+    fn read_capacity<T: 'static>(table: &Archetype) -> usize {
+        let column = table
+            .components_of(TypeId::of::<T>())
+            .expect("the table should store the component type");
+        column.capacity()
+    }
+
     /// Checks the starting state of a table, from no columns up to a bit at the top of the mask
     #[test]
     fn new_with_varying_infos_returns_empty_table_with_combined_mask() {
@@ -730,6 +738,37 @@ mod tests {
                 .collect();
 
             assert_eq!(found, expected, "infos for entry order {case}");
+        }
+    }
+
+    /// Checks that a table is empty only before its first row, and again once its last row leaves
+    #[test]
+    fn is_empty_with_varying_row_counts_returns_expected_answer() {
+        // Lists the rows to push, the rows to remove from row 0, and the answer that should result
+        let cases = [
+            (0_u32, 0, true),
+            (1, 0, false),
+            (3, 0, false),
+            (2, 1, false),
+            (2, 2, true),
+        ];
+
+        for (pushes, removals, expected) in cases {
+            let mut table =
+                Archetype::new(&[ComponentInfo::of::<Health>(ComponentMask::single(0))]);
+            for index in 0..pushes {
+                push_row(&mut table, Entity::new(index, 0), Health(index));
+            }
+            for _ in 0..removals {
+                table.remove_entity(0);
+            }
+
+            let empty = table.is_empty();
+
+            assert_eq!(
+                empty, expected,
+                "answer after {pushes} pushes and {removals} removals"
+            );
         }
     }
 
@@ -984,10 +1023,14 @@ mod tests {
         }
         let moved = Entity::new(4, 0);
         push_row(&mut source, moved, Health(4));
+        let capacity_before = read_capacity::<Health>(&target);
 
         source.move_entity(0, &mut target, ComponentVec::swap_remove, |_, _| {});
 
+        let capacity_after = read_capacity::<Health>(&target);
         let moved_row = target.len() - 1;
+        assert_eq!(capacity_before, 4, "target capacity before the move");
+        assert_eq!(capacity_after, 8, "target capacity after the move");
         assert_eq!(target.entities[moved_row], moved, "last target entity");
         assert_eq!(
             read_column::<Health>(&target),
@@ -1293,10 +1336,10 @@ mod tests {
         }
     }
 
-    /// Checks that the reserved rows fit in the blocks that the table already has, meaning that
-    /// neither the entity list nor any column moves to a larger block
+    /// Checks that the reserved rows fit in the room that the table already has, meaning that
+    /// neither the entity list nor any column grows its capacity
     #[test]
-    fn reserve_with_varying_additional_rows_fits_rows_without_moving_blocks() {
+    fn reserve_with_varying_additional_rows_fits_rows_without_growing() {
         let cases = [1_u32, 4, 9];
 
         for additional in cases {
@@ -1306,30 +1349,31 @@ mod tests {
             push_pair_row(&mut table, Entity::new(0, 0), Position(0.0), Health(0));
 
             table.reserve(additional as usize);
-            let reserved_positions = read_column::<Position>(&table).as_ptr();
-            let reserved_healths = read_column::<Health>(&table).as_ptr();
-            let reserved_entities = table.entities().as_ptr();
+            let reserved = (
+                read_capacity::<Position>(&table),
+                read_capacity::<Health>(&table),
+                table.entities.capacity(),
+            );
             for index in 1..=additional {
                 let row = Entity::new(index, 0);
                 push_pair_row(&mut table, row, Position(index as f32), Health(index));
             }
-            let final_positions = read_column::<Position>(&table).as_ptr();
-            let final_healths = read_column::<Health>(&table).as_ptr();
-            let final_entities = table.entities().as_ptr();
+            let after_pushes = (
+                read_capacity::<Position>(&table),
+                read_capacity::<Health>(&table),
+                table.entities.capacity(),
+            );
 
             let rows = additional as usize + 1;
+            let room_for_rows = reserved.0 >= rows && reserved.1 >= rows && reserved.2 >= rows;
             assert_eq!(table.len(), rows, "length after {additional} pushes");
-            assert_eq!(
-                final_positions, reserved_positions,
-                "position block after {additional} pushes"
+            assert!(
+                room_for_rows,
+                "capacities {reserved:?} after reserving {additional}"
             );
             assert_eq!(
-                final_healths, reserved_healths,
-                "health block after {additional} pushes"
-            );
-            assert_eq!(
-                final_entities, reserved_entities,
-                "entity block after {additional} pushes"
+                after_pushes, reserved,
+                "capacities after {additional} pushes"
             );
         }
     }
@@ -1729,5 +1773,124 @@ mod tests {
         target.entities.push(Entity::new(1, 0));
 
         source.move_entity(0, &mut target, ComponentVec::swap_remove, |_, _| {});
+    }
+
+    /// Adds one row to a table that stores `Position`, `String` and `DropCounter`.
+    fn push_triple_row(
+        table: &mut Archetype,
+        entity: Entity,
+        x: f32,
+        label: &str,
+        drops: &Arc<AtomicUsize>,
+    ) {
+        table.push_entity(entity, |table, _| {
+            push_component(table, Position(x));
+            push_component(table, String::from(label));
+            push_component(
+                table,
+                DropCounter {
+                    drops: Arc::clone(drops),
+                },
+            );
+        });
+    }
+
+    /// Checks that a `take` that keeps the component as a value hands it over whole, without
+    /// running its clean-up code, and leaves the source rows in order
+    #[test]
+    fn move_entity_with_keeping_take_returns_component_without_dropping_it() {
+        let drops = Arc::new(AtomicUsize::new(0));
+        let position = ComponentInfo::of::<Position>(ComponentMask::single(0));
+        let name = ComponentInfo::of::<String>(ComponentMask::single(1));
+        let counter = ComponentInfo::of::<DropCounter>(ComponentMask::single(2));
+        let mut source = Archetype::new(&[position, name, counter]);
+        let mut target = Archetype::new(&[position, counter]);
+        let first = Entity::new(0, 0);
+        let second = Entity::new(1, 0);
+        let third = Entity::new(2, 0);
+        for (entity, x, label) in [(first, 1.0, "Ada"), (second, 2.0, "Bo"), (third, 3.0, "Cy")] {
+            push_triple_row(&mut source, entity, x, label, &drops);
+        }
+        let mut kept = None;
+
+        let filled = source.move_entity(
+            0,
+            &mut target,
+            |components, row| kept = Some(components.swap_remove_typed::<String>(row)),
+            |_, _| {},
+        );
+        let drops_after_move = drops.load(Ordering::Relaxed);
+
+        assert_eq!(filled, Some(third), "entity that fills the row");
+        assert_eq!(kept.as_deref(), Some("Ada"), "kept component");
+        assert_eq!(drops_after_move, 0, "drops caused by the move");
+        assert_eq!(read_column::<String>(&source), ["Cy", "Bo"], "source names");
+        assert_eq!(
+            read_column::<Position>(&source),
+            [Position(3.0), Position(2.0)],
+            "source positions"
+        );
+        assert_eq!(target.entities(), [first], "target entities");
+        assert_eq!(
+            read_column::<Position>(&target),
+            [Position(1.0)],
+            "target positions"
+        );
+        assert_eq!(
+            read_column::<DropCounter>(&target).len(),
+            1,
+            "target counters"
+        );
+    }
+
+    /// Checks that a move into a table that lacks several columns drops one component from each
+    /// of them, and leaves the other rows of those columns readable
+    #[test]
+    fn move_entity_with_target_lacking_several_columns_drops_each_component_once() {
+        let drops = Arc::new(AtomicUsize::new(0));
+        let position = ComponentInfo::of::<Position>(ComponentMask::single(0));
+        let name = ComponentInfo::of::<String>(ComponentMask::single(1));
+        let counter = ComponentInfo::of::<DropCounter>(ComponentMask::single(2));
+        let mut source = Archetype::new(&[position, name, counter]);
+        let mut target = Archetype::new(&[position]);
+        let first = Entity::new(0, 0);
+        let second = Entity::new(1, 0);
+        let third = Entity::new(2, 0);
+        for (entity, x, label) in [(first, 1.0, "Ada"), (second, 2.0, "Bo"), (third, 3.0, "Cy")] {
+            push_triple_row(&mut source, entity, x, label, &drops);
+        }
+        let mut expected_columns = vec![name.type_id(), counter.type_id()];
+        expected_columns.sort();
+        let mut taken_columns = Vec::new();
+
+        let filled = source.move_entity(
+            1,
+            &mut target,
+            |components, row| {
+                taken_columns.push(components.info().type_id());
+                components.swap_remove(row);
+            },
+            |_, _| {},
+        );
+        let drops_after_move = drops.load(Ordering::Relaxed);
+        let names_after_move = read_column::<String>(&source).to_vec();
+        let counters_after_move = read_column::<DropCounter>(&source).len();
+
+        drop(source);
+        let drops_after_source = drops.load(Ordering::Relaxed);
+
+        taken_columns.sort();
+        assert_eq!(filled, Some(third), "entity that fills the row");
+        assert_eq!(taken_columns, expected_columns, "columns passed to `take`");
+        assert_eq!(drops_after_move, 1, "drops caused by the move");
+        assert_eq!(names_after_move, ["Ada", "Cy"], "source names");
+        assert_eq!(counters_after_move, 2, "counters left in the source");
+        assert_eq!(drops_after_source, 3, "drops after the source is gone");
+        assert_eq!(target.entities(), [second], "target entities");
+        assert_eq!(
+            read_column::<Position>(&target),
+            [Position(2.0)],
+            "target positions"
+        );
     }
 }

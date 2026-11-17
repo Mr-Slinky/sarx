@@ -8,6 +8,7 @@
 //! program.
 
 use crate::executor::block_on;
+use crate::input;
 use amaterasu::{Camera, Renderer};
 use glam::{Mat4, Vec2, Vec3};
 use std::error::Error;
@@ -16,9 +17,8 @@ use std::time::{Duration, Instant};
 use winit::application::ApplicationHandler;
 use winit::event::WindowEvent;
 use winit::event_loop::ActiveEventLoop;
-use winit::window::{Window, WindowId};
+use winit::window::{Fullscreen, Window, WindowId};
 use zurvan::Simulation;
-use crate::input;
 
 /// Owns the window and the renderer, and defines the methods that winit calls for each event.
 ///
@@ -83,7 +83,8 @@ impl App {
         let window_size = Vec2::new(size.width as f32, size.height as f32);
         // Aims the hand at the ground under the cursor, or keeps the last aim if there is no
         // ground point
-        if let Some(ground_point) = input::find_hand_target(self.cursor, window_size, &self.camera) {
+        if let Some(ground_point) = input::find_hand_target(self.cursor, window_size, &self.camera)
+        {
             self.simulation.set_hand_target(ground_point);
         }
 
@@ -151,10 +152,14 @@ impl ApplicationHandler for App {
 
         // Creates the window and the renderer on the first call, when no window exists yet
         if self.window.is_none() {
-            let attributes = Window::default_attributes().with_title("Sarx");
+            let fullscreen = Fullscreen::Borderless(None);
+            let attributes = Window::default_attributes()
+                .with_title("Sarx")
+                .with_fullscreen(Some(fullscreen));
             let window = event_loop // <-- First window instance is created here
                 .create_window(attributes)
                 .expect("Failed to create the window");
+            window.set_cursor_visible(false);
             let window = Arc::new(window);
 
             // Reads the hand's mesh, or ends the program where the hand model cannot be read
@@ -169,7 +174,8 @@ impl ApplicationHandler for App {
 
             // Creates the renderer for the window, or ends the program where the setup fails
             let size = window.inner_size();
-            let renderer_setup = Renderer::new(Arc::clone(&window), size.width, size.height, hand_mesh);
+            let renderer_setup =
+                Renderer::new(Arc::clone(&window), size.width, size.height, hand_mesh);
             match block_on(renderer_setup) {
                 Ok(renderer) => self.renderer = Some(renderer),
                 Err(error) => {

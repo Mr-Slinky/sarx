@@ -1,5 +1,6 @@
 use glam::{Vec2, Vec3};
 use amaterasu::Camera;
+use zurvan::Simulation;
 
 /// Returns the point on the ground under `cursor`, where the hand aims.
 ///
@@ -24,5 +25,5 @@ use amaterasu::Camera;
 /// ```
 pub(crate) fn find_hand_target(cursor: Option<Vec2>, window_size: Vec2, camera: &Camera) -> Option<Vec3> {
     let ray = camera.cast_ray(cursor?, window_size)?;
-    ray.meet_ground()
+    ray.meet_height(Simulation::HOVER_HEIGHT)
 }

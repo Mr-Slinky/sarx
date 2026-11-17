@@ -50,6 +50,7 @@ impl App {
         env!("CARGO_MANIFEST_DIR"),
         "/../../assets/hand-model.glb"
     ));
+    const PALM_CENTRE: Vec3 = Vec3::new(0.0, 0.03, -1.89);
     // Where the camera stands, tuned so that the whole hand fits on screen
     const CAMERA_EYE: Vec3 = Vec3::new(0.3, 4.0, 3.0);
     // The point the camera looks at, tuned to the middle of the hand
@@ -83,14 +84,15 @@ impl App {
         let window_size = Vec2::new(size.width as f32, size.height as f32);
         // Aims the hand at the ground under the cursor, or keeps the last aim if there is no
         // ground point
-        if let Some(ground_point) = input::find_hand_target(self.cursor, window_size, &self.camera)
+        if let Some(hover_point) = input::find_hand_target(self.cursor, window_size, &self.camera)
         {
-            self.simulation.set_hand_target(ground_point);
+            self.simulation.set_hand_target(hover_point);
         }
 
         self.simulation.advance(elapsed);
         let hand_position = self.simulation.hand_position();
-        let hand_transform = Mat4::from_translation(hand_position);
+        let hand_transform =
+            Mat4::from_translation(hand_position) * Mat4::from_translation(-Self::PALM_CENTRE);
 
         // Draws the frame, and ends the program IF the renderer cannot carry on
         if let Err(error) = renderer.render(&self.camera, hand_transform) {
@@ -159,7 +161,7 @@ impl ApplicationHandler for App {
             let window = event_loop // <-- First window instance is created here
                 .create_window(attributes)
                 .expect("Failed to create the window");
-            window.set_cursor_visible(false);
+            // window.set_cursor_visible(false);
             let window = Arc::new(window);
 
             // Reads the hand's mesh, or ends the program where the hand model cannot be read

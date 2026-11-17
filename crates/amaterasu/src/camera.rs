@@ -93,12 +93,16 @@ impl Camera {
 
 impl Ray {
     pub fn meet_ground(&self) -> Option<Vec3> {
+        self.meet_height(0.0)
+    }
+
+    pub fn meet_height(&self, height: f32) -> Option<Vec3> {
         // Returns `None` where the ray points level or upwards, since it then never reaches the ground
         if self.direction.y >= 0.0 {
             return None;
         }
         // Finds how far along the ray its height falls to zero
-        let distance = -self.origin.y / self.direction.y;
+        let distance = (height - self.origin.y) / self.direction.y;
         // Returns `None` where that point lies behind the origin, as it does for a ray that starts below the ground
         if distance < 0.0 {
             return None;

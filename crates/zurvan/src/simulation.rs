@@ -17,7 +17,7 @@ impl Simulation {
     pub const STEP: Duration = Duration::from_nanos(16_666_667);
     // Defines the most elapsed time that one call to `advance` adds to `unsimulated`.
     const MAX_ELAPSED: Duration = Duration::from_millis(250);
-    const HOVER_HEIGHT: f32 = 1.0;
+    pub const HOVER_HEIGHT: f32 = 1.0;
     const HAND_SPEED: f32 = 20.0;
 
     pub fn new() -> Self {
@@ -30,14 +30,12 @@ impl Simulation {
         }
     }
 
-    pub fn set_hand_target(&mut self, ground_point: Vec3) {
-        // Lifts the point on the ground to the hover height
-        let hover_point = ground_point + Vec3::Y * Self::HOVER_HEIGHT;
+    pub fn set_hand_target(&mut self, point: Vec3) {
         let target = self
             .world
             .get_mut::<Target>(self.hand)
             .expect("the hand always has a target");
-        target.0 = hover_point;
+        target.0 = point;
     }
 
     /// Returns the hand's position
@@ -218,8 +216,7 @@ mod tests {
     /// Checks that the target is the point given, lifted by the hover height, and that the hand
     /// does not move until the simulation advances
     #[test]
-    fn set_hand_target_with_points_lifts_target_by_hover_height() {
-        let lift = Vec3::Y * Simulation::HOVER_HEIGHT;
+    fn set_hand_target_with_points_stores_point_as_target() {
         let cases = [
             ("origin", Vec3::ZERO),
             ("positive point", Vec3::new(3.0, 0.0, 4.0)),
@@ -228,15 +225,15 @@ mod tests {
             ("far point", Vec3::new(1e6, 0.0, -1e6)),
         ];
 
-        for (name, ground_point) in cases {
+        for (name, point) in cases {
             let mut simulation = Simulation::new();
             let start = simulation.hand_position();
 
-            simulation.set_hand_target(ground_point);
+            simulation.set_hand_target(point);
 
             assert_eq!(
                 read_target(&simulation),
-                ground_point + lift,
+                point,
                 "target for {name}"
             );
             assert_eq!(
@@ -295,7 +292,7 @@ mod tests {
     #[test]
     fn advance_with_enough_steps_reaches_target_without_overshoot() {
         let mut simulation = Simulation::new();
-        simulation.set_hand_target(Vec3::new(3.0, 0.0, 4.0));
+        simulation.set_hand_target(Vec3::new(3.0, Simulation::HOVER_HEIGHT, 4.0));
         let target = read_target(&simulation);
         let start = simulation.hand_position();
         let mut positions = vec![start];

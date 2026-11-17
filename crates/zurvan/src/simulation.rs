@@ -17,7 +17,7 @@ impl Simulation {
     pub const STEP: Duration = Duration::from_nanos(16_666_667);
     // Defines the most elapsed time that one call to `advance` adds to `unsimulated`.
     const MAX_ELAPSED: Duration = Duration::from_millis(250);
-    const HOVER_HEIGHT: f32 = 5.0;
+    const HOVER_HEIGHT: f32 = 1.0;
     const HAND_SPEED: f32 = 20.0;
 
     pub fn new() -> Self {
@@ -40,7 +40,8 @@ impl Simulation {
         target.0 = hover_point;
     }
 
-    pub fn find_hand_position(&self) -> Vec3 {
+    /// Returns the hand's position
+    pub fn hand_position(&self) -> Vec3 {
         let position = self
             .world
             .get::<Position>(self.hand)
@@ -166,11 +167,11 @@ mod tests {
     fn advance_with_elapsed_at_cap_runs_fourteen_steps() {
         let mut simulation = Simulation::new();
         simulation.set_hand_target(Vec3::new(1000.0, 0.0, 0.0));
-        let start = simulation.find_hand_position();
+        let start = simulation.hand_position();
 
         simulation.advance(Simulation::MAX_ELAPSED);
 
-        let distance = simulation.find_hand_position().distance(start);
+        let distance = simulation.hand_position().distance(start);
         let expected_distance = 14.0 * find_reach();
         assert!(
             (distance - expected_distance).abs() < TOLERANCE,
@@ -191,7 +192,7 @@ mod tests {
             .get::<Velocity>(simulation.hand)
             .map(|velocity| velocity.0);
         let speed = world.get::<Speed>(simulation.hand).map(|speed| speed.0);
-        assert_eq!(simulation.find_hand_position(), start, "position");
+        assert_eq!(simulation.hand_position(), start, "position");
         assert_eq!(velocity, Some(Vec3::ZERO), "velocity");
         assert_eq!(read_target(&simulation), start, "target");
         assert_eq!(speed, Some(Simulation::HAND_SPEED), "speed");
@@ -206,8 +207,8 @@ mod tests {
         let default = Simulation::default();
 
         assert_eq!(
-            default.find_hand_position(),
-            new.find_hand_position(),
+            default.hand_position(),
+            new.hand_position(),
             "position"
         );
         assert_eq!(read_target(&default), read_target(&new), "target");
@@ -229,7 +230,7 @@ mod tests {
 
         for (name, ground_point) in cases {
             let mut simulation = Simulation::new();
-            let start = simulation.find_hand_position();
+            let start = simulation.hand_position();
 
             simulation.set_hand_target(ground_point);
 
@@ -239,7 +240,7 @@ mod tests {
                 "target for {name}"
             );
             assert_eq!(
-                simulation.find_hand_position(),
+                simulation.hand_position(),
                 start,
                 "position for {name}"
             );
@@ -257,7 +258,7 @@ mod tests {
             .expect("the hand has a position")
             .0 = moved;
 
-        let position = simulation.find_hand_position();
+        let position = simulation.hand_position();
 
         assert_eq!(position, moved);
     }
@@ -276,11 +277,11 @@ mod tests {
         for (name, ground_point) in cases {
             let mut simulation = Simulation::new();
             simulation.set_hand_target(ground_point);
-            let start = simulation.find_hand_position();
+            let start = simulation.hand_position();
 
             simulation.advance(Simulation::STEP);
 
-            let distance = simulation.find_hand_position().distance(start);
+            let distance = simulation.hand_position().distance(start);
             let reach = find_reach();
             assert!(
                 distance <= reach + TOLERANCE,
@@ -296,12 +297,12 @@ mod tests {
         let mut simulation = Simulation::new();
         simulation.set_hand_target(Vec3::new(3.0, 0.0, 4.0));
         let target = read_target(&simulation);
-        let start = simulation.find_hand_position();
+        let start = simulation.hand_position();
         let mut positions = vec![start];
 
         for _ in 0..30 {
             simulation.advance(Simulation::STEP);
-            positions.push(simulation.find_hand_position());
+            positions.push(simulation.hand_position());
         }
 
         // Measures each position along the line from the start to the target, where the target
@@ -318,7 +319,7 @@ mod tests {
         let never_past = progress
             .iter()
             .all(|&covered| covered <= full_distance + TOLERANCE);
-        let position = simulation.find_hand_position();
+        let position = simulation.hand_position();
         assert!(never_back, "progress towards the target: {progress:?}");
         assert!(never_past, "progress past the target: {progress:?}");
         assert!(

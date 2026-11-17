@@ -9,6 +9,7 @@
 
 mod app;
 mod executor;
+mod input;
 
 use winit::event_loop::EventLoop;
 

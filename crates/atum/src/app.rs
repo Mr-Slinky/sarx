@@ -18,6 +18,7 @@ use winit::event::WindowEvent;
 use winit::event_loop::ActiveEventLoop;
 use winit::window::{Window, WindowId};
 use zurvan::Simulation;
+use crate::input;
 
 /// Owns the window and the renderer, and defines the methods that winit calls for each event.
 ///
@@ -80,50 +81,25 @@ impl App {
         let size = window.inner_size();
         // Converts the window size to floats for the camera's maths
         let window_size = Vec2::new(size.width as f32, size.height as f32);
-        // Aims the hand at the ground under the cursor, and keeps the last aim where there is no
+        // Aims the hand at the ground under the cursor, or keeps the last aim if there is no
         // ground point
-        if let Some(ground_point) = Self::find_hand_target(self.cursor, window_size, &self.camera) {
+        if let Some(ground_point) = input::find_hand_target(self.cursor, window_size, &self.camera) {
             self.simulation.set_hand_target(ground_point);
         }
 
         self.simulation.advance(elapsed);
-        let hand_position = self.simulation.find_hand_position();
+        let hand_position = self.simulation.hand_position();
         let hand_transform = Mat4::from_translation(hand_position);
 
-        // Draws the frame, and ends the program where the renderer cannot carry on
+        // Draws the frame, and ends the program IF the renderer cannot carry on
         if let Err(error) = renderer.render(&self.camera, hand_transform) {
             Self::print_error(&error);
             event_loop.exit();
             return;
         }
+
         // Asks winit for the next frame at once, which keeps the simulation and the drawing running
         window.request_redraw();
-    }
-
-    /// Returns the point on the ground under `cursor`, where the hand aims.
-    ///
-    /// `cursor` is in pixels from the window's top-left corner, and `window_size` gives the
-    /// window's width and height in pixels. The camera casts a ray through the cursor, and the
-    /// returned point is where that ray meets the ground.
-    ///
-    /// Returns `None` where `cursor` is `None`, as it is before the cursor first moves over the
-    /// window. Also returns `None` where the camera cannot cast a ray for `window_size`, or where
-    /// the ray does not meet the ground.
-    ///
-    /// # Examples
-    ///
-    /// The cursor in the centre of the window aims the hand at the point that the camera looks at.
-    ///
-    /// ```ignore
-    /// // Returns the camera's target, at a height of zero
-    /// let camera = Camera::new(App::CAMERA_EYE, App::CAMERA_TARGET);
-    /// let window_size = Vec2::new(800.0, 600.0);
-    /// let cursor = Some(window_size / 2.0);
-    /// let ground_point = App::find_hand_target(cursor, window_size, &camera);
-    /// ```
-    fn find_hand_target(cursor: Option<Vec2>, window_size: Vec2, camera: &Camera) -> Option<Vec3> {
-        let ray = camera.cast_ray(cursor?, window_size)?;
-        ray.meet_ground()
     }
 
     /// Prints `error` to standard error, followed by the error that caused it, where there is one.
@@ -176,13 +152,13 @@ impl ApplicationHandler for App {
         // Creates the window and the renderer on the first call, when no window exists yet
         if self.window.is_none() {
             let attributes = Window::default_attributes().with_title("Sarx");
-            let window = event_loop
+            let window = event_loop // <-- First window instance is created here
                 .create_window(attributes)
                 .expect("Failed to create the window");
             let window = Arc::new(window);
 
             // Reads the hand's mesh, or ends the program where the hand model cannot be read
-            let hand = match hermes::read_mesh(Self::HAND_MODEL) {
+            let hand_mesh = match hermes::read_mesh(Self::HAND_MODEL) {
                 Ok(hand) => hand,
                 Err(error) => {
                     Self::print_error(&error);
@@ -193,7 +169,7 @@ impl ApplicationHandler for App {
 
             // Creates the renderer for the window, or ends the program where the setup fails
             let size = window.inner_size();
-            let renderer_setup = Renderer::new(Arc::clone(&window), size.width, size.height, hand);
+            let renderer_setup = Renderer::new(Arc::clone(&window), size.width, size.height, hand_mesh);
             match block_on(renderer_setup) {
                 Ok(renderer) => self.renderer = Some(renderer),
                 Err(error) => {

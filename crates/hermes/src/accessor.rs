@@ -5,7 +5,7 @@
 
 use crate::bytes::read_bytes_from;
 use crate::GltfError;
-use crate::document::{Accessor, Document};
+use crate::document::{Accessor, GlbDocument};
 
 const FLOAT_CODE: u32 = 5126;
 const UNSIGNED_SHORT_CODE: u32 = 5123;
@@ -25,7 +25,7 @@ const MAX_STRIDE: usize = 252;
 /// binary     = the floats 1, 2, 3, 4, 5, 6, each stored as four little-endian bytes
 /// read_vec3s(&document, binary, 0)  ->  Ok([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
 /// ```
-pub(crate) fn read_vec3s(document: &Document, binary: &[u8], index: usize) -> Result<Vec<[f32; 3]>, GltfError> {
+pub(crate) fn read_vec3s(document: &GlbDocument, binary: &[u8], index: usize) -> Result<Vec<[f32; 3]>, GltfError> {
     // Finds the accessor, or fails where the index points past the end of the list
     let accessor = document.accessors.get(index).ok_or(GltfError::MissingAccessor(index))?;
     let is_vec3 = accessor.component_type == FLOAT_CODE && accessor.kind == "VEC3";
@@ -49,7 +49,7 @@ pub(crate) fn read_vec3s(document: &Document, binary: &[u8], index: usize) -> Re
     Ok(values)
 }
 
-pub(crate) fn read_indices(document: &Document, binary: &[u8], index: usize) -> Result<Vec<u32>, GltfError> {
+pub(crate) fn read_indices(document: &GlbDocument, binary: &[u8], index: usize) -> Result<Vec<u32>, GltfError> {
     let accessor = document.accessors.get(index).ok_or(GltfError::MissingAccessor(index))?;
     // Rejects every shape other than one number per element
     if accessor.kind != "SCALAR" {
@@ -95,7 +95,7 @@ struct Layout {
     is_strided: bool, // whether the buffer view states its own stride
 }
 
-fn find_layout(document: &Document, accessor: &Accessor, view_index: usize, element_size: usize) -> Result<Layout, GltfError> {
+fn find_layout(document: &GlbDocument, accessor: &Accessor, view_index: usize, element_size: usize) -> Result<Layout, GltfError> {
     let view = document.buffer_views.get(view_index).ok_or(GltfError::MissingBufferView(view_index))?;
     if let Some(stride) = view.byte_stride {
         // Applies the limits that glTF sets on `byteStride`. `MIN_STRIDE` changes no result, since the
@@ -146,7 +146,7 @@ mod tests {
     use crate::test_support::HAND_MODEL;
 
     /// Returns the document whose JSON lists the given accessors and buffer views, and no meshes
-    fn parse_document(accessors: &str, buffer_views: &str) -> Document {
+    fn parse_document(accessors: &str, buffer_views: &str) -> GlbDocument {
         let json = format!(
             r#"{{"meshes": [], "accessors": [{accessors}], "bufferViews": [{buffer_views}]}}"#
         );
@@ -187,7 +187,7 @@ mod tests {
     }
 
     /// Returns the document and the binary chunk of the hand model
-    fn load_hand_model() -> (Document, &'static [u8]) {
+    fn load_hand_model() -> (GlbDocument, &'static [u8]) {
         let glb = split_glb(HAND_MODEL).expect("the hand model is a valid GLB file");
         let document = serde_json::from_slice(glb.json).expect("the hand model has valid JSON");
         (document, glb.binary)

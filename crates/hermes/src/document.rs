@@ -61,7 +61,7 @@ use serde::Deserialize;
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct Document {
+pub(crate) struct GlbDocument {
     // glTF lets a file leave out each of these lists, and serde then fills in an empty list
     #[serde(default)]
     pub(crate) meshes: Vec<Mesh>,
@@ -163,7 +163,7 @@ mod tests {
     /// Returns the number of meshes, accessors and buffer views in the document that `json`
     /// describes, or `None` where `json` fails to parse
     fn summarise_document(json: &str) -> Option<(usize, usize, usize)> {
-        let document = serde_json::from_str::<Document>(json).ok()?;
+        let document = serde_json::from_str::<GlbDocument>(json).ok()?;
         Some((
             document.meshes.len(),
             document.accessors.len(),
@@ -177,7 +177,7 @@ mod tests {
     fn from_slice_with_hand_model_document_returns_mesh_and_lists() {
         let json = read_hand_json();
 
-        let document = serde_json::from_slice::<Document>(json).expect("the hand model's JSON parses");
+        let document = serde_json::from_slice::<GlbDocument>(json).expect("the hand model's JSON parses");
 
         let primitive_counts: Vec<usize> = document.meshes.iter().map(|mesh| mesh.primitives.len()).collect();
         let primitive = &document.meshes[0].primitives[0];
@@ -203,7 +203,7 @@ mod tests {
             (Some(5), 0, 5123, 19788, "SCALAR"),
         ];
 
-        let document = serde_json::from_slice::<Document>(json).expect("the hand model's JSON parses");
+        let document = serde_json::from_slice::<GlbDocument>(json).expect("the hand model's JSON parses");
 
         for (index, expected) in expected.into_iter().enumerate() {
             let accessor = &document.accessors[index];
@@ -232,7 +232,7 @@ mod tests {
             (185016, 39576),
         ];
 
-        let document = serde_json::from_slice::<Document>(json).expect("the hand model's JSON parses");
+        let document = serde_json::from_slice::<GlbDocument>(json).expect("the hand model's JSON parses");
 
         for (index, (expected_offset, expected_length)) in expected.into_iter().enumerate() {
             let view = &document.buffer_views[index];
@@ -341,7 +341,7 @@ mod tests {
         ];
 
         for (name, json) in cases {
-            let result = serde_json::from_str::<Document>(json);
+            let result = serde_json::from_str::<GlbDocument>(json);
 
             assert!(result.is_err(), "document for {name} should be rejected");
         }

@@ -1,7 +1,7 @@
-use crate::accessor::{read_indices, read_vec3s};
-use crate::document::Document;
-use crate::glb::split_glb;
 use crate::GltfError;
+use crate::accessor::{read_indices, read_vec3s};
+use crate::document::GlbDocument;
+use crate::glb::split_glb;
 
 pub struct MeshData {
     pub positions: Vec<[f32; 3]>,
@@ -11,26 +11,41 @@ pub struct MeshData {
 
 pub fn read_mesh(file: &[u8]) -> Result<MeshData, GltfError> {
     let glb = split_glb(file)?;
-    let document: Document = serde_json::from_slice(glb.json)?;
+    let document: GlbDocument = serde_json::from_slice(glb.json)?;
     let mesh = document.meshes.first().ok_or(GltfError::MissingMesh)?;
     let primitive = mesh.primitives.first().ok_or(GltfError::MissingMesh)?;
     let positions = read_vec3s(&document, glb.binary, primitive.attributes.position)?;
-    let normal_index = primitive.attributes.normal.ok_or(GltfError::MissingNormals)?;
+    let normal_index = primitive
+        .attributes
+        .normal
+        .ok_or(GltfError::MissingNormals)?;
     let normals = read_vec3s(&document, glb.binary, normal_index)?;
     // glTF requires every attribute of a primitive to hold one value for each vertex
     if normals.len() != positions.len() {
-        return Err(GltfError::NormalCountMismatch { positions: positions.len(), normals: normals.len() });
+        return Err(GltfError::NormalCountMismatch {
+            positions: positions.len(),
+            normals: normals.len(),
+        });
     }
 
     let indices_index = primitive.indices.ok_or(GltfError::MissingIndices)?;
     let indices = read_indices(&document, glb.binary, indices_index)?;
     let vertex_count = positions.len();
-    let out_of_range = indices.iter().find(|&&index| !usize::try_from(index).is_ok_and(|index| index < vertex_count));
+    let out_of_range = indices
+        .iter()
+        .find(|&&index| !usize::try_from(index).is_ok_and(|index| index < vertex_count));
     if let Some(&index) = out_of_range {
-        return Err(GltfError::IndexOutOfRange { index, vertex_count });
+        return Err(GltfError::IndexOutOfRange {
+            index,
+            vertex_count,
+        });
     }
 
-    Ok(MeshData { positions, normals, indices })
+    Ok(MeshData {
+        positions,
+        normals,
+        indices,
+    })
 }
 
 // ========================================================================================== \\
@@ -110,7 +125,10 @@ mod tests {
 
     /// Returns the bytes of `values`, each as a little-endian `u16`
     fn encode_u16s(values: &[u16]) -> Vec<u8> {
-        values.iter().flat_map(|value| value.to_le_bytes()).collect()
+        values
+            .iter()
+            .flat_map(|value| value.to_le_bytes())
+            .collect()
     }
 
     /// Returns a fixture GLB file with the given `meshes` JSON, and the fixture accessors, buffer
@@ -138,7 +156,11 @@ mod tests {
         assert_eq!(mesh.positions.len(), 3558, "number of positions");
         assert_eq!(mesh.normals.len(), 3558, "number of normals");
         assert_eq!(mesh.indices.len(), 19788, "number of indices");
-        assert_eq!(mesh.indices.len() % 3, 0, "indices left over after the last whole triangle");
+        assert_eq!(
+            mesh.indices.len() % 3,
+            0,
+            "indices left over after the last whole triangle"
+        );
     }
 
     /// Checks that the indices of the hand model reach its last vertex, and never point past it
@@ -147,10 +169,17 @@ mod tests {
         let mesh = read_mesh(HAND_MODEL).unwrap();
 
         let vertex_count = mesh.positions.len();
-        let out_of_range = mesh.indices.iter().filter(|&&index| index as usize >= vertex_count).count();
+        let out_of_range = mesh
+            .indices
+            .iter()
+            .filter(|&&index| index as usize >= vertex_count)
+            .count();
         let largest = mesh.indices.iter().max();
 
-        assert_eq!(out_of_range, 0, "indices past the last of {vertex_count} vertices");
+        assert_eq!(
+            out_of_range, 0,
+            "indices past the last of {vertex_count} vertices"
+        );
         assert_eq!(largest, Some(&3557), "largest index");
     }
 
@@ -175,8 +204,16 @@ mod tests {
     fn read_mesh_with_hand_model_returns_first_vertex_and_triangle() {
         let mesh = read_mesh(HAND_MODEL).unwrap();
 
-        assert_eq!(mesh.positions[0], [-0.76153266, 0.15828243, -3.4236743], "first position");
-        assert_eq!(mesh.normals[0], [-0.882713, -0.46630687, -0.058100857], "first normal");
+        assert_eq!(
+            mesh.positions[0],
+            [-0.76153266, 0.15828243, -3.4236743],
+            "first position"
+        );
+        assert_eq!(
+            mesh.normals[0],
+            [-0.882713, -0.46630687, -0.058100857],
+            "first normal"
+        );
         assert_eq!(mesh.indices[..3], [0, 960, 2738], "first triangle");
     }
 
@@ -202,8 +239,14 @@ mod tests {
 
         let mesh = read_mesh(&file).unwrap();
 
-        assert_eq!(mesh.positions, TRIANGLE_NORMALS, "positions read through accessor 1");
-        assert_eq!(mesh.normals, TRIANGLE_POSITIONS, "normals read through accessor 0");
+        assert_eq!(
+            mesh.positions, TRIANGLE_NORMALS,
+            "positions read through accessor 1"
+        );
+        assert_eq!(
+            mesh.normals, TRIANGLE_POSITIONS,
+            "normals read through accessor 0"
+        );
     }
 
     /// Checks that a primitive whose accessors have a count of zero gives an empty mesh
@@ -215,7 +258,10 @@ mod tests {
 
         let mesh = read_mesh(&file).unwrap();
 
-        assert!(mesh.positions.is_empty(), "positions of the empty primitive");
+        assert!(
+            mesh.positions.is_empty(),
+            "positions of the empty primitive"
+        );
         assert!(mesh.normals.is_empty(), "normals of the empty primitive");
         assert!(mesh.indices.is_empty(), "indices of the empty primitive");
     }
@@ -246,8 +292,14 @@ mod tests {
 
             let mesh = read_mesh(&file).unwrap();
 
-            assert_eq!(mesh.positions, TRIANGLE_POSITIONS, "positions of the first mesh for {name}");
-            assert_eq!(mesh.normals, TRIANGLE_NORMALS, "normals of the first mesh for {name}");
+            assert_eq!(
+                mesh.positions, TRIANGLE_POSITIONS,
+                "positions of the first mesh for {name}"
+            );
+            assert_eq!(
+                mesh.normals, TRIANGLE_NORMALS,
+                "normals of the first mesh for {name}"
+            );
             assert_eq!(
                 mesh.indices,
                 TRIANGLE_INDICES.map(u32::from),
@@ -269,9 +321,19 @@ mod tests {
 
         let mesh = read_mesh(&file).unwrap();
 
-        assert_eq!(mesh.positions, TRIANGLE_POSITIONS, "positions of the first primitive");
-        assert_eq!(mesh.normals, TRIANGLE_NORMALS, "normals of the first primitive");
-        assert_eq!(mesh.indices, TRIANGLE_INDICES.map(u32::from), "indices of the first primitive");
+        assert_eq!(
+            mesh.positions, TRIANGLE_POSITIONS,
+            "positions of the first primitive"
+        );
+        assert_eq!(
+            mesh.normals, TRIANGLE_NORMALS,
+            "normals of the first primitive"
+        );
+        assert_eq!(
+            mesh.indices,
+            TRIANGLE_INDICES.map(u32::from),
+            "indices of the first primitive"
+        );
     }
 
     /// Checks that an empty list of meshes, or a first mesh without primitives, gives `MissingMesh`
@@ -294,7 +356,10 @@ mod tests {
 
             let result = read_mesh(&file);
 
-            assert!(matches!(result, Err(GltfError::MissingMesh)), "result for {name}");
+            assert!(
+                matches!(result, Err(GltfError::MissingMesh)),
+                "result for {name}"
+            );
         }
     }
 
@@ -330,20 +395,39 @@ mod tests {
         length_one_more[8..12].copy_from_slice(&stated_length.to_le_bytes());
 
         let cases: [ErrorCase; 24] = [
-            ("wrong magic", wrong_magic, |error| matches!(error, GltfError::NotGlb)),
-            ("version 1", version_one, |error| matches!(error, GltfError::UnsupportedVersion(1))),
-            ("BIN chunk type in place of JSON", binary_chunk_first, |error| {
-                matches!(
-                    error,
-                    GltfError::UnexpectedChunk { expected: 0x4E4F_534A, found: 0x004E_4942 }
-                )
+            ("wrong magic", wrong_magic, |error| {
+                matches!(error, GltfError::NotGlb)
             }),
-            ("empty file", Vec::new(), |error| matches!(error, GltfError::Truncated)),
-            ("binary chunk cut short", cut_short, |error| matches!(error, GltfError::Truncated)),
-            ("total length one byte more than the file", length_one_more, |error| {
-                matches!(error, GltfError::LengthMismatch { stated, actual } if *stated as usize == actual + 1)
+            ("version 1", version_one, |error| {
+                matches!(error, GltfError::UnsupportedVersion(1))
             }),
-            ("malformed JSON", build_glb(b"{", &[]), |error| matches!(error, GltfError::Json(_))),
+            (
+                "BIN chunk type in place of JSON",
+                binary_chunk_first,
+                |error| {
+                    matches!(
+                        error,
+                        GltfError::UnexpectedChunk {
+                            expected: 0x4E4F_534A,
+                            found: 0x004E_4942
+                        }
+                    )
+                },
+            ),
+            ("empty file", Vec::new(), |error| {
+                matches!(error, GltfError::Truncated)
+            }),
+            ("binary chunk cut short", cut_short, |error| {
+                matches!(error, GltfError::Truncated)
+            }),
+            (
+                "total length one byte more than the file",
+                length_one_more,
+                |error| matches!(error, GltfError::LengthMismatch { stated, actual } if *stated as usize == actual + 1),
+            ),
+            ("malformed JSON", build_glb(b"{", &[]), |error| {
+                matches!(error, GltfError::Json(_))
+            }),
             (
                 "accessor index as text",
                 build_fixture_glb(
@@ -374,7 +458,9 @@ mod tests {
             ),
             (
                 "primitive without normals",
-                build_fixture_glb(r#"[{"primitives":[{"attributes":{"POSITION":0},"indices":2}]}]"#),
+                build_fixture_glb(
+                    r#"[{"primitives":[{"attributes":{"POSITION":0},"indices":2}]}]"#,
+                ),
                 |error| matches!(error, GltfError::MissingNormals),
             ),
             (
@@ -436,35 +522,70 @@ mod tests {
                 build_fixture_glb(
                     r#"[{"primitives":[{"attributes":{"POSITION":0,"NORMAL":9},"indices":2}]}]"#,
                 ),
-                |error| matches!(error, GltfError::NormalCountMismatch { positions: 3, normals: 2 }),
+                |error| {
+                    matches!(
+                        error,
+                        GltfError::NormalCountMismatch {
+                            positions: 3,
+                            normals: 2
+                        }
+                    )
+                },
             ),
             (
                 "more normals than positions",
                 build_fixture_glb(
                     r#"[{"primitives":[{"attributes":{"POSITION":9,"NORMAL":1},"indices":2}]}]"#,
                 ),
-                |error| matches!(error, GltfError::NormalCountMismatch { positions: 2, normals: 3 }),
+                |error| {
+                    matches!(
+                        error,
+                        GltfError::NormalCountMismatch {
+                            positions: 2,
+                            normals: 3
+                        }
+                    )
+                },
             ),
             (
                 "index equal to the vertex count",
                 build_fixture_glb(
                     r#"[{"primitives":[{"attributes":{"POSITION":0,"NORMAL":1},"indices":10}]}]"#,
                 ),
-                |error| matches!(error, GltfError::IndexOutOfRange { index: 3, vertex_count: 3 }),
+                |error| {
+                    matches!(
+                        error,
+                        GltfError::IndexOutOfRange {
+                            index: 3,
+                            vertex_count: 3
+                        }
+                    )
+                },
             ),
             (
                 "largest 16-bit index",
                 build_fixture_glb(
                     r#"[{"primitives":[{"attributes":{"POSITION":0,"NORMAL":1},"indices":11}]}]"#,
                 ),
-                |error| matches!(error, GltfError::IndexOutOfRange { index: 65_535, vertex_count: 3 }),
+                |error| {
+                    matches!(
+                        error,
+                        GltfError::IndexOutOfRange {
+                            index: 65_535,
+                            vertex_count: 3
+                        }
+                    )
+                },
             ),
         ];
 
         for (name, file, is_expected) in cases {
             let error = read_mesh(&file).err();
 
-            assert!(error.as_ref().is_some_and(is_expected), "error for {name}: {error:?}");
+            assert!(
+                error.as_ref().is_some_and(is_expected),
+                "error for {name}: {error:?}"
+            );
         }
     }
 }

@@ -137,9 +137,7 @@ impl GpuContext {
         // Creates a flag to record a lost device, and gives the callback its own handle to it
         let device_lost = Arc::new(AtomicBool::new(false));
         let callback_flag = Arc::clone(&device_lost);
-        // Sets the flag when the device dies. `move` hands the handle to the callback, which owns
-        // it from then on, as `'static` requires. `Relaxed` suffices, since no other data depends
-        // on the flag
+        // Sets the flag when the device dies.
         device.set_device_lost_callback(move |_reason, _message| {
             callback_flag.store(true, Ordering::Relaxed);
         });

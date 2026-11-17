@@ -320,7 +320,7 @@ impl World {
     /// Gives `entity` every component in `components`, a component set, in one call.
     ///
     /// For each component in `components`, the entity either gains it or has its existing
-    /// component of that type replaced, and the world drops each replaced component. The entity
+    /// component of that type replaced. The world then drops each replaced component. The entity
     /// keeps every other component, and moves to another table at most once per call.
     ///
     /// Each component type in `components` must implement [`Component`].

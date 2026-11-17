@@ -96,6 +96,17 @@ mod sealed {
 /// accept((Position(0.0, 0.0), Health(100)));
 /// ```
 pub trait ComponentSet: sealed::Sealed + Send + Sync + 'static {
+    /// Represents the components that [`ComponentSet::push_into`] replaces, with one `Option` for
+    /// each field of the component set.
+    ///
+    /// For the component set `(Position, Health)`, the type is `(Option<Position>,
+    /// Option<Health>)`. A field is `Some` where the new component replaced one at the row, and
+    /// `None` where it was pushed. The test
+    /// `push_into_with_some_types_present_pushes_new_and_replaces_existing` receives a value of
+    /// this type.
+    #[doc(hidden)]
+    type Replaced;
+
     /// Returns one [`ComponentInfo`] for each type in the component set, in the order of the tuple
     /// fields.
     ///
@@ -126,17 +137,6 @@ pub trait ComponentSet: sealed::Sealed + Send + Sync + 'static {
     /// registry)`.
     #[doc(hidden)]
     fn infos(registry: &mut ComponentRegistry) -> Vec<ComponentInfo>;
-
-    /// Represents the components that [`ComponentSet::push_into`] replaces, with one `Option` for
-    /// each field of the component set.
-    ///
-    /// For the component set `(Position, Health)`, the type is `(Option<Position>,
-    /// Option<Health>)`. A field is `Some` where the new component replaced one at the row, and
-    /// `None` where it was pushed. The test
-    /// `push_into_with_some_types_present_pushes_new_and_replaces_existing` receives a value of
-    /// this type.
-    #[doc(hidden)]
-    type Replaced;
 
     /// Stores each component in the component set in `table`, at row `row`, and returns the
     /// components that it replaces.
@@ -193,7 +193,7 @@ pub trait ComponentSet: sealed::Sealed + Send + Sync + 'static {
 /// Stores `value` at row `row` of the column in `table` that stores `T`.
 ///
 /// Where `existing` has the bit for `T`, the entity already had a `T`. `value` then replaces the
-/// component at `row`, and the function returns the replaced component. Otherwise the function
+/// component at `row`, and the function returns the replaced component. Otherwise, the function
 /// pushes `value` onto the end of the column, and returns `None`.
 ///
 /// The caller owns the returned component, and decides when it drops.

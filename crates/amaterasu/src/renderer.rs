@@ -317,6 +317,7 @@ impl Renderer {
         let (frame, suboptimal) = match surface_context.surface.get_current_texture() {
             CurrentSurfaceTexture::Success(frame) => (frame, false),
             CurrentSurfaceTexture::Suboptimal(frame) => (frame, true),
+            // Return branches:
             CurrentSurfaceTexture::Outdated => {
                 self.gpu.reconfigure();
                 return Ok(());

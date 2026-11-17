@@ -213,8 +213,8 @@ mod tests {
         assert_eq!(default.unsimulated, new.unsimulated, "unsimulated time");
     }
 
-    /// Checks that the target is the point given, lifted by the hover height, and that the hand
-    /// does not move until the simulation advances
+    /// Checks that the target is the point given, and that the hand does not move until the
+    /// simulation advances
     #[test]
     fn set_hand_target_with_points_stores_point_as_target() {
         let cases = [

@@ -97,13 +97,13 @@ impl Ray {
     }
 
     pub fn meet_height(&self, height: f32) -> Option<Vec3> {
-        // Returns `None` where the ray points level or upwards, since it then never reaches the ground
+        // Returns `None` where the ray points level or upwards, since it then never falls to `height`
         if self.direction.y >= 0.0 {
             return None;
         }
-        // Finds how far along the ray its height falls to zero
+        // Finds how far along the ray its height falls to `height`
         let distance = (height - self.origin.y) / self.direction.y;
-        // Returns `None` where that point lies behind the origin, as it does for a ray that starts below the ground
+        // Returns `None` where that point lies behind the origin, as it does for a ray that starts below `height`
         if distance < 0.0 {
             return None;
         }

@@ -50,6 +50,9 @@ impl App {
         env!("CARGO_MANIFEST_DIR"),
         "/../../assets/hand-model.glb"
     ));
+    // The centre of the hand model's palm, relative to the model's origin at the wrist cut-off.
+    // Measured from the skeleton, halfway between the wrist joint and the average of the four
+    // knuckles
     const PALM_CENTRE: Vec3 = Vec3::new(0.0, 0.03, -1.89);
     // Where the camera stands, tuned so that the whole hand fits on screen
     const CAMERA_EYE: Vec3 = Vec3::new(0.3, 4.0, 3.0);
@@ -82,8 +85,8 @@ impl App {
         let size = window.inner_size();
         // Converts the window size to floats for the camera's maths
         let window_size = Vec2::new(size.width as f32, size.height as f32);
-        // Aims the hand at the ground under the cursor, or keeps the last aim if there is no
-        // ground point
+        // Aims the hand at the point under the cursor at the hover height, or keeps the last aim
+        // if there is no such point
         if let Some(hover_point) = input::find_hand_target(self.cursor, window_size, &self.camera)
         {
             self.simulation.set_hand_target(hover_point);
@@ -91,6 +94,8 @@ impl App {
 
         self.simulation.advance(elapsed);
         let hand_position = self.simulation.hand_position();
+        // Slides the palm centre onto the model's origin, then moves the hand to its position, so
+        // that the palm, rather than the wrist, sits under the cursor
         let hand_transform =
             Mat4::from_translation(hand_position) * Mat4::from_translation(-Self::PALM_CENTRE);
 

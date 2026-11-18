@@ -1,0 +1,51 @@
+Sarx Proprietary Licence
+
+Copyright (c) 2026 Kheagen Haskins. All rights reserved.
+
+This repository, and everything in it, belongs to the copyright holder. That covers the source code,
+shaders, assets, documentation and any build of the software made from them. The copyright holder
+makes the repository publicly visible so that people can read it. Being able to see the repository
+does not give anyone a licence to use it.
+
+1. Viewing
+
+   Anyone may view the contents of this repository on the platform that hosts it, and may make the
+   temporary copies that viewing it requires.
+
+2. Restrictions
+
+   Without prior written permission from the copyright holder, nobody may do any of the following
+   with any part of this repository:
+
+   a. copy or reproduce it, beyond what section 1 allows
+   b. modify it, or create a work derived from it
+   c. distribute, publish, sublicense or sell it, or make it available to anyone else
+   d. compile, run or use it, for any purpose, commercial or otherwise
+   e. use it to train, fine-tune or evaluate a machine-learning model
+
+3. Released builds
+
+   The copyright holder may release builds of the software, such as a free demo. Each release
+   comes with its own terms, which govern the use of that build. This licence gives no rights in a
+   released build.
+
+4. Contributions
+
+   The copyright holder does not accept outside contributions unless they agree to them in writing.
+   Anyone who submits material to this repository assigns all rights in that material to the
+   copyright holder.
+
+5. Termination
+
+   Any use of this repository that breaks these terms ends every permission that this licence gives,
+   at once and without notice.
+
+6. No warranty
+
+   The repository is provided "as is", without warranty of any kind, express or implied. That
+   includes, without limitation, warranties of merchantability, fitness for a particular purpose
+   and non-infringement. The copyright holder is not liable for any claim, damage or other
+   liability arising from the repository or its use.
+
+To request permission for any use that this licence does not allow, contact the copyright holder
+through the account that owns this repository.

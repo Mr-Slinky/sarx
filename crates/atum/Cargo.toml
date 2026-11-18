@@ -3,6 +3,7 @@ name = "atum"
 version.workspace = true
 edition.workspace = true
 publish.workspace = true
+license-file.workspace = true
 
 [dependencies]
 amaterasu = { version = "0.1.0", path = "../amaterasu" }

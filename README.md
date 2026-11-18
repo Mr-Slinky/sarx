@@ -4,7 +4,7 @@
 [![wgpu](https://img.shields.io/badge/wgpu-30.0.1-blue.svg)](https://wgpu.rs/)
 [![winit](https://img.shields.io/badge/winit-0.30.13-blue.svg)](https://github.com/rust-windowing/winit)
 [![Platform](https://img.shields.io/badge/Platform-Windows-blue.svg)](https://www.microsoft.com/windows)
-![License](https://img.shields.io/badge/License-Proprietary-red.svg)
+[![License](https://img.shields.io/badge/License-Proprietary-red.svg)](LICENSE)
 
 Sarx is a god game, written in Rust, and made for Windows.
 

@@ -28,6 +28,7 @@ use crate::Camera;
 use crate::RendererError;
 use crate::context::GpuContext;
 use crate::mesh::Mesh;
+use crate::object::RenderObject;
 use crate::uniform::{ObjectUniforms, SceneUniforms};
 
 /// A window that a [`Renderer`] can draw into.
@@ -86,15 +87,11 @@ impl<W> RenderWindow for W where W: DisplayAndWindowHandle + Debug + 'static {}
 /// }
 /// ```
 pub struct Renderer {
-    gpu: GpuContext,       // the connection to the GPU, and the surface for the window
-    vertex_buffer: Buffer, // the hand's vertices, in GPU memory
-    index_buffer: Buffer,  // the hand's triangle list, in GPU memory
-    index_count: u32,      // the number of entries in `index_buffer`, which each draw call needs
-    scene_buffer: Buffer,  // the camera's matrix and the light's direction
+    gpu: GpuContext,
+    hand: RenderObject,
+    scene_buffer: Buffer,        // the camera's matrix and the light's direction
     scene_bind_group: BindGroup, // hands `scene_buffer` to the shader, at group 0
-    object_buffer: Buffer, // the hand's model matrix
-    object_bind_group: BindGroup, // hands `object_buffer` to the shader, at group 1
-    pipeline: RenderPipeline, // the lit pipeline
+    pipeline: RenderPipeline,    // the lit pipeline
 }
 
 impl Renderer {
@@ -153,34 +150,23 @@ impl Renderer {
         // Connects to the GPU, and creates the window's surface
         let gpu = GpuContext::new(window, width, height).await?;
         // Interleaves the hand's positions and normals into vertices
-        let mesh = Mesh::from_mesh_data(hand);
-
-        let vertex_buffer = gpu.create_vertex_buffer(&mesh);
-        let index_buffer = gpu.create_index_buffer(&mesh);
+        let hand_mesh = Mesh::from_mesh_data(hand);
 
         let scene_buffer = gpu.create_uniform_buffer("Scene uniforms", size_of::<SceneUniforms>());
-        let object_buffer =
-            gpu.create_uniform_buffer("Object uniforms", size_of::<ObjectUniforms>());
-
         let scene_layout = gpu.create_uniform_layout("Scene layout");
         let object_layout = gpu.create_uniform_layout("Object layout");
 
+        let hand = gpu.create_render_object("Hand", &hand_mesh, &object_layout);
         let scene_bind_group =
-            gpu.create_uniform_bind_group("Scene bind group", &scene_layout, &scene_buffer);
-        let object_bind_group =
-            gpu.create_uniform_bind_group("Object bind group", &object_layout, &object_buffer);
+            gpu.create_bind_group("Scene bind group", &scene_layout, &scene_buffer);
 
         let shader = gpu.create_shader("Lit shader", include_str!("../shaders/lit.wgsl"));
         let pipeline = gpu.create_pipeline(&shader, &scene_layout, &object_layout);
         Ok(Self {
             gpu,
-            vertex_buffer,
-            index_buffer,
-            index_count: mesh.count_indices(),
             scene_buffer,
+            hand,
             scene_bind_group,
-            object_buffer,
-            object_bind_group,
             pipeline,
         })
     }
@@ -341,9 +327,8 @@ impl Renderer {
             colour: Self::HAND_COLOUR,
         };
 
-        self.gpu
-            .queue
-            .write_buffer(&self.object_buffer, 0, bytemuck::bytes_of(&object));
+        // Copies the hand's matrix and colour into its buffer
+        self.hand.write_uniforms(&self.gpu.queue, &object);
 
         // Creates the command encoder, which records this frame's commands for the GPU to run
         let encoder_descriptor = CommandEncoderDescriptor {
@@ -384,10 +369,7 @@ impl Renderer {
         let mut render_pass = encoder.begin_render_pass(&pass_descriptor);
         render_pass.set_pipeline(&self.pipeline);
         render_pass.set_bind_group(0, &self.scene_bind_group, &[]);
-        render_pass.set_bind_group(1, &self.object_bind_group, &[]);
-        render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
-        render_pass.set_index_buffer(self.index_buffer.slice(..), IndexFormat::Uint32);
-        render_pass.draw_indexed(0..self.index_count, 0, 0..1);
+        self.hand.draw(&mut render_pass);
         drop(render_pass);
 
         // Sends the recorded commands to the GPU, then shows the frame's texture in the window

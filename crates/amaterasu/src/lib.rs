@@ -36,6 +36,7 @@ mod error;
 mod mesh;
 mod renderer;
 mod uniform;
+mod object;
 
 pub use camera::{Camera, Ray};
 pub use error::RendererError;

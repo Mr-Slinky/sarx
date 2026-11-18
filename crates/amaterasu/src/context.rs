@@ -40,7 +40,9 @@ use wgpu::{
 
 use crate::RendererError;
 use crate::mesh::{GpuVertex, Mesh, Vertex};
+use crate::object::RenderObject;
 use crate::renderer::RenderWindow;
+use crate::uniform::ObjectUniforms;
 
 /// The connection to one GPU, together with the surface that the GPU draws into.
 ///
@@ -377,8 +379,28 @@ impl GpuContext {
         // Creates the layout
         self.device.create_bind_group_layout(&descriptor)
     }
+    
+    pub(crate) fn create_render_object<V: GpuVertex>(
+        &self,
+        label: &str,
+        mesh: &Mesh<V>,
+        obj_layout: &BindGroupLayout,
+    ) -> RenderObject {
+        let vertex_buffer = self.create_vertex_buffer(mesh);
+        let index_buffer = self.create_index_buffer(mesh);
+        let uniform_buffer = self.create_uniform_buffer(label, size_of::<ObjectUniforms>());
+        let bind_group = self.create_bind_group(label, obj_layout, &uniform_buffer);
+        
+        RenderObject {
+            vertex_buffer,
+            index_buffer,
+            index_count: mesh.count_indices(),
+            uniform_buffer,
+            bind_group
+        }
+    }
 
-    pub(crate) fn create_uniform_bind_group(
+    pub(crate) fn create_bind_group(
         &self,
         label: &str,
         layout: &BindGroupLayout,

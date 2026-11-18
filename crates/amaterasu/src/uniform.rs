@@ -11,6 +11,6 @@ pub(crate) struct SceneUniforms {
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
 pub(crate) struct ObjectUniforms {
-    pub(crate) model: Mat4,
+    pub(crate) model: Mat4, // transformations such as rotation, translation and scaling
     pub(crate) colour: Vec4,
 }

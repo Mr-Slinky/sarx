@@ -13,11 +13,6 @@ struct Scene {
     light_direction: vec4<f32>,
 }
 
-// Matches `ObjectUniforms` in `uniform.rs`
-struct Object {
-    model: mat4x4<f32>,
-}
-
 // Reads the scene uniforms from binding 0 of bind group 0
 @group(0) @binding(0) var<uniform> scene: Scene;
 // Reads the object uniforms from binding 0 of bind group 1

@@ -379,7 +379,7 @@ impl GpuContext {
         // Creates the layout
         self.device.create_bind_group_layout(&descriptor)
     }
-    
+
     pub(crate) fn create_render_object<V: GpuVertex>(
         &self,
         label: &str,
@@ -390,7 +390,7 @@ impl GpuContext {
         let index_buffer = self.create_index_buffer(mesh);
         let uniform_buffer = self.create_uniform_buffer(label, size_of::<ObjectUniforms>());
         let bind_group = self.create_bind_group(label, obj_layout, &uniform_buffer);
-        
+
         RenderObject {
             vertex_buffer,
             index_buffer,
@@ -466,28 +466,31 @@ impl GpuContext {
     /// let pipeline = gpu.create_pipeline(&shader, &scene_layout, &object_layout);
     /// render_pass.set_pipeline(&pipeline);
     /// ```
-    pub(crate) fn create_pipeline(
+    pub(crate) fn create_pipeline<V: GpuVertex>(
         &self,
+        label: &str,
         shader: &ShaderModule,
-        scene_layout: &BindGroupLayout,
-        object_layout: &BindGroupLayout,
+        entry_points: (&str, &str),
+        layouts: &[&BindGroupLayout],
     ) -> RenderPipeline {
-        // Lists the bind group layouts in group order: the scene at group 0, the object at group 1
-        let bind_group_layouts = [Some(scene_layout), Some(object_layout)];
+        // Splits the pair into the vertex shader's entry point and the fragment shader's
+        let (vertex_entry, fragment_entry) = entry_points;
+        // Wraps each layout in `Some`, as the descriptor requires, keeping the group order
+        let bind_group_layouts: Vec<_> = layouts.iter().copied().map(Some).collect();
         // Describes the pipeline layout from that list
         let layout_descriptor = PipelineLayoutDescriptor {
-            label: Some("Lit pipeline layout"),
+            label: Some(label),
             bind_group_layouts: &bind_group_layouts,
             immediate_size: 0,
         };
         // Creates the pipeline layout
         let pipeline_layout = self.device.create_pipeline_layout(&layout_descriptor);
 
-        // Reads each vertex from buffer slot 0 through `Mesh::LAYOUT`, and passes it to `vs_main`
-        let vertex_buffers = [Some(Vertex::LAYOUT)];
+        // Reads each vertex from buffer slot 0 through the layout of `V`
+        let vertex_buffers = [Some(V::LAYOUT)];
         let vertex = VertexState {
             module: shader,
-            entry_point: Some("vs_main"),
+            entry_point: Some(vertex_entry),
             compilation_options: Default::default(),
             buffers: &vertex_buffers,
         };
@@ -500,7 +503,7 @@ impl GpuContext {
         })];
         let fragment = FragmentState {
             module: shader,
-            entry_point: Some("fs_main"),
+            entry_point: Some(fragment_entry),
             compilation_options: Default::default(),
             targets: &targets,
         };
@@ -525,7 +528,7 @@ impl GpuContext {
 
         // Describes the whole pipeline
         let descriptor = RenderPipelineDescriptor {
-            label: Some("Lit pipeline"),
+            label: Some(label),
             layout: Some(&pipeline_layout),
             vertex,
             primitive,

@@ -123,6 +123,20 @@ impl Mesh<Vertex> {
         }
     }
 
+    pub(crate) fn build_ground(half_size: f32) -> Self {
+        // Finds the edges of the square, `half_size` either side of the origin
+        let near = half_size;
+        let far = -half_size;
+        // Describes a square at height 0, with every normal pointing straight up
+        let data = MeshData {
+            positions: vec![[far, 0.0, far], [far, 0.0, near], [near, 0.0, near], [near, 0.0, far]],
+            normals: vec![[0.0, 1.0, 0.0]; 4],
+            indices: vec![0, 1, 2, 0, 2, 3],
+        };
+        // Interleaves the positions and normals, as for any other mesh
+        Self::from_mesh_data(data)
+    }
+
 }
 
 #[cfg(test)]

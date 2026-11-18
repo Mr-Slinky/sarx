@@ -27,7 +27,7 @@ use wgpu::{
 use crate::Camera;
 use crate::RendererError;
 use crate::context::GpuContext;
-use crate::mesh::Mesh;
+use crate::mesh::{Mesh, Vertex};
 use crate::object::RenderObject;
 use crate::uniform::{ObjectUniforms, SceneUniforms};
 
@@ -91,7 +91,9 @@ pub struct Renderer {
     hand: RenderObject,
     scene_buffer: Buffer,        // the camera's matrix and the light's direction
     scene_bind_group: BindGroup, // hands `scene_buffer` to the shader, at group 0
-    pipeline: RenderPipeline,    // the lit pipeline
+    ground_pipeline: RenderPipeline, // draws the ground, with the checker
+    hand_pipeline: RenderPipeline, // draws the hand, in one colour
+    ground: RenderObject,        // the ground's buffers and bind group
 }
 
 impl Renderer {
@@ -107,6 +109,10 @@ impl Renderer {
     const LIGHT_DIRECTION: Vec4 = Vec4::new(-0.3, -1.0, -0.5, 0.0);
 
     const HAND_COLOUR: Vec4 = Vec4::new(0.85, 0.64, 0.52, 1.0);
+    // The colour of the ground's light squares, as RGBA from 0 to 1
+    const GROUND_COLOUR: Vec4 = Vec4::new(0.36, 0.55, 0.3, 1.0);
+    // How far the ground reaches from the origin in each direction along x and z
+    const GROUND_HALF_SIZE: f32 = 50.0;
 
     /// Creates a renderer that draws `hand` into `window`, at `width` by `height` pixels.
     ///
@@ -157,17 +163,35 @@ impl Renderer {
         let object_layout = gpu.create_uniform_layout("Object layout");
 
         let hand = gpu.create_render_object("Hand", &hand_mesh, &object_layout);
+        // Builds the square of ground, and creates its buffers and bind group
+        let ground_mesh = Mesh::build_ground(Self::GROUND_HALF_SIZE);
+        let ground = gpu.create_render_object("Ground", &ground_mesh, &object_layout);
         let scene_bind_group =
             gpu.create_bind_group("Scene bind group", &scene_layout, &scene_buffer);
 
         let shader = gpu.create_shader("Lit shader", include_str!("../shaders/lit.wgsl"));
-        let pipeline = gpu.create_pipeline(&shader, &scene_layout, &object_layout);
+        // Builds the ground's pipeline: plain vertices, the checker, and groups 0 and 1
+        let ground_pipeline = gpu.create_pipeline::<Vertex>(
+            "Ground pipeline",
+            &shader,
+            ("vs_static", "fs_ground"),
+            &[&scene_layout, &object_layout],
+        );
+        // Builds the hand's pipeline: plain vertices, one colour, and groups 0 and 1
+        let hand_pipeline = gpu.create_pipeline::<Vertex>(
+            "Hand pipeline",
+            &shader,
+            ("vs_static", "fs_lit"),
+            &[&scene_layout, &object_layout],
+        );
         Ok(Self {
             gpu,
             scene_buffer,
             hand,
             scene_bind_group,
-            pipeline,
+            ground_pipeline,
+            hand_pipeline,
+            ground,
         })
     }
 
@@ -322,13 +346,21 @@ impl Renderer {
             .queue
             .write_buffer(&self.scene_buffer, 0, bytemuck::bytes_of(&scene));
 
-        let object = ObjectUniforms {
+        let hand_uniforms = ObjectUniforms {
             model: hand_transform,
             colour: Self::HAND_COLOUR,
         };
 
         // Copies the hand's matrix and colour into its buffer
-        self.hand.write_uniforms(&self.gpu.queue, &object);
+        self.hand.write_uniforms(&self.gpu.queue, &hand_uniforms);
+
+        // Leaves the ground where its mesh puts it, and gives it the ground colour
+        let ground_uniforms = ObjectUniforms {
+            model: Mat4::IDENTITY,
+            colour: Self::GROUND_COLOUR,
+        };
+        // Copies the ground's matrix and colour into its buffer
+        self.ground.write_uniforms(&self.gpu.queue, &ground_uniforms);
 
         // Creates the command encoder, which records this frame's commands for the GPU to run
         let encoder_descriptor = CommandEncoderDescriptor {
@@ -361,14 +393,21 @@ impl Renderer {
             stencil_ops: None,
         };
         let pass_descriptor = RenderPassDescriptor {
-            label: Some("Hand"),
+            label: Some("Scene"),
             color_attachments: &[Some(colour_attachment)],
             depth_stencil_attachment: Some(depth_attachment),
             ..Default::default()
         };
+
         let mut render_pass = encoder.begin_render_pass(&pass_descriptor);
-        render_pass.set_pipeline(&self.pipeline);
+        // Points group 0 at the camera and the light, which both pipelines share
         render_pass.set_bind_group(0, &self.scene_bind_group, &[]);
+
+        // Draws the ground through the checker
+        render_pass.set_pipeline(&self.ground_pipeline);
+        self.ground.draw(&mut render_pass);
+        // Draws the hand in its own colour
+        render_pass.set_pipeline(&self.hand_pipeline);
         self.hand.draw(&mut render_pass);
         drop(render_pass);
 

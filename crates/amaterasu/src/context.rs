@@ -39,7 +39,7 @@ use wgpu::{
 };
 
 use crate::RendererError;
-use crate::mesh::Mesh;
+use crate::mesh::{GpuVertex, Mesh, Vertex};
 use crate::renderer::RenderWindow;
 
 /// The connection to one GPU, together with the surface that the GPU draws into.
@@ -323,7 +323,7 @@ impl GpuContext {
     /// let vertex_buffer = gpu.create_vertex_buffer(&mesh);
     /// render_pass.set_vertex_buffer(0, vertex_buffer.slice(..));
     /// ```
-    pub(crate) fn create_vertex_buffer(&self, mesh: &Mesh) -> Buffer {
+    pub(crate) fn create_vertex_buffer<V: GpuVertex>(&self, mesh: &Mesh<V>) -> Buffer {
         // Describes a vertex buffer, filled with the mesh's vertices as bytes
         let descriptor = BufferInitDescriptor {
             label: Some("Mesh vertices"),
@@ -334,7 +334,7 @@ impl GpuContext {
         self.device.create_buffer_init(&descriptor)
     }
 
-    pub(crate) fn create_index_buffer(&self, mesh: &Mesh) -> Buffer {
+    pub(crate) fn create_index_buffer<V: GpuVertex>(&self, mesh: &Mesh<V>) -> Buffer {
         // Describes an index buffer, filled with the mesh's triangle list as bytes
         let descriptor = BufferInitDescriptor {
             label: Some("Mesh indices"),
@@ -462,7 +462,7 @@ impl GpuContext {
         let pipeline_layout = self.device.create_pipeline_layout(&layout_descriptor);
 
         // Reads each vertex from buffer slot 0 through `Mesh::LAYOUT`, and passes it to `vs_main`
-        let vertex_buffers = [Some(Mesh::LAYOUT)];
+        let vertex_buffers = [Some(Vertex::LAYOUT)];
         let vertex = VertexState {
             module: shader,
             entry_point: Some("vs_main"),

@@ -12,5 +12,5 @@ pub(crate) struct SceneUniforms {
 #[derive(Clone, Copy, Pod, Zeroable)]
 pub(crate) struct ObjectUniforms {
     pub(crate) model: Mat4,
-    pub(crate) colours: Vec4,
+    pub(crate) colour: Vec4,
 }

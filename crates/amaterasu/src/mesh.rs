@@ -9,11 +9,44 @@ use hermes::MeshData;
 use std::mem::offset_of;
 use wgpu::{BufferAddress, VertexAttribute, VertexBufferLayout, VertexFormat, VertexStepMode};
 
+pub(crate) trait GpuVertex: Pod {
+    // Describes the bytes of one vertex
+    const LAYOUT: VertexBufferLayout<'static>;
+}
+
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
 pub(crate) struct Vertex {
     position: [f32; 3], // the corner's position, in the model's own space
     normal: [f32; 3],   // the direction that the surface faces at this corner
+}
+
+impl GpuVertex for Vertex {
+    /// The layout that tells the pipeline how to read the bytes returned by `cast_vertex_bytes`.
+    ///
+    /// Each vertex takes 24 bytes. The vertex shader receives the position at location 0 and the
+    /// normal at location 1, each as three `f32` values.
+    const LAYOUT: VertexBufferLayout<'static> = VertexBufferLayout {
+        // Steps 24 bytes from one vertex to the next
+        array_stride: size_of::<Vertex>() as BufferAddress,
+        // Moves to the next vertex for each vertex that the draw reads
+        step_mode: VertexStepMode::Vertex,
+        // Describes the two attributes inside each vertex
+        attributes: &[
+            // Hands the position to the shader at location 0
+            VertexAttribute {
+                format: VertexFormat::Float32x3,
+                offset: offset_of!(Vertex, position) as BufferAddress,
+                shader_location: 0,
+            },
+            // Hands the normal to the shader at location 1
+            VertexAttribute {
+                format: VertexFormat::Float32x3,
+                offset: offset_of!(Vertex, normal) as BufferAddress,
+                shader_location: 1,
+            },
+        ],
+    };
 }
 
 /// The vertices and indices of one shape.
@@ -53,37 +86,27 @@ pub(crate) struct Vertex {
 /// render_pass.set_index_buffer(index_buffer.slice(..), IndexFormat::Uint32);
 /// render_pass.draw_indexed(0..mesh.count_indices(), 0, 0..1);
 /// ```
-pub(crate) struct Mesh {
-    vertices: Vec<Vertex>, // every corner, each stored once
-    indices: Vec<u32>,     // three entries for each triangle, each one an index into `vertices`
+pub(crate) struct Mesh<V> {
+    vertices: Vec<V>,  // every corner, each stored once
+    indices: Vec<u32>, // three entries for each triangle, each one an index into `vertices`
 }
 
-impl Mesh {
-    /// The layout that tells the pipeline how to read the bytes that `cast_vertex_bytes` returns.
-    ///
-    /// Each vertex takes 24 bytes. The vertex shader receives the position at location 0 and the
-    /// normal at location 1, each as three `f32` values.
-    pub(crate) const LAYOUT: VertexBufferLayout<'static> = VertexBufferLayout {
-        // Steps 24 bytes from one vertex to the next
-        array_stride: size_of::<Vertex>() as BufferAddress,
-        // Moves to the next vertex for each vertex that the draw reads
-        step_mode: VertexStepMode::Vertex,
-        // Describes the two attributes inside each vertex
-        attributes: &[
-            // Hands the position to the shader at location 0
-            VertexAttribute {
-                format: VertexFormat::Float32x3,
-                offset: offset_of!(Vertex, position) as BufferAddress,
-                shader_location: 0,
-            },
-            // Hands the normal to the shader at location 1
-            VertexAttribute {
-                format: VertexFormat::Float32x3,
-                offset: offset_of!(Vertex, normal) as BufferAddress,
-                shader_location: 1,
-            },
-        ],
-    };
+
+impl <V: GpuVertex> Mesh<V> {
+    pub(crate) fn count_indices(&self) -> u32 {
+        self.indices.len() as u32
+    }
+
+    pub(crate) fn cast_vertex_bytes(&self) -> &[u8] {
+        bytemuck::cast_slice(&self.vertices)
+    }
+
+    pub(crate) fn cast_index_bytes(&self) -> &[u8] {
+        bytemuck::cast_slice(&self.indices)
+    }
+}
+
+impl Mesh<Vertex> {
 
     pub(crate) fn from_mesh_data(data: MeshData) -> Self {
         // Pairs each position with the normal at the same index, and builds one vertex from each pair
@@ -100,17 +123,6 @@ impl Mesh {
         }
     }
 
-    pub(crate) fn count_indices(&self) -> u32 {
-        self.indices.len() as u32
-    }
-
-    pub(crate) fn cast_vertex_bytes(&self) -> &[u8] {
-        bytemuck::cast_slice(&self.vertices)
-    }
-
-    pub(crate) fn cast_index_bytes(&self) -> &[u8] {
-        bytemuck::cast_slice(&self.indices)
-    }
 }
 
 #[cfg(test)]
@@ -136,11 +148,11 @@ mod tests {
         }
     }
 
-    /// Checks that the layout matches the `VertexInput` struct of `lit.wgsl`: a 24-byte stride,
-    /// with the position at offset 0 and location 0, and the normal at offset 12 and location 1
+    // Checks that the layout matches the `VertexInput` struct of `lit.wgsl`: a 24-byte stride,
+    // with the position at offset 0 and location 0, and the normal at offset 12 and location 1
     #[test]
     fn layout_with_position_and_normal_matches_lit_shader() {
-        let layout = Mesh::LAYOUT;
+        let layout = Vertex::LAYOUT;
 
         let attributes = layout.attributes;
 

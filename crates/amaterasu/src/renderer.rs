@@ -106,8 +106,10 @@ impl Renderer {
         a: 1.0,
     };
 
-    // The direction that the light travels in: downwards, and a little to the left and away from the camera
+    // downwards, and a little to the left and away from the camera
     const LIGHT_DIRECTION: Vec4 = Vec4::new(-0.3, -1.0, -0.5, 0.0);
+
+    const HAND_COLOUR: Vec4 = Vec4::new(0.85, 0.64, 0.52, 1.0);
 
     /// Creates a renderer that draws `hand` into `window`, at `width` by `height` pixels.
     ///
@@ -168,8 +170,7 @@ impl Renderer {
         let object_bind_group =
             gpu.create_uniform_bind_group("Object bind group", &object_layout, &object_buffer);
 
-        let shader_source = include_str!("../shaders/lit.wgsl");
-        let shader = gpu.create_shader("Lit shader", shader_source);
+        let shader = gpu.create_shader("Lit shader", include_str!("../shaders/lit.wgsl"));
         let pipeline = gpu.create_pipeline(&shader, &scene_layout, &object_layout);
         Ok(Self {
             gpu,
@@ -259,16 +260,11 @@ impl Renderer {
 
     /// Draws one frame and shows it in the window.
     ///
-    /// Each frame shows the hand over a dark blue background, lit from one direction and seen
-    /// through `camera`. `hand_transform` is the hand's model matrix, which places the hand's mesh
-    /// in the world.
-    ///
     /// Some calls skip the frame. While the app is suspended, no surface exists, and `render`
     /// returns at once.
     ///
-    /// Otherwise, each frame is drawn into a texture, which is an image in GPU memory that the
-    /// surface hands out for that frame. Where no texture comes back, `render` skips the frame.
-    /// Before skipping, it reconfigures an outdated surface and replaces a lost one with a new
+    /// Otherwise, each frame is drawn into a texture. If no texture comes back, `render` skips the frame,
+    /// before which, it reconfigures an outdated surface or replaces a lost one with a new
     /// surface for the same window.
     ///
     /// # Errors
@@ -335,12 +331,16 @@ impl Renderer {
             view_projection: camera.build_view_projection(aspect_ratio),
             light_direction: Self::LIGHT_DIRECTION,
         };
+
         self.gpu
             .queue
             .write_buffer(&self.scene_buffer, 0, bytemuck::bytes_of(&scene));
+
         let object = ObjectUniforms {
             model: hand_transform,
+            colour: Self::HAND_COLOUR,
         };
+
         self.gpu
             .queue
             .write_buffer(&self.object_buffer, 0, bytemuck::bytes_of(&object));

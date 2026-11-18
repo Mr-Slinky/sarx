@@ -1,7 +1,11 @@
 // The share of the full brightness that every surface receives, even one facing away from the light
 const AMBIENT: f32 = 0.2;
-// The colour of the hand's skin, as RGB from 0 to 1
-const SKIN: vec3<f32> = vec3<f32>(0.85, 0.64, 0.52);
+
+// Matches `ObjectUniforms` in `uniform.rs`, field for field
+struct Object {
+    model: mat4x4<f32>,
+    colour: vec4<f32>,
+}
 
 // Matches `SceneUniforms` in `uniform.rs`, field for field
 struct Scene {
@@ -53,6 +57,6 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     let diffuse = max(dot(normal, towards_light), 0.0);
     // Adds the ambient share to the light that the surface receives
     let brightness = AMBIENT + (1.0 - AMBIENT) * diffuse;
-    // Returns the skin colour at that brightness, fully opaque
-    return vec4<f32>(SKIN * brightness, 1.0);
+    // Returns the object's colour at the above brightness, fully opaque
+    return vec4<f32>(object.colour.rgb * brightness, 1.0);
 }

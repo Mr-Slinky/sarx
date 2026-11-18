@@ -53,11 +53,11 @@ impl App {
     // The centre of the hand model's palm, relative to the model's origin at the wrist cut-off.
     // Measured from the skeleton, halfway between the wrist joint and the average of the four
     // knuckles
-    const PALM_CENTRE: Vec3 = Vec3::new(0.0, 0.03, -1.89);
+    const PALM_CENTRE: Vec3 = Vec3::new(0.0, -0.03, -1.89);
     // Where the camera stands, tuned so that the whole hand fits on screen
-    const CAMERA_EYE: Vec3 = Vec3::new(0.3, 4.0, 3.0);
+    const CAMERA_EYE: Vec3 = Vec3::new(-0.3, 4.0, 3.0);
     // The point the camera looks at, tuned to the middle of the hand
-    const CAMERA_TARGET: Vec3 = Vec3::new(0.3, 0.0, -2.0);
+    const CAMERA_TARGET: Vec3 = Vec3::new(-0.3, 0.0, -2.0);
 
     pub(crate) fn new() -> Self {
         let camera = Camera::new(Self::CAMERA_EYE, Self::CAMERA_TARGET);

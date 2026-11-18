@@ -279,29 +279,6 @@ Two facts about this machine affect how an agent builds Sarx.
 
 ---
 
-## Git and GitHub
-
-The repository belongs to the developer's personal GitHub account. On this machine, however, `gh`
-signs in to a work account by default. The points below set out how an agent works with both.
-
-- The repository is private, at `github.com/Mr-Slinky/sarx`. Like everything under
-  `C:\Repos\personal`, it is owned by the Mr-Slinky account.
-- The `origin` remote uses the `github-personal` SSH alias, which authenticates as Mr-Slinky.
-- `~/.gitconfig` loads `~/.gitconfig-personal` for every repository under `C:\Repos\personal`.
-  Commits in this repository therefore take their author name and email from that file.
-- The active `gh` account is ITAnywhere-Developer, the work account. A `gh` command against this
-  repository needs Mr-Slinky instead. The agent passes the token for Mr-Slinky to that one command,
-  leaving the active account as it is:
-
-  ```bash
-  GH_TOKEN=$(gh auth token -u Mr-Slinky) gh <command>
-  ```
-
-- An agent brings `main` up to date only when the developer asks. It follows the process in the
-  conventions, under Branches.
-
----
-
 ## Commits
 
 Agents write commit messages in the format that the conventions set out, following the

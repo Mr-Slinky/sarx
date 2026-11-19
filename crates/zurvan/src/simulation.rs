@@ -18,7 +18,7 @@ impl Simulation {
     // Defines the most elapsed time that one call to `advance` adds to `unsimulated`.
     const MAX_ELAPSED: Duration = Duration::from_millis(250);
     pub const HOVER_HEIGHT: f32 = 1.0;
-    const HAND_SPEED: f32 = 20.0;
+    const HAND_SPEED: f32 = 50.0;
 
     pub fn new() -> Self {
         let mut world = World::new();

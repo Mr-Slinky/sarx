@@ -1,7 +1,9 @@
-use crate::components::{Position, Speed, Target, Velocity};
-use crate::systems::{movement, steering};
+use crate::HandPoses;
+use crate::components::{Bones, Idle, PoseGoal, Position, Speed, Target, Velocity};
+use crate::random::Random;
+use crate::systems::{idling, movement, posing, steering};
 use enki::{Entity, World};
-use glam::Vec3;
+use glam::{Quat, Vec3};
 use std::time::Duration;
 
 pub struct Simulation {
@@ -10,6 +12,8 @@ pub struct Simulation {
     // Stores the time that has passed and that no step has used yet. Between calls to `advance`,
     // it stays below `STEP`.
     unsimulated: Duration,
+    poses: HandPoses,
+    random: Random,
 }
 
 impl Simulation {
@@ -19,15 +23,85 @@ impl Simulation {
     const MAX_ELAPSED: Duration = Duration::from_millis(250);
     pub const HOVER_HEIGHT: f32 = 1.0;
     const HAND_SPEED: f32 = 50.0;
+    const RANDOM_SEED: u32 = 0x9E37_79B9;
 
-    pub fn new() -> Self {
+    pub fn new(poses: HandPoses) -> Self {
+        assert!(
+            !poses.idle.is_empty(),
+            "the hand needs at least one idle pose"
+        );
+        let rest_bone_count = poses.rest.0.len();
+        let mut every_pose  = poses.idle.iter().chain(&poses.actions);
+        let all_match = every_pose.all(|pose| pose.0.len() == rest_bone_count);
+        // Guards `posing`, which pairs each bone with one goal rotation
+        assert!(
+            all_match,
+            "every pose must have one rotation for each bone of the rest pose"
+        );
+
         let mut world = World::new();
-        let hand = Self::init_hand(&mut world);
+        let hand = world.spawn_empty();
+        let start = Vec3::new(0.0, Self::HOVER_HEIGHT, 0.0);
+        let components = (
+            Position(start),
+            Velocity(Vec3::ZERO),
+            Target(start),
+            Speed(Self::HAND_SPEED),
+            Bones(poses.rest.0.clone()),
+            PoseGoal(poses.idle[0].0.clone()),
+            Idle(Some(0)),
+        );
+
+        world
+            .add_components(hand, components)
+            .expect("the hand should exist");
+        // Returns the simulation, with no time left over
         Self {
             world,
             hand,
             unsimulated: Duration::ZERO,
+            poses,
+            random: Random::new(Self::RANDOM_SEED),
         }
+    }
+
+    pub fn hold_pose(&mut self, action: usize) {
+        let pose = &self.poses.actions[action];
+        let goal = self
+            .world
+            .get_mut::<PoseGoal>(self.hand)
+            .expect("the hand always has a pose goal");
+        goal.0.clone_from(&pose.0);
+        let idle = self
+            .world
+            .get_mut::<Idle>(self.hand)
+            .expect("the hand always has an idle cycle");
+        // Pauses the idle cycle, which makes `idling` leave the goal alone
+        idle.0 = None;
+    }
+
+    pub fn release_pose(&mut self) {
+        let next = self.random.pick_below(self.poses.idle.len());
+        let pose = &self.poses.idle[next];
+        let goal = self
+            .world
+            .get_mut::<PoseGoal>(self.hand)
+            .expect("the hand always has a pose goal");
+        goal.0.clone_from(&pose.0);
+        let idle = self
+            .world
+            .get_mut::<Idle>(self.hand)
+            .expect("the hand always has an idle cycle");
+        // Resumes the idle cycle from that pose
+        idle.0 = Some(next);
+    }
+
+    pub fn find_bone_rotations(&self) -> &[Quat] {
+        let bones = self
+            .world
+            .get::<Bones>(self.hand)
+            .expect("the hand always has bones");
+        &bones.0
     }
 
     pub fn set_hand_target(&mut self, point: Vec3) {
@@ -59,30 +133,9 @@ impl Simulation {
         let step_seconds = Self::STEP.as_secs_f32();
         steering(&mut self.world, step_seconds);
         movement(&mut self.world, step_seconds);
-    }
-
-    fn init_hand(world: &mut World) -> Entity {
-        let hand = world.spawn_empty();
-        let start = Vec3::new(0.0, Self::HOVER_HEIGHT, 0.0);
-        let components = (
-            Position(start),
-            Velocity(Vec3::ZERO),
-            Target(start),
-            Speed(Self::HAND_SPEED),
-        );
-
-        world
-            .add_components(hand, components)
-            .expect("the hand should exist");
-
-        hand
-    }
-
-}
-
-impl Default for Simulation {
-    fn default() -> Self {
-        Self::new()
+        // Runs before `idling`, which then sees on the same step whether the bones have arrived
+        posing(&mut self.world);
+        idling(&mut self.world, &self.poses.idle);
     }
 }
 

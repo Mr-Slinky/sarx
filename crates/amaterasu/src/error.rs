@@ -44,7 +44,7 @@ pub enum RendererError {
     ///
     /// - The GPU does not offer a pixel format or a present mode for the surface. A present mode
     ///   sets when each finished frame appears in the window.
-    /// - A new surface lacks the pixel format that the pipeline was built for.
+    /// - A new surface lacks the pixel format that the pipelines were built for.
     UnsupportedSurface,
     /// The GPU cannot anti-alias in the surface's pixel format.
     ///

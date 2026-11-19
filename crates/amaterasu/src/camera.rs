@@ -1,12 +1,50 @@
+//! The camera that the renderer draws each frame through, and the ray that runs from the camera
+//! through a point in the window.
+//!
+//! The example on [`Camera`] casts a ray under the cursor and finds where it meets the ground.
+
 use glam::camera::rh::{proj, view};
 use glam::{Mat4, Vec2, Vec3};
 use std::f32::consts::FRAC_PI_4;
 
+/// A camera at a point in the world, looking at a target point.
+///
+/// The renderer draws each frame through the matrix that
+/// [`build_view_projection`](Self::build_view_projection) returns. A caller also uses the camera
+/// to find what lies under the cursor, with [`cast_ray`](Self::cast_ray).
+///
+/// # Examples
+///
+/// The example places a camera above and in front of the origin, then finds the point on the
+/// ground under the centre of an 800 by 600 window. The centre of the window lies over the
+/// camera's target, which means the ray meets the ground at the origin.
+///
+/// ```
+/// use amaterasu::Camera;
+/// use glam::{Vec2, Vec3};
+///
+/// // Places the camera 3 units up and 4 units back, looking at the origin
+/// let camera = Camera::new(Vec3::new(0.0, 3.0, 4.0), Vec3::ZERO);
+///
+/// // Casts the ray under the centre of the window, then finds where it meets the ground
+/// let window_size = Vec2::new(800.0, 600.0);
+/// let ray = camera
+///     .cast_ray(window_size / 2.0, window_size)
+///     .expect("the window should have a usable size");
+/// let ground_point = ray.meet_ground().expect("the ray should point down at the ground");
+///
+/// // Checks that the ray meets the ground at the origin
+/// assert!(ground_point.abs_diff_eq(Vec3::ZERO, 1e-3));
+/// ```
 pub struct Camera {
     eye: Vec3,    // where the camera is positioned, in world units
     target: Vec3, // the point that the camera looks at
 }
 
+/// A line through the world that starts at one point and runs on in one direction.
+///
+/// [`Camera::cast_ray`] returns the ray under a point in the window. The example on [`Camera`]
+/// finds where one meets the ground.
 pub struct Ray {
     origin: Vec3,    // where the ray starts, on the camera's near plane
     direction: Vec3, // the way the ray points, one unit long
@@ -20,10 +58,19 @@ impl Camera {
     // The furthest distance that the camera draws
     const FAR: f32 = 100.0;
 
+    /// Returns a camera at `eye`, looking at `target`. Both are positions in the world.
+    ///
+    /// The example on [`Camera`] shows a call.
     pub fn new(eye: Vec3, target: Vec3) -> Self {
         Self { eye, target }
     }
 
+    /// Returns the matrix that turns a position in the world into a position in clip space.
+    ///
+    /// `aspect_ratio` is the window's width divided by its height. In clip space, x and y run from
+    /// -1 to 1 across the window, with y pointing up. Depth runs from 0 at the nearest distance
+    /// that the camera draws to 1 at the furthest. The camera sees 45 degrees from the bottom of
+    /// the view to the top.
     pub fn build_view_projection(&self, aspect_ratio: f32) -> Mat4 {
         let view_matrix = view::look_at_mat4(self.eye, self.target, Vec3::Y);
         // Applies perspective, and maps depth to the range 0 to 1
@@ -92,10 +139,18 @@ impl Camera {
 }
 
 impl Ray {
+    /// Returns the point where the ray meets the ground, at height 0, as
+    /// [`meet_height`](Self::meet_height) finds it.
+    ///
+    /// The example on [`Camera`] shows a call.
     pub fn meet_ground(&self) -> Option<Vec3> {
         self.meet_height(0.0)
     }
 
+    /// Returns the point where the ray falls to `height` on the y axis.
+    ///
+    /// Returns `None` if the ray points level or upwards. Also returns `None` if the ray starts
+    /// below `height`, since the point then lies behind the ray's start.
     pub fn meet_height(&self, height: f32) -> Option<Vec3> {
         // Returns `None` where the ray points level or upwards, since it then never falls to `height`
         if self.direction.y >= 0.0 {

@@ -81,7 +81,9 @@ Several points remain open. The developer settles them once the simulation has c
 ### Confirmation
 
 Nothing in the code embodies this decision yet. `zurvan`, the crate for the simulation, moves the
-god's hand towards the cursor, and does not make any other change to the world.
+god's hand towards the cursor and turns the bones of the hand towards a pose. The systems in
+`crates/zurvan/src/systems.rs` write those changes to the world directly, and nothing in the code
+checks a request.
 
 Once the simulation changes the world, a reviewer confirms three points:
 

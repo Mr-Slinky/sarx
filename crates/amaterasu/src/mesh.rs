@@ -9,11 +9,19 @@ use hermes::{MeshData, SkinData};
 use std::mem::offset_of;
 use wgpu::{BufferAddress, VertexAttribute, VertexBufferLayout, VertexFormat, VertexStepMode};
 
+/// A vertex type that a pipeline can read out of a vertex buffer.
+///
+/// The `Pod` bound lets a [`Mesh`] cast its vertices to the bytes that the GPU reads. `LAYOUT`
+/// tells the pipeline where each value lies inside one vertex's bytes, and at which location the
+/// vertex shader receives it. [`Vertex`] and [`SkinnedVertex`] implement the trait.
 pub(crate) trait GpuVertex: Pod {
     // Describes the bytes of one vertex
     const LAYOUT: VertexBufferLayout<'static>;
 }
 
+/// One corner of a mesh, with a position and a normal.
+///
+/// The vertex function `vs_static` in `lit.wgsl` reads it, through [`Vertex::LAYOUT`].
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
 pub(crate) struct Vertex {
@@ -21,6 +29,14 @@ pub(crate) struct Vertex {
     normal: [f32; 3],   // the direction that the surface faces at this corner
 }
 
+/// One corner of a mesh that bends with the bones of a skeleton.
+///
+/// Moving each vertex of a mesh with the bones of a skeleton is called skinning. Each skinned
+/// vertex lists four bones, and a weight for each bone that sets how strongly that bone pulls the
+/// vertex. The position and the normal describe the vertex at rest, before any bone moves it.
+///
+/// [`SkinnedVertex::LAYOUT`] hands the position, the normal, the bones and the weights to the
+/// vertex shader at locations 0 to 3.
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
 pub(crate) struct SkinnedVertex {
@@ -97,8 +113,10 @@ impl GpuVertex for SkinnedVertex {
 
 /// The vertices and indices of one shape.
 ///
-/// Each vertex stores a position in the model's own space, and the normal, which is the direction
-/// that the surface faces at that corner.
+/// `V` is the type of each vertex. A [`Vertex`] stores a position in the model's own space, and
+/// the normal, which is the direction that the surface faces at that corner. A [`SkinnedVertex`]
+/// also stores the four bones that move it, with a weight for each. `from_mesh_data` and
+/// `build_ground` build a `Mesh<Vertex>`, and `from_skinned_data` builds a `Mesh<SkinnedVertex>`.
 ///
 /// A caller copies the vertices into a vertex buffer, using the bytes that `cast_vertex_bytes`
 /// returns. It copies the indices into an index buffer in the same way, using `cast_index_bytes`.
@@ -139,14 +157,25 @@ pub(crate) struct Mesh<V> {
 
 
 impl <V: GpuVertex> Mesh<V> {
+    /// Returns the number of indices, which is three for each triangle.
+    ///
+    /// A draw passes it as the end of its index range, as the example on [`Mesh`] shows.
     pub(crate) fn count_indices(&self) -> u32 {
         self.indices.len() as u32
     }
 
+    /// Returns the vertices as bytes, laid out as `V::LAYOUT` describes, for copying into a vertex
+    /// buffer.
+    ///
+    /// The example on [`Mesh`] shows a call.
     pub(crate) fn cast_vertex_bytes(&self) -> &[u8] {
         bytemuck::cast_slice(&self.vertices)
     }
 
+    /// Returns the indices as bytes, four for each index, for copying into an index buffer that a
+    /// render pass reads as `IndexFormat::Uint32`.
+    ///
+    /// The example on [`Mesh`] shows a call.
     pub(crate) fn cast_index_bytes(&self) -> &[u8] {
         bytemuck::cast_slice(&self.indices)
     }
@@ -154,6 +183,13 @@ impl <V: GpuVertex> Mesh<V> {
 
 impl Mesh<Vertex> {
 
+    /// Builds a mesh from the positions, normals and indices in `data`.
+    ///
+    /// Each vertex pairs a position with the normal at the same index. If `data` has fewer
+    /// normals than positions, the mesh keeps only as many vertices as there are normals. The mesh
+    /// takes the index list from `data` without copying it.
+    ///
+    /// The example on [`Mesh`] shows a call.
     pub(crate) fn from_mesh_data(data: MeshData) -> Self {
         // Pairs each position with the normal at the same index, and builds one vertex from each pair
         let vertices = data
@@ -169,6 +205,10 @@ impl Mesh<Vertex> {
         }
     }
 
+    /// Builds a flat square of ground at height 0, which reaches `half_size` from the origin in
+    /// each direction along x and z.
+    ///
+    /// The square takes two triangles, and every normal points straight up.
     pub(crate) fn build_ground(half_size: f32) -> Self {
         // Finds the edges of the square, `half_size` either side of the origin
         let near = half_size;
@@ -186,6 +226,16 @@ impl Mesh<Vertex> {
 }
 
 impl Mesh<SkinnedVertex> {
+    /// Builds a skinned mesh from the positions, normals and indices in `data`, and the bones and
+    /// weights in `skin`.
+    ///
+    /// Vertex `n` takes entry `n` from each of the four lists. The mesh copies the index list,
+    /// since it only borrows `data`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `data.normals`, `skin.joints` or `skin.weights` has fewer entries than
+    /// `data.positions`.
     pub(crate) fn from_skinned_data(data: &MeshData, skin: &SkinData) -> Self {
         // Creates an empty list with room for every vertex
         let mut vertices = Vec::with_capacity(data.positions.len());

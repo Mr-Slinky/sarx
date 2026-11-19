@@ -56,8 +56,10 @@ one rotation to another, along the shortest arc between them.
 To change the hand's goal, Sarx changes the target pose. Each bone then starts its turn from its
 rotation at that moment. A hand part-way into one pose therefore turns smoothly towards the next.
 
-A further decision must set how far a bone turns on each update. Another must choose whether the
-update runs in the simulation step or in the renderer, and that decision must agree with ADR 0004.
+The turn runs in the fixed simulation step that ADR 0004 sets out, rather than in the renderer. On
+each step, every bone turns a tenth of its remaining way towards the target pose, and snaps onto the
+target once it lies within half a degree of it. The constants `POSE_FRACTION` and `SNAP_ANGLE` in
+`crates/zurvan/src/systems.rs` set those two values.
 
 ### Consequences
 
@@ -77,12 +79,13 @@ update runs in the simulation step or in the renderer, and that decision must ag
 
 ### Confirmation
 
-Nothing in the code embodies this decision yet. Once the hand animates, a reader confirms it with
-three checks:
+The code follows this decision. A reader confirms it with three checks:
 
-- Each pose in the hand's glTF file is an animation with a single keyframe.
-- The animation code turns each bone towards a target rotation by slerp, starting from its current
-  rotation.
+- Each pose in the hand's glTF file is an animation with a single keyframe. `read_poses` in
+  `crates/hermes/src/pose.rs` reads only those animations as poses, and leaves out any animation
+  with more keyframes.
+- The `posing` system in `crates/zurvan/src/systems.rs` turns each bone towards its goal rotation by
+  slerp, starting from its current rotation.
 - No code plays a hand animation through time.
 
 ## Pros and Cons of the Options

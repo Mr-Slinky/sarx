@@ -1,3 +1,5 @@
+//! Defines the components that the simulation stores on its entities.
+
 use enki::Component;
 use glam::{Quat, Vec3};
 
@@ -14,6 +16,7 @@ pub struct Velocity(pub(crate) Vec3);
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Target(pub(crate) Vec3);
 
+/// The fastest that an entity moves, in world units per second.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Speed(pub(crate) f32);
 

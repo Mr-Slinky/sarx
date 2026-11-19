@@ -102,8 +102,9 @@ pub enum Permission {
 /// # Visibility
 ///
 /// Code outside the crate can name the trait as a bound, and can pass any query type that the
-/// crate implements it for. The attribute `#[doc(hidden)]` hides the three methods from the public
-/// documentation, since only code inside the crate needs them.
+/// crate implements it for. The attribute `#[doc(hidden)]` hides the type `Rows` and the six
+/// methods `add_permissions`, `find_columns`, `build_rows`, `count_rows`, `fetch_row` and
+/// `split_rows` from the public documentation, since only code inside the crate needs them.
 ///
 /// Code outside the crate cannot implement the trait. `Query` requires the trait `Sealed`, which a
 /// private module in `query.rs` declares. Code outside the crate cannot write a path to `Sealed`,

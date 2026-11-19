@@ -1,7 +1,14 @@
+//! Defines the error that the crate returns when it cannot read a model.
+
 use std::error::Error;
 use std::fmt;
 use std::fmt::{Display, Formatter};
 
+/// Describes why [`read_mesh`](crate::read_mesh) or [`read_model`](crate::read_model) could not
+/// read a file.
+///
+/// Each variant names one part of the file that is missing or does not fit the rest. The
+/// `# Errors` sections of the two functions list which part causes each variant.
 #[derive(Debug)]
 pub enum GltfError {
     // Wraps the gltf crate's own error: the file is not glTF, is malformed, or its JSON text
@@ -13,18 +20,18 @@ pub enum GltfError {
     MissingMesh,
     // The first primitive has no `POSITION` attribute, or its positions cannot be read
     MissingPositions,
-    /// The primitive that `read_mesh` reads has no `indices`
+    /// The primitive that `read_mesh` and `read_model` read has no `indices`
     MissingIndices,
-    /// The primitive that `read_mesh` reads has no `NORMAL` attribute
+    /// The primitive that `read_mesh` and `read_model` read has no `NORMAL` attribute
     MissingNormals,
-    /// The primitive that `read_mesh` reads has a different number of normals from its number of
-    /// positions, where glTF requires one normal for each position
+    /// The primitive that `read_mesh` and `read_model` read has a different number of normals from
+    /// its number of positions, where glTF requires one normal for each position
     ///
     /// ```text
     /// 3 positions, 2 normals  ->  NormalCountMismatch { positions: 3, normals: 2 }
     /// ```
     NormalCountMismatch { positions: usize, normals: usize },
-    /// An index of the primitive that `read_mesh` reads points at or past the end of its vertices
+    /// An index of the primitive that `read_mesh` and `read_model` read points past its last vertex
     ///
     /// `index` is the first such index in the order that the file stores them.
     ///
@@ -45,6 +52,8 @@ pub enum GltfError {
 }
 
 impl Display for GltfError {
+    /// Writes a message of one line, starting in lower case, which states what is wrong with the
+    /// file and any numbers that the variant contains.
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         // Writes one line for each variant, starting in lower case
         match self {
@@ -88,6 +97,8 @@ impl Display for GltfError {
 }
 
 impl Error for GltfError {
+    /// Returns the error from the `gltf` crate for [`GltfError::Gltf`], and `None` for every other
+    /// variant.
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
             // Returns the gltf crate's own error, which states what it found wrong with the file
@@ -99,6 +110,7 @@ impl Error for GltfError {
 }
 
 impl From<gltf::Error> for GltfError {
+    /// Wraps `error` in [`GltfError::Gltf`].
     fn from(error: gltf::Error) -> Self {
         // Wraps the crate's error, which lets `?` turn a `gltf::Error` into a `GltfError`
         Self::Gltf(error)

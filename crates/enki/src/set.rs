@@ -63,8 +63,8 @@ mod sealed {
 /// # Visibility
 ///
 /// Code outside the crate can use the trait as a bound, and can write tuples that implement it. The
-/// attribute `#[doc(hidden)]` hides the two methods from the public documentation, since only code
-/// inside the crate needs them.
+/// attribute `#[doc(hidden)]` hides the type `Replaced` and the two methods `infos` and `push_into`
+/// from the public documentation, since only code inside the crate needs them.
 ///
 /// Code outside the crate cannot implement the trait. `ComponentSet` requires the trait `Sealed`,
 /// which a private module in `set.rs` declares. Code outside the crate cannot write a path to
@@ -1015,7 +1015,8 @@ mod tests {
     }
 
     /// Checks that a replaced component whose clean-up code panics leaves every column at its new
-    /// length, since `push_into` drops it only once every component is stored
+    /// length, since `push_into` returns it once every component is stored, and the caller then
+    /// drops it
     #[test]
     fn push_into_with_panicking_replaced_component_leaves_every_column_at_new_length() {
         let volatile = ComponentInfo::of::<Volatile>(ComponentMask::single(0));

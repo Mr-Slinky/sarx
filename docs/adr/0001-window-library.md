@@ -12,8 +12,8 @@ Sarx needs a window to draw into. It also needs an event loop. An event loop is 
 receives input and other events from the operating system and passes them on to the game.
 
 Structure is code that other code builds on. The event loop is the first piece of structure in
-`atum`. The GPU setup already builds on it, and the fixed-step simulation will build on it in a
-later step.
+`atum`. The GPU setup builds on it. The fixed-step simulation builds on it as well, since
+`App::draw_frame` in `crates/atum/src/app.rs` advances the simulation on each frame.
 
 Sarx is built and tested on Windows, as ADR 0003 records. A port to another platform stays possible,
 though none is planned.

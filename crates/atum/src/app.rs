@@ -4,8 +4,11 @@
 //! closing the window, winit calls a method on [`App`].
 //!
 //! The `App` owns the window, together with the [`Renderer`] that draws into it. Each method passes
-//! its event on to the renderer, stores the cursor's position, prints the event, or ends the
+//! its event on to the renderer, draws a frame, stores the cursor's position, prints the event, or
+//! ends the program. Where the renderer fails, the method prints the error before it ends the
 //! program.
+//!
+//! The example on [`App`] hands it to winit's event loop.
 
 use crate::executor::block_on;
 use crate::input;
@@ -24,8 +27,8 @@ use zurvan::{HandPoses, Pose, Simulation};
 
 /// Owns the window and the renderer, and defines the methods that winit calls for each event.
 ///
-/// `App::new()` builds the camera and the simulation, and leaves the window and the renderer as
-/// `None`. The first call to `resumed` then creates both.
+/// [`App::new`] reads the hand model, then builds the camera and the simulation from it. It leaves
+/// the window and the renderer as `None`, and the first call to `resumed` then creates both.
 ///
 /// # Examples
 ///
@@ -35,7 +38,7 @@ use zurvan::{HandPoses, Pose, Simulation};
 /// ```ignore
 /// // Creates the event loop, then hands it a new `App` with no window or renderer yet
 /// let event_loop = EventLoop::new()?;
-/// let mut app = App::new();
+/// let mut app = App::new()?;
 /// event_loop.run_app(&mut app)?;
 /// ```
 pub(crate) struct App {
@@ -72,6 +75,15 @@ impl App {
         (KeyCode::Digit4, "thumbs_up"),
     ];
 
+    /// Returns an `App` with the hand model read, the hand's poses handed to a new simulation, and
+    /// the camera in place. The window and the renderer stay `None` until the first `resumed`.
+    ///
+    /// The example on [`App`] shows a call.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error where the hand model cannot be read, or where it lacks one of the poses
+    /// that `IDLE_POSES` and `ACTION_KEYS` name.
     pub(crate) fn new() -> Result<Self, Box<dyn Error>> {
         let hand_model = hermes::read_model(Self::HAND_MODEL)?;
         let poses = Self::build_hand_poses(&hand_model)?;
@@ -87,6 +99,13 @@ impl App {
         })
     }
 
+    /// Returns the hand's poses from `model`: its rest pose, built from each bone's rest rotation,
+    /// then the idle poses and the action poses, in the order that `IDLE_POSES` and `ACTION_KEYS`
+    /// list them.
+    ///
+    /// # Errors
+    ///
+    /// Returns a message naming the first pose that `model` lacks.
     fn build_hand_poses(model: &Model) -> Result<HandPoses, String> {
         // Converts each bone's rest rotation into a glam quaternion
         let rest_rotations = model
@@ -114,6 +133,12 @@ impl App {
         })
     }
 
+    /// Returns the pose called `name` in `model`, with one rotation for each bone. A bone that the
+    /// pose leaves out takes its rest rotation.
+    ///
+    /// # Errors
+    ///
+    /// Returns a message naming the pose where `model` has no pose called `name`.
     fn find_pose(model: &Model, name: &str) -> Result<Pose, String> {
         let Some(pose) = model.poses.iter().find(|pose| pose.name == name) else {
             return Err(format!("the hand model has no pose named '{name}'"));
@@ -128,6 +153,12 @@ impl App {
         Ok(Pose(rotations))
     }
 
+    /// Advances the simulation by the time since the last frame, draws the frame, and asks winit
+    /// for the next one.
+    ///
+    /// Before it advances the simulation, the method aims the hand at the point under the cursor.
+    /// It does nothing until the window and the renderer both exist. Where the renderer fails,
+    /// it prints the error and ends the program.
     fn draw_frame(&mut self, event_loop: &ActiveEventLoop) {
         // Skips the frame until both the window and the renderer exist
         let (Some(window), Some(renderer)) = (&self.window, self.renderer.as_mut()) else {

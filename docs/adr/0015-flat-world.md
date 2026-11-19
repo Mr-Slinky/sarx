@@ -63,8 +63,9 @@ each point of the grid. The grid lies flat. Each height lifts the ground at its 
 
 ### Confirmation
 
-Nothing in the code embodies this decision yet. The ray from the cursor meets a flat ground plane at
-height zero, and no crate stores terrain heights.
+Nothing in the code embodies this decision yet. `find_hand_target` in `crates/atum/src/input.rs`
+aims the hand at the point where the ray from the cursor falls to one fixed height,
+`Simulation::HOVER_HEIGHT`. No crate stores terrain heights.
 
 The foundation work ends with lit heightmap terrain on screen. Once that step is done,
 a reader can confirm the decision. They check that the terrain stores one height for each point of a

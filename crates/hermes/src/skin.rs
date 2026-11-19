@@ -1,3 +1,5 @@
+//! Reads the skin, which ties the vertices of a mesh to a skeleton of bones.
+
 use crate::GltfError;
 use crate::model::find_buffer;
 use gltf::{Gltf, Primitive, Skin};
@@ -11,21 +13,38 @@ const IDENTITY: [[f32; 4]; 4] = [
     [0.0, 0.0, 0.0, 1.0],
 ];
 
+/// Stores the skeleton of a model, and the bones that each vertex of its mesh follows.
+///
+/// `joints` and `weights` have one entry for each vertex, in the order of the mesh's vertices. The
+/// [crate documentation](crate#skin) explains how a vertex follows its bones, and the example on
+/// [`read_model`](crate::read_model) reads a skin.
 pub struct SkinData {
+    /// Stores the numbers of the four bones that each vertex follows, as positions in `bones`.
     pub joints: Vec<[u16; 4]>,
+    /// Stores how strongly each vertex follows each of its four bones, in the order of `joints`.
     pub weights: Vec<[f32; 4]>,
     pub bones: Vec<BoneData>,
 }
 
+/// Describes one bone of a skeleton, and its place at rest.
+///
+/// `translation`, `rotation` and `scale` give the bone's place at rest, relative to its parent node
+/// in the file. The [crate documentation](crate#skin) explains the inverse bind matrix.
 pub struct BoneData {
     pub name: String,
+    /// Stores the position in [`SkinData::bones`] of the bone's parent, which lies before this
+    /// bone, or `None` if the bone has no parent node or its parent node is not a bone.
     pub parent: Option<usize>,
     pub translation: [f32; 3],
+    /// Stores the rotation as a quaternion, in the order `[x, y, z, w]`.
     pub rotation: [f32; 4],
     pub scale: [f32; 3],
+    /// Stores the inverse bind matrix as sixteen floats, with its four columns end to end.
     pub inverse_bind: [f32; 16],
 }
 
+/// Returns the node number of the parent of each node in `gltf`, indexed by node number. A node
+/// with no parent takes `None`.
 fn find_parent_nodes(gltf: &Gltf) -> Vec<Option<usize>> {
     // Starts with no parent for every node in the file
     let mut parent_nodes = vec![None; gltf.nodes().len()];
@@ -42,6 +61,11 @@ fn find_parent_nodes(gltf: &Gltf) -> Vec<Option<usize>> {
     parent_nodes
 }
 
+/// Checks that a list in the skin has `found` entries, where it must have `expected`.
+///
+/// # Errors
+///
+/// Returns [`GltfError::SkinCountMismatch`] if the two counts differ.
 fn ensure_count(expected: usize, found: usize) -> Result<(), GltfError> {
     if expected != found {
         return Err(GltfError::SkinCountMismatch { expected, found });
@@ -51,6 +75,17 @@ fn ensure_count(expected: usize, found: usize) -> Result<(), GltfError> {
     Ok(())
 }
 
+/// Reads every bone of `skin`, in the order that the skin lists them, from `gltf` and its block of
+/// bytes `binary`.
+///
+/// A skin that leaves out its inverse bind matrices gives every bone the identity matrix, as glTF
+/// specifies.
+///
+/// # Errors
+///
+/// Returns [`GltfError::SkinCountMismatch`] if the skin has a different number of inverse bind
+/// matrices from its number of bones. Returns [`GltfError::ParentAfterChild`] if a bone comes
+/// before its parent.
 fn read_bones(gltf: &Gltf, skin: &Skin, binary: &[u8]) -> Result<Vec<BoneData>, GltfError> {
     // Lists the node number of each bone, in bone order
     let bone_nodes: Vec<usize> = skin.joints().map(|node| node.index()).collect();
@@ -108,6 +143,19 @@ fn read_bones(gltf: &Gltf, skin: &Skin, binary: &[u8]) -> Result<Vec<BoneData>, 
     Ok(bones)
 }
 
+/// Reads the first skin in `gltf`, along with the bone numbers and weights of each vertex of
+/// `primitive`, from the block of bytes `binary`.
+///
+/// `vertex_count` is the number of vertices in the primitive, which the bone numbers and the
+/// weights must each match.
+///
+/// # Errors
+///
+/// Returns [`GltfError::MissingSkin`] if the file has no skin, or the primitive has no bone
+/// numbers or weights that the `gltf` crate can reach. Returns [`GltfError::SkinCountMismatch`] if
+/// a list has the wrong length, and [`GltfError::JointOutOfRange`] if a vertex names a bone number
+/// past the last bone. Also returns [`GltfError::ParentAfterChild`] if a bone comes before its
+/// parent.
 pub(crate) fn read_skin(
     gltf: &Gltf,
     primitive: &Primitive,
@@ -153,6 +201,12 @@ pub(crate) fn read_skin(
     })
 }
 
+/// Returns the node number of each bone in the first skin of `gltf`, in the order that the skin
+/// lists its bones.
+///
+/// # Errors
+///
+/// Returns [`GltfError::MissingSkin`] if the file has no skin.
 pub(crate) fn find_bone_nodes(gltf: &Gltf) -> Result<Vec<usize>, GltfError> {
     // Takes the first skin in the file
     let skin = gltf.skins().next().ok_or(GltfError::MissingSkin)?;

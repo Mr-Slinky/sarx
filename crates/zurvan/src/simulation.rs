@@ -1,3 +1,5 @@
+//! Defines the simulation, which advances the god's hand in fixed steps.
+
 use crate::HandPoses;
 use crate::components::{Bones, Idle, PoseGoal, Position, Speed, Target, Velocity};
 use crate::random::Random;
@@ -6,6 +8,56 @@ use enki::{Entity, World};
 use glam::{Quat, Vec3};
 use std::time::Duration;
 
+/// Advances the god's hand through the game, one fixed step at a time.
+///
+/// A caller builds the simulation from the hand's poses with [`new`](Self::new). On each frame,
+/// the caller then sets the point that the hand moves towards, advances the simulation by the time
+/// that has passed, and reads the hand's position and bone rotations back to draw it.
+///
+/// # Examples
+///
+/// The example builds a hand with one bone and moves it to a point 5 units away. It then holds an
+/// action pose until the bone reaches it, and releases the pose.
+///
+/// ```
+/// use glam::{Quat, Vec3};
+/// use std::time::Duration;
+/// use zurvan::{HandPoses, Pose, Simulation};
+///
+/// // Builds the poses of a hand with one bone, which rests unturned, idles between two tilts and
+/// // has one action pose, a twist
+/// let twist = Quat::from_rotation_y(1.0);
+/// let poses = HandPoses {
+///     rest: Pose(vec![Quat::IDENTITY]),
+///     idle: vec![
+///         Pose(vec![Quat::from_rotation_x(0.5)]),
+///         Pose(vec![Quat::from_rotation_x(-0.5)]),
+///     ],
+///     actions: vec![Pose(vec![twist])],
+/// };
+/// let mut simulation = Simulation::new(poses);
+///
+/// // Sets a target 5 units from where the hand starts, at the same height
+/// let target = Vec3::new(3.0, Simulation::HOVER_HEIGHT, 4.0);
+/// simulation.set_hand_target(target);
+///
+/// // Advances by 200 ms, which runs 11 steps. The hand reaches the target in 6 and stops there
+/// simulation.advance(Duration::from_millis(200));
+/// assert!(simulation.hand_position().abs_diff_eq(target, 1e-4));
+///
+/// // Holds the twist, then advances by 2 seconds, one frame of 250 ms at a time, while the bone
+/// // turns onto it
+/// simulation.hold_pose(0);
+/// for _ in 0..8 {
+///     simulation.advance(Duration::from_millis(250));
+/// }
+/// assert_eq!(simulation.find_bone_rotations(), &[twist]);
+///
+/// // Releases the twist, after which the bone turns away from it, towards an idle pose
+/// simulation.release_pose();
+/// simulation.advance(Simulation::STEP);
+/// assert_ne!(simulation.find_bone_rotations(), &[twist]);
+/// ```
 pub struct Simulation {
     world: World,
     hand: Entity,
@@ -21,10 +73,25 @@ impl Simulation {
     pub const STEP: Duration = Duration::from_nanos(16_666_667);
     // Defines the most elapsed time that one call to `advance` adds to `unsimulated`.
     const MAX_ELAPSED: Duration = Duration::from_millis(250);
+    /// Defines the height, in world units, at which the hand starts and hovers.
     pub const HOVER_HEIGHT: f32 = 1.0;
+    /// Defines the hand's top speed, in world units per second.
     const HAND_SPEED: f32 = 50.0;
     const RANDOM_SEED: u32 = 0x9E37_79B9;
 
+    /// Returns a simulation with the hand still, at [`HOVER_HEIGHT`](Self::HOVER_HEIGHT) above the
+    /// origin, and no time left over.
+    ///
+    /// The hand's bones start in the rest pose, and turn towards the first idle pose from the first
+    /// step. The hand's target is the point where it starts. The hand therefore stays still until a
+    /// caller sets another target.
+    ///
+    /// The example on [`Simulation`] shows a call.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `poses` has no idle pose. Also panics if an idle or action pose has a different
+    /// number of rotations from the rest pose.
     pub fn new(poses: HandPoses) -> Self {
         assert!(
             !poses.idle.is_empty(),
@@ -65,6 +132,15 @@ impl Simulation {
         }
     }
 
+    /// Makes the action pose at position `action` in [`HandPoses::actions`] the hand's goal, and
+    /// pauses the idle cycle.
+    ///
+    /// The bones then turn towards that pose on each step, and stay on it until a call to
+    /// [`release_pose`](Self::release_pose). The example on [`Simulation`] shows a call.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `action` is not below the number of action poses.
     pub fn hold_pose(&mut self, action: usize) {
         let pose = &self.poses.actions[action];
         let goal = self
@@ -80,6 +156,11 @@ impl Simulation {
         idle.0 = None;
     }
 
+    /// Makes an idle pose, picked at random, the hand's goal, and resumes the idle cycle from that
+    /// pose.
+    ///
+    /// The simulation seeds its picks with a fixed number. Every run therefore picks the same
+    /// sequence of idle poses. The example on [`Simulation`] shows a call.
     pub fn release_pose(&mut self) {
         let next = self.random.pick_below(self.poses.idle.len());
         let pose = &self.poses.idle[next];
@@ -96,6 +177,8 @@ impl Simulation {
         idle.0 = Some(next);
     }
 
+    /// Returns the current rotation of each bone of the hand, relative to its parent, in the order
+    /// of the rest pose.
     pub fn find_bone_rotations(&self) -> &[Quat] {
         let bones = self
             .world
@@ -104,6 +187,10 @@ impl Simulation {
         &bones.0
     }
 
+    /// Sets `point` as the hand's target.
+    ///
+    /// The hand stays where it is until the next step. From then on, it moves towards `point` at
+    /// no more than its top speed, and stops on it.
     pub fn set_hand_target(&mut self, point: Vec3) {
         let target = self
             .world
@@ -121,6 +208,14 @@ impl Simulation {
         position.0
     }
 
+    /// Runs as many steps as `elapsed` calls for, and keeps the time left over for the next call.
+    ///
+    /// The simulation adds `elapsed` to the time that no step has used yet, but adds at most
+    /// 250 ms in one call. It then runs one step for each whole [`STEP`](Self::STEP) in that total.
+    /// A call that brings the total to less than one step runs no step.
+    ///
+    /// The cap discards the time beyond 250 ms. As a result, a device too slow to keep up runs the
+    /// game in slow motion, rather than falling further behind on every frame.
     pub fn advance(&mut self, elapsed: Duration) {
         self.unsimulated += elapsed.min(Self::MAX_ELAPSED);
         while self.unsimulated >= Self::STEP {
@@ -129,6 +224,7 @@ impl Simulation {
         }
     }
 
+    /// Runs each system once, in the order that the crate documentation sets out.
     fn step(&mut self) {
         let step_seconds = Self::STEP.as_secs_f32();
         steering(&mut self.world, step_seconds);
@@ -330,7 +426,7 @@ mod tests {
     }
 
     /// Checks that the hand closes on its target every step, never passes it, and comes to rest
-    /// on it. The target lies 5 units away, which takes 15 steps at full speed
+    /// on it. The target lies 5 units away, which takes 6 steps at full speed
     #[test]
     fn advance_with_enough_steps_reaches_target_without_overshoot() {
         let mut simulation = Simulation::new(build_poses());

@@ -76,7 +76,7 @@ The workspace contains five crates:
 | `enki`      | The entity component system                                     |
 | `zurvan`    | The game simulation, which does not depend on any graphics code |
 | `amaterasu` | The wgpu renderer                                               |
-| `hermes`    | The glTF reader, which reads meshes from binary glTF files      |
+| `hermes`    | The glTF reader, which reads meshes, skeletons and poses        |
 | `atum`      | The program that opens the window and runs the game             |
 
 Crates are added to the project as it needs them.

@@ -141,9 +141,11 @@ measurement replaces it once the central AI exists.
 
 ### Confirmation
 
-A reader confirms this decision in `enki`. There, the ECS stores the components of each entity
-in the table of its archetype, with one column per component type. A query there hands a system one
-slice per component type for each table, and the row iterator builds on those slices.
+The code follows this decision. A reader confirms it in `enki`. There, `Archetype` in
+`crates/enki/src/archetype.rs` stores the components of each entity in the table of its archetype,
+with one column per component type. `World::query_archetype_mut` in `crates/enki/src/world.rs`
+hands a system one slice per component type for each table. `World::query_mut`, the row iterator,
+builds on those slices through `Query::split_rows`.
 
 ## Pros and Cons of the Options
 

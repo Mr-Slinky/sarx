@@ -2,7 +2,7 @@
 //!
 //! A [`GpuContext`] opens the connection once, when the [`Renderer`](crate::Renderer) is created,
 //! and keeps it for as long as the renderer exists. It also creates every GPU object that the
-//! renderer draws with, such as buffers, shaders and the pipeline.
+//! renderer draws with, such as buffers, shaders and the pipelines.
 //!
 //! A [`SurfaceContext`] stores the surface, which is the part of a window that the GPU draws into.
 //! Unlike the connection, a surface can be lost and replaced while the program runs. The
@@ -10,15 +10,30 @@
 //!
 //! # Examples
 //!
-//! `Renderer::new` connects to the GPU, then creates the objects that each frame draws with.
+//! `Renderer::new` connects to the GPU, then creates the objects that each frame draws with. The
+//! example follows the ground from its mesh to its pipeline.
 //!
 //! ```ignore
 //! // Connects to a GPU that can draw to the window, and configures the window's surface
 //! let gpu = GpuContext::new(window, width, height).await?;
 //!
-//! // Compiles the shader, then builds the pipeline around it and the two uniform layouts
+//! // Creates the layouts that the shader reads the scene uniforms and the object uniforms through
+//! let scene_layout = gpu.create_uniform_layout("Scene layout");
+//! let object_layout = gpu.create_uniform_layout("Object layout");
+//!
+//! // Copies the ground's mesh into GPU memory, with a uniform buffer that follows `object_layout`
+//! let ground_mesh = Mesh::build_ground(50.0);
+//! let ground = gpu.create_render_object("Ground", &ground_mesh, &object_layout);
+//!
+//! // Compiles the shader, then builds the ground's pipeline from `vs_static` and `fs_ground`, with
+//! // the scene uniforms at group 0 and the object uniforms at group 1
 //! let shader = gpu.create_shader("Lit shader", shader_source);
-//! let pipeline = gpu.create_pipeline(&shader, &scene_layout, &object_layout);
+//! let ground_pipeline = gpu.create_pipeline::<Vertex>(
+//!     "Ground pipeline",
+//!     &shader,
+//!     ("vs_static", "fs_ground"),
+//!     &[&scene_layout, &object_layout],
+//! );
 //! ```
 
 use std::borrow::Cow;
@@ -61,7 +76,7 @@ pub(crate) struct GpuContext {
     /// The queue that sends recorded commands to the GPU.
     pub(crate) queue: Queue,
     /// The pixel format of the first surface. A pixel format sets how each pixel's colour is laid
-    /// out in memory. `create_pipeline` builds the pipeline for this format, and every later
+    /// out in memory. `create_pipeline` builds every pipeline for this format, and every later
     /// surface therefore takes it too.
     format: TextureFormat,
     /// Stores `true` once the connection to the GPU has died, for example after a driver reset.
@@ -78,6 +93,8 @@ impl GpuContext {
     /// is called anti-aliasing.
     const SAMPLE_COUNT: u32 = 4;
 
+    /// The pixel format of the depth texture, which stores how far each sample lies from the
+    /// camera as one 32-bit float.
     const DEPTH_FORMAT: TextureFormat = TextureFormat::Depth32Float;
     // ====================================================================================== \\
     //                                      Constructors                                      \\
@@ -234,7 +251,7 @@ impl GpuContext {
     ///
     /// Returns `RendererError::Surface` where wgpu cannot create the new surface. Returns
     /// `RendererError::UnsupportedSurface` where the GPU cannot draw to the new surface in the
-    /// pixel format that the pipeline was built for.
+    /// pixel format that the pipelines were built for.
     ///
     /// # Examples
     ///
@@ -275,7 +292,7 @@ impl GpuContext {
 
     /// Creates a surface for `window` at `width` by `height` pixels.
     ///
-    /// The surface takes the pixel format that the pipeline is built for.
+    /// The surface takes the pixel format that the pipelines are built for.
     ///
     /// # Errors
     ///
@@ -336,6 +353,10 @@ impl GpuContext {
         self.device.create_buffer_init(&descriptor)
     }
 
+    /// Copies the indices of `mesh` into a new index buffer, and returns the buffer.
+    ///
+    /// An index buffer is a buffer that a draw reads its triangle list from. A render pass reads
+    /// this one as `IndexFormat::Uint32`.
     pub(crate) fn create_index_buffer<V: GpuVertex>(&self, mesh: &Mesh<V>) -> Buffer {
         // Describes an index buffer, filled with the mesh's triangle list as bytes
         let descriptor = BufferInitDescriptor {
@@ -347,6 +368,11 @@ impl GpuContext {
         self.device.create_buffer_init(&descriptor)
     }
 
+    /// Creates an empty uniform buffer of `size` bytes, and returns the buffer.
+    ///
+    /// A uniform buffer stores values that stay the same for every vertex and every pixel of a
+    /// draw, such as the camera's matrix. The caller fills it with `Queue::write_buffer`. `label`
+    /// identifies the buffer in wgpu's error messages and in GPU debugging tools.
     pub(crate) fn create_uniform_buffer(&self, label: &str, size: usize) -> Buffer {
         // Describes an empty uniform buffer of `size` bytes, which `write_buffer` can copy into
         let descriptor = BufferDescriptor {
@@ -359,6 +385,14 @@ impl GpuContext {
         self.device.create_buffer(&descriptor)
     }
 
+    /// Creates a bind group layout with one uniform buffer at binding 0, and returns the layout.
+    ///
+    /// A bind group hands a set of buffers to the shader, and its layout describes what the bind
+    /// group contains. Both the vertex shader and the fragment shader can read the buffer that a
+    /// bind group of this layout contains. A pipeline lists one layout for each group that its
+    /// shader reads.
+    ///
+    /// The [module example](crate::context#examples) creates two layouts.
     pub(crate) fn create_uniform_layout(&self, label: &str) -> BindGroupLayout {
         // Describes binding 0 as one uniform buffer, which both the vertex and fragment shaders read
         let entry = BindGroupLayoutEntry {
@@ -380,6 +414,14 @@ impl GpuContext {
         self.device.create_bind_group_layout(&descriptor)
     }
 
+    /// Copies `mesh` into GPU memory, and returns a [`RenderObject`] that a render pass can draw.
+    ///
+    /// The object takes a vertex buffer and an index buffer for the mesh, and a uniform buffer
+    /// sized for one `ObjectUniforms`. Its bind group hands that uniform buffer to the shader, and
+    /// follows `obj_layout`. `label` identifies the uniform buffer and the bind group in wgpu's
+    /// error messages.
+    ///
+    /// The [module example](crate::context#examples) creates the ground's render object.
     pub(crate) fn create_render_object<V: GpuVertex>(
         &self,
         label: &str,
@@ -400,6 +442,11 @@ impl GpuContext {
         }
     }
 
+    /// Creates a bind group that follows `layout`, with the whole of `buffer` at binding 0, and
+    /// returns the bind group.
+    ///
+    /// A render pass hands the bind group to the shader with `set_bind_group`, at the group that
+    /// the pipeline lists `layout` for.
     pub(crate) fn create_bind_group(
         &self,
         label: &str,
@@ -446,12 +493,19 @@ impl GpuContext {
         self.device.create_shader_module(descriptor)
     }
 
-    /// Builds the lit pipeline, which draws a `Mesh` in one colour, shaded by a single light.
+    /// Builds a pipeline that draws a `Mesh<V>`, and returns it.
     ///
-    /// The pipeline runs two functions from `shader`. `vs_main` runs once for each vertex, and
-    /// places the vertex in the window. `fs_main` runs once for each pixel that the mesh covers,
-    /// and returns the pixel's colour. The shader reads the scene uniforms through `scene_layout`
-    /// at group 0, and the object uniforms through `object_layout` at group 1.
+    /// A pipeline is the set of settings that the GPU follows to draw a mesh. It reads each vertex
+    /// through `V::LAYOUT`.
+    ///
+    /// The pipeline runs two functions from `shader`, which `entry_points` gives by name: the
+    /// vertex function first, then the fragment function. The vertex function runs once for each
+    /// vertex, and places the vertex in the window. The fragment function runs once for each pixel
+    /// that the mesh covers, and returns the pixel's colour. `lit.wgsl` defines `vs_static` as a
+    /// vertex function, and `fs_lit` and `fs_ground` as fragment functions.
+    ///
+    /// `layouts` lists the bind group layouts in group order, meaning the first serves group 0.
+    /// `label` identifies the pipeline in wgpu's error messages and in GPU debugging tools.
     ///
     /// The pipeline writes colour into textures in the surface's pixel format, taking
     /// `SAMPLE_COUNT` samples for each pixel. It also tests and writes depth in `DEPTH_FORMAT`,
@@ -459,12 +513,20 @@ impl GpuContext {
     ///
     /// # Examples
     ///
-    /// The example builds the pipeline, then hands it to a render pass.
+    /// The example builds the hand's pipeline, then hands it to a render pass.
     ///
     /// ```ignore
-    /// // Builds the pipeline, then selects it for the draws that follow in the render pass
-    /// let pipeline = gpu.create_pipeline(&shader, &scene_layout, &object_layout);
-    /// render_pass.set_pipeline(&pipeline);
+    /// // Builds a pipeline that reads plain vertices and draws the hand in one colour, with the
+    /// // scene uniforms at group 0 and the object uniforms at group 1
+    /// let hand_pipeline = gpu.create_pipeline::<Vertex>(
+    ///     "Hand pipeline",
+    ///     &shader,
+    ///     ("vs_static", "fs_lit"),
+    ///     &[&scene_layout, &object_layout],
+    /// );
+    ///
+    /// // Selects the pipeline for the draws that follow in the render pass
+    /// render_pass.set_pipeline(&hand_pipeline);
     /// ```
     pub(crate) fn create_pipeline<V: GpuVertex>(
         &self,
@@ -550,8 +612,8 @@ impl GpuContext {
     // ====================================================================================== \\
     /// Creates a `SurfaceContext` for `window`, at `width` by `height` pixels.
     ///
-    /// It creates the surface, checks that the surface supports the pixel format that the pipeline
-    /// was built for, and configures it in that format. Last, it creates a multisampled texture and
+    /// It creates the surface, checks that the surface supports the pixel format that the
+    /// pipelines were built for, and configures it in that format. Last, it creates a multisampled texture and
     /// a depth texture to match the surface.
     ///
     /// # Errors
@@ -594,10 +656,15 @@ impl GpuContext {
 ///
 /// The renderer replaces all of these parts together, whenever it replaces the surface.
 pub(crate) struct SurfaceContext {
+    /// The window that the surface belongs to, kept so that `GpuContext::recreate` can create a
+    /// new surface for it.
     window: Arc<dyn DisplayAndWindowHandle>,
     pub(crate) surface: Surface<'static>,
     pub(crate) config: SurfaceConfiguration,
+    /// A view of the multisampled texture, which each frame draws into before the GPU averages
+    /// its samples into the surface's texture.
     pub(crate) msaa_view: TextureView,
+    /// A view of the depth texture, which the depth test reads and writes during each frame.
     pub(crate) depth_view: TextureView,
 }
 
@@ -720,6 +787,11 @@ impl SurfaceContext {
         texture.create_view(&TextureViewDescriptor::default())
     }
 
+    /// Creates a depth texture to match the surface, and returns a view of it.
+    ///
+    /// The texture has the size of the surface, and stores one depth in
+    /// `GpuContext::DEPTH_FORMAT` for each of `GpuContext::SAMPLE_COUNT` samples per pixel. Its
+    /// sample count matches the multisampled texture, as a render pass requires of the two.
     fn create_depth_view(device: &Device, config: &SurfaceConfiguration) -> TextureView {
         let size = Extent3d {
             width: config.width,

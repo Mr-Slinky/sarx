@@ -97,7 +97,7 @@ pub struct Renderer {
 }
 
 impl Renderer {
-    /// The dark blue that fills each frame before the renderer draws the hand.
+    /// The dark blue that fills each frame before the renderer draws the ground and the hand.
     const CLEAR_COLOUR: Color = Color {
         r: 0.1,
         g: 0.2,
@@ -116,10 +116,13 @@ impl Renderer {
 
     /// Creates a renderer that draws `hand` into `window`, at `width` by `height` pixels.
     ///
-    /// `new` first connects to a GPU that can draw to the window. It then copies the hand's mesh
-    /// into GPU memory, creates the buffers that the shader reads the camera and the light from,
-    /// and compiles the shader. Last, it builds the pipeline, which is the set of settings that the
-    /// GPU follows to draw the hand.
+    /// `new` first connects to a GPU that can draw to the window. It then builds a square of
+    /// ground, copies its mesh and the hand's mesh into GPU memory, creates the buffers that the
+    /// shader reads the camera and the light from, and compiles the shader.
+    ///
+    /// Last, it builds two pipelines. A pipeline is the set of settings that the GPU follows to
+    /// draw a mesh. The ground's pipeline draws the ground with a checker of light and dark
+    /// squares, and the hand's pipeline draws the hand in one colour.
     ///
     /// # Errors
     ///
@@ -241,7 +244,7 @@ impl Renderer {
     /// Returns a `RendererError` in each of these cases:
     ///
     /// - wgpu cannot create the surface.
-    /// - The GPU cannot draw to the surface in the pixel format that the pipeline was built for.
+    /// - The GPU cannot draw to the surface in the pixel format that the pipelines were built for.
     ///
     /// # Examples
     ///
@@ -289,7 +292,7 @@ impl Renderer {
     /// Returns a `RendererError` after wgpu reports the surface lost, in each of these cases:
     ///
     /// - wgpu cannot create the new surface.
-    /// - The GPU cannot draw to the new surface in the pixel format that the pipeline was built
+    /// - The GPU cannot draw to the new surface in the pixel format that the pipelines were built
     ///   for.
     ///
     /// # Examples

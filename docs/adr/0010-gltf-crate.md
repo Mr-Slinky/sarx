@@ -42,7 +42,8 @@ How does Sarx read a glTF file?
   teach.
 - The hand-written reader has taught how a mesh is laid out in bytes. A vertex buffer in wgpu uses
   the same terms: a byte offset, a stride and a number type for each attribute.
-- The skin and the poses are the next work on the hand, and the reader does not read them yet.
+- The skin and the poses were the next work on the hand, and the hand-written reader did not read
+  them.
 - The renderer and the program that runs the game should depend on Sarx's own types for a mesh, a
   skeleton and a pose. A change of glTF library then stays inside one crate.
 
@@ -57,15 +58,15 @@ How does Sarx read a glTF file?
 Chosen option: "The `gltf` crate, behind `hermes`", because the hand-written reader has already
 taught the byte layout, and the crate reads the skin and the animations that the hand needs next.
 
-The `gltf` crate reads every part of a glTF file. `hermes` will pass the file to the crate, and turn
-what the crate returns into Sarx's own types. `MeshData` is the first of those types, and a skeleton
-and a pose will follow once the hand animates. `amaterasu` and `atum` keep calling `hermes`, and will
-not depend on `gltf`.
+The `gltf` crate reads every part of a glTF file. `hermes` passes the file to the crate, and turns
+what the crate returns into Sarx's own types: `MeshData` for the shape, `SkinData` and `BoneData`
+for the skeleton, and `PoseData` for each pose. `amaterasu` and `atum` call `hermes`, and do not
+depend on `gltf`.
 
 The function below shows how `hermes` could read the vertex positions of a mesh through the crate.
 A reader that the crate builds follows each accessor into the block of bytes. The function returns
-`None` wherever the file lacks a part, and the real code will return an error that names the part
-instead.
+`None` wherever the file lacks a part. The real code, `read_mesh` in `crates/hermes/src/model.rs`,
+returns a `GltfError` that names the part instead.
 
 ```rust
 fn read_positions(file: &[u8]) -> Option<Vec<[f32; 3]>> {
@@ -84,7 +85,7 @@ fn read_positions(file: &[u8]) -> Option<Vec<[f32; 3]>> {
 }
 ```
 
-`hermes` will turn off the crate's default features. Those features load a `.gltf` file whose
+`hermes` turns off the crate's default features. Those features load a `.gltf` file whose
 buffers and textures lie in separate files, and they bring in a library for decoding images. Sarx
 loads `.glb` files alone, and the reader above works without those features.
 
@@ -118,20 +119,22 @@ stays the same.
 - Bad, because the crate hides how the skin and the animations are laid out in bytes. The developer
   learns their structure from the crate's types instead, which name the same parts that the glTF
   specification names.
-- Bad, because Sarx takes on the `gltf` crate, and through it `gltf-json`, `byteorder`, `serde` and
-  `serde_json`.
+- Bad, because Sarx takes on the `gltf` crate, and through it `gltf-json`, `gltf-derive`,
+  `byteorder`, `lazy_static`, `serde` and `serde_json`.
 - Bad, because the hand-written reader goes. Its code stays in the git history.
 
 ### Confirmation
 
-Nothing in the code acts on this decision yet, and `hermes` still reads the file by hand. Once
-`hermes` moves to the crate, a reader confirms the decision with three checks:
+`hermes` reads the file through the crate, and the hand-written reader has gone. A reader confirms
+the decision with three checks:
 
-- `hermes` depends on `gltf` with its default features turned off. No other crate in the workspace
-  depends on `gltf`.
-- The public types of `hermes` are Sarx's own, and none of them comes from `gltf`.
+- `hermes` depends on `gltf` with its default features turned off, as `crates/hermes/Cargo.toml`
+  shows. No other crate in the workspace depends on `gltf`.
+- The public types of `hermes` are Sarx's own, and none of them comes from `gltf`. One variant
+  differs: `GltfError::Gltf` in `crates/hermes/src/error.rs` wraps a `gltf::Error`.
 - `hermes` returns each animation as its channels. The pose code for the hand, rather than `hermes`,
-  picks out the rotations.
+  picks out the rotations. The code differs here: `read_pose` in `crates/hermes/src/pose.rs` keeps
+  the rotation channels alone, and `hermes` returns each pose as a `PoseData` of rotations.
 
 ## Pros and Cons of the Options
 

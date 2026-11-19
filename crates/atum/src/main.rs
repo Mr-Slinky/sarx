@@ -19,7 +19,8 @@ use app::App;
 ///
 /// # Panics
 ///
-/// Panics where winit cannot create the event loop, or where the event loop fails while it runs.
+/// Panics where winit cannot create the event loop, where [`App::new`] cannot set up the hand, or
+/// where the event loop fails while it runs.
 fn main() {
     let event_loop = EventLoop::new().expect("Failed to create the event loop");
     let mut app = App::new().expect("Failed to set up the hand");

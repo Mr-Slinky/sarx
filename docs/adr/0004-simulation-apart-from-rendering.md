@@ -65,10 +65,14 @@ move it with the cursor across a flat ground plane".
 
 Two questions remain open. This decision leaves both to a later discussion.
 
-- 60 steps per second is the proposed step rate. The developer has yet to settle it.
+- 60 steps per second is the proposed step rate. The developer has yet to settle it. The code
+  runs at that rate for now, since `Simulation::STEP` in `crates/zurvan/src/simulation.rs` is
+  16,666,667 ns.
 - The renderer can draw the latest state as it stands. It can also blend the two most recent
   states, by how far the clock has run into the next step. That blending is called interpolation.
-  The developer has yet to choose between these.
+  The developer has yet to choose between these. For now, the code draws the latest state:
+  `App::draw_frame` in `crates/atum/src/app.rs` passes the current position of the hand to
+  `Renderer::render`.
 
 ### Consequences
 
@@ -89,13 +93,16 @@ Two questions remain open. This decision leaves both to a later discussion.
 `cargo tree -p zurvan` does not list a graphics crate, such as `wgpu`, `winit` or `amaterasu`.
 The `[dependencies]` table in `crates/zurvan/Cargo.toml` shows the same.
 
-A reader also checks `Simulation` in `zurvan`, and the game loop in `atum`, for four points:
+A reader also checks `Simulation` in `crates/zurvan/src/simulation.rs`, and the game loop in
+`crates/atum/src/app.rs`, for four points. The code meets all four:
 
-- The step length is a single constant.
-- The function that advances the simulation by one step does not take elapsed frame time.
-- The game loop calls that function as many times as the clock calls for, separately from its call
-  to draw a frame.
-- The loop adds at most 250 ms to its running total in one frame.
+- The step length is a single constant, `Simulation::STEP`.
+- The function that advances the simulation by one step, `Simulation::step`, does not take elapsed
+  frame time.
+- `Simulation::advance` calls `step` as many times as the clock calls for. `App::draw_frame` calls
+  `advance` separately from its call to `Renderer::render`, which draws the frame.
+- `Simulation::advance` adds at most `Simulation::MAX_ELAPSED`, 250 ms, to its running total in one
+  frame.
 
 ## Pros and Cons of the Options
 

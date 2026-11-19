@@ -1,3 +1,6 @@
+//! Defines the systems that the simulation runs on each step, in the order that the crate
+//! documentation sets out.
+
 use crate::components::{Bones, Idle, PoseGoal, Position, Speed, Target, Velocity};
 use enki::World;
 use crate::Pose;
@@ -7,12 +10,22 @@ const POSE_FRACTION: f32 = 0.1;
 // The angle, in radians, below which a bone snaps onto its goal
 const SNAP_ANGLE: f32 = 0.5_f32.to_radians();
 
+/// Moves each entity that has a `Position` and a `Velocity` by its velocity times `step_seconds`.
 pub(crate) fn movement(world: &mut World, step_seconds: f32) {
     for (position, velocity) in world.query_mut::<(&mut Position, &Velocity)>() {
         position.0 += velocity.0 * step_seconds;
     }
 }
 
+/// Sets the velocity of each entity that has a `Position`, a `Target` and a `Speed`.
+///
+/// The velocity is the one that would carry the entity onto its target in one step of
+/// `step_seconds`, shortened to the entity's speed if it is faster. An entity within one step of
+/// its target therefore lands on it, and a further one moves towards it at full speed.
+///
+/// # Panics
+///
+/// Panics if `step_seconds` is not above 0, which includes NaN.
 pub(crate) fn steering(world: &mut World, step_seconds: f32) {
     // Guards callers inside this crate, which can pass any step. A step of 0 would divide the
     // offset by 0 and give every entity an infinite or NaN velocity
@@ -25,6 +38,8 @@ pub(crate) fn steering(world: &mut World, step_seconds: f32) {
     }
 }
 
+/// Turns each bone in `Bones` by `POSE_FRACTION` of the way towards its rotation in `PoseGoal`, and
+/// sets the bone to that rotation once it lies within `SNAP_ANGLE` of it.
 // Directs a hand model to a given pose
 pub(crate) fn posing(world: &mut World) {
     for (bones, goal) in world.query_mut::<(&mut Bones, &PoseGoal)>() {
@@ -42,6 +57,9 @@ pub(crate) fn posing(world: &mut World) {
     }
 }
 
+/// Copies the next pose in `idle_poses` into `PoseGoal` for each entity whose bones have all
+/// reached their goal, and records that pose in `Idle`. Wraps round to the first pose after the
+/// last, and leaves an entity whose `Idle` is `None` alone.
 // Moves a hand model through a set of idle poses
 pub(crate) fn idling(world: &mut World, idle_poses: &[Pose]) {
     for (idle, goal, bones) in world.query_mut::<(&mut Idle, &mut PoseGoal, &Bones)>() {

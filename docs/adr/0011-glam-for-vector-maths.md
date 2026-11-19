@@ -55,14 +55,15 @@ that follows.
 glam supplies the types that the hand step uses: `Vec3` for points, directions and normals, `Mat4`
 for the camera, and `Quat` for the rotations that ADR 0020 turns by slerp.
 
-The developer still builds each matrix, and decides what it contains. For example, the camera calls
-`Mat4::look_at_rh` for the view matrix and `Mat4::perspective_rh` for the projection matrix. The
-developer chooses where the camera stands, what it looks at, how wide it sees, and the order that
+The developer still builds each matrix, and decides what it contains. For example,
+`Camera::build_view_projection` in `crates/amaterasu/src/camera.rs` calls two functions from glam's
+`camera::rh` module: `view::look_at_mat4` for the view matrix, and `proj::directx::perspective` for
+the projection matrix. The developer chooses where the camera stands, what it looks at, how wide it sees, and the order that
 the shader multiplies the matrices in. glam performs the multiplication.
 
-`Mat4::perspective_rh` maps depth to the range from 0 to 1. wgpu uses the same range for its depth
-buffer. glam also offers `Mat4::perspective_rh_gl`, which maps depth from -1 to 1 for OpenGL. Sarx
-must use the version without `_gl`.
+`proj::directx::perspective` maps depth to the range from 0 to 1. wgpu uses the same range for its
+depth buffer. glam also offers `proj::opengl::perspective`, which maps depth from -1 to 1 for
+OpenGL. Sarx must use the `directx` version.
 
 ### Consequences
 
@@ -79,9 +80,10 @@ must use the version without `_gl`.
 
 ### Confirmation
 
-A reader confirms this decision with two checks:
+The code follows this decision. A reader confirms it with two checks:
 
-- The workspace depends on `glam`.
+- The workspace depends on `glam`. `amaterasu`, `atum` and `zurvan` each list it in their
+  `Cargo.toml`.
 - Sarx does not declare a vector or matrix type of its own.
 
 ## Pros and Cons of the Options

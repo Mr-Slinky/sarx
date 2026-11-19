@@ -130,7 +130,8 @@ A reader confirms this decision in `enki` with three checks:
 - `World::add_component` and the tuple implementations of `ComponentSet` take `T: Component`.
   `ComponentInfo::of` and the supertraits of `ComponentSet` are the two other places that spell out
   the bound.
-- A call to `add_component` with a tuple fails to compile.
+- A call to `add_component` with a tuple fails to compile. The `compile_fail` example on
+  `Component` in `crates/enki/src/component.rs` makes that call.
 
 ## Pros and Cons of the Options
 

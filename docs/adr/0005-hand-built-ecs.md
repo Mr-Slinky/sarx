@@ -53,8 +53,8 @@ Chosen option: "A hand-built ECS", because building the ECS is part of what Sarx
 and each ECS library brings its own architecture and hides the part that the developer wants to
 learn.
 
-The developer writes the ECS in the `enki` crate. Its first version moves the triangle from a
-fixed-step simulation. That version is built on the design that Sarx keeps, and later work adds to
+The developer writes the ECS in the `enki` crate. Its first version moves the god's hand from a
+fixed-step simulation, `Simulation` in `crates/zurvan/src/simulation.rs`. That version is built on the design that Sarx keeps, and later work adds to
 that design rather than replacing it.
 
 How the ECS stores its data is a separate decision. ADR 0007 records it.

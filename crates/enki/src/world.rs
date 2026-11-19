@@ -1066,8 +1066,8 @@ impl World {
     /// Where the first of two entities in the empty table moves to row 3 of table 1, the second
     /// entity fills row 0. `record_move` then points the first slot at table 1, row 3, and the
     /// second slot at row 0 of the empty table. The test
-    /// `despawn_with_first_row_updates_location_of_filling_entity` reaches it through
-    /// `despawn`.
+    /// `add_components_with_entity_leaving_first_row_updates_filling_entity` reaches it through
+    /// `add_components`.
     fn record_move(
         &mut self,
         moved_ent: Entity,

@@ -64,8 +64,8 @@ which ADR 0011 sets out. A `Mat4` field then counts as `Pod` inside a uniform st
 ### Consequences
 
 - Good, because a type with padding fails to compile, before it can reach the GPU.
-- Good, because a cast returns the bytes in place. A mesh of 13,192 vertices is not copied a second
-  time before wgpu copies it to the GPU.
+- Good, because a cast returns the bytes in place. The hand's mesh of 3,558 vertices is not copied a
+  second time before wgpu copies it to the GPU.
 - Good, because every type that the GPU reads uses the same two lines.
 - Bad, because bytemuck hides the `unsafe` cast. The developer does not write the code that turns a
   struct into bytes.
@@ -74,9 +74,11 @@ which ADR 0011 sets out. A `Mat4` field then counts as `Pod` inside a uniform st
 
 ### Confirmation
 
-A reader confirms this decision in `amaterasu` with two checks:
+The code follows this decision. A reader confirms it in `amaterasu` with two checks:
 
-- `Vertex` and each uniform struct take `#[repr(C)]`, and derive `Pod` and `Zeroable`.
+- `Vertex` in `crates/amaterasu/src/mesh.rs`, and the uniform structs `SceneUniforms` and
+  `ObjectUniforms` in `crates/amaterasu/src/uniform.rs`, take `#[repr(C)]`, and derive `Pod` and
+  `Zeroable`.
 - No type that the GPU reads has a `to_bytes` method of its own.
 
 ## Pros and Cons of the Options

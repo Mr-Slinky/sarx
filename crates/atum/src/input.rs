@@ -1,3 +1,7 @@
+//! Turns the player's input into targets for the simulation.
+//!
+//! [`find_hand_target`] turns the cursor's position on screen into the point where the hand aims.
+
 use glam::{Vec2, Vec3};
 use amaterasu::Camera;
 use zurvan::Simulation;

@@ -8,9 +8,10 @@ The list exists to guide design. The ECS is built for the systems that will run 
 developer or an agent designs a part of the ECS, or plans a feature, they read this list and check
 the design against the systems that it must serve.
 
-Two systems exist so far, in a first form. `steering` and `movement` in `zurvan` move the god's hand
-towards the cursor, through the `Position`, `Velocity`, `Target` and `Speed` components. Every other
-component name below, such as `Needs` or `Task`, is a working guess. The counts come from the limits that [ADR 0021](adr/0021-scale-target.md) sets:
+Four systems exist so far, in a first form, all in `zurvan`. `steering` and `movement` move the
+god's hand towards the cursor, through the `Position`, `Velocity`, `Target` and `Speed` components.
+`posing` turns each bone in `Bones` towards the rotations in `PoseGoal`, and `idling` uses the
+`Idle` component to cycle the hand through its idle poses. Every other component name below, such as `Needs` or `Task`, is a working guess. The counts come from the limits that [ADR 0021](adr/0021-scale-target.md) sets:
 50,000 villagers, 500,000 entities, and 15,000 villagers on screen at once.
 
 ## Keeping the List Current

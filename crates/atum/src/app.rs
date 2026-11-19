@@ -89,7 +89,9 @@ impl App {
 
     fn build_hand_poses(model: &Model) -> Result<HandPoses, String> {
         // Converts each bone's rest rotation into a glam quaternion
-        let rest_rotations = model.skin.bones
+        let rest_rotations = model
+            .skin
+            .bones
             .iter()
             .map(|bone| Quat::from_array(bone.rotation))
             .collect();

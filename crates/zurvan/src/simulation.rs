@@ -31,7 +31,7 @@ impl Simulation {
             "the hand needs at least one idle pose"
         );
         let rest_bone_count = poses.rest.0.len();
-        let mut every_pose  = poses.idle.iter().chain(&poses.actions);
+        let mut every_pose = poses.idle.iter().chain(&poses.actions);
         let all_match = every_pose.all(|pose| pose.0.len() == rest_bone_count);
         // Guards `posing`, which pairs each bone with one goal rotation
         assert!(
@@ -146,9 +146,22 @@ impl Simulation {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::pose::Pose;
 
     /// Sets the largest difference at which two floats count as equal
     const TOLERANCE: f32 = 1e-4;
+
+    /// Returns poses for a hand with one bone, which rests unturned and idles through two turns
+    fn build_poses() -> HandPoses {
+        HandPoses {
+            rest: Pose(vec![Quat::IDENTITY]),
+            idle: vec![
+                Pose(vec![Quat::from_rotation_x(0.5)]),
+                Pose(vec![Quat::from_rotation_x(-0.5)]),
+            ],
+            actions: vec![Pose(vec![Quat::from_rotation_y(1.0)])],
+        }
+    }
 
     /// Returns the target of the hand
     fn read_target(simulation: &Simulation) -> Vec3 {
@@ -194,7 +207,7 @@ mod tests {
         ];
 
         for (name, elapsed_times, expected) in cases {
-            let mut simulation = Simulation::new();
+            let mut simulation = Simulation::new(build_poses());
             let mut leftovers = Vec::new();
 
             for &elapsed in elapsed_times {
@@ -216,7 +229,7 @@ mod tests {
     /// distance it covers therefore counts the steps
     #[test]
     fn advance_with_elapsed_at_cap_runs_fourteen_steps() {
-        let mut simulation = Simulation::new();
+        let mut simulation = Simulation::new(build_poses());
         simulation.set_hand_target(Vec3::new(1000.0, 0.0, 0.0));
         let start = simulation.hand_position();
 
@@ -234,8 +247,8 @@ mod tests {
     /// Checks that a new simulation holds a still hand at the hover height above the origin,
     /// aiming at where it already is, with no time left over
     #[test]
-    fn new_with_no_args_starts_hand_at_rest_above_origin() {
-        let simulation = Simulation::new();
+    fn new_with_hand_poses_starts_hand_at_rest_above_origin() {
+        let simulation = Simulation::new(build_poses());
 
         let start = Vec3::new(0.0, Simulation::HOVER_HEIGHT, 0.0);
         let world = &simulation.world;
@@ -248,22 +261,6 @@ mod tests {
         assert_eq!(read_target(&simulation), start, "target");
         assert_eq!(speed, Some(Simulation::HAND_SPEED), "speed");
         assert_eq!(simulation.unsimulated, Duration::ZERO, "unsimulated time");
-    }
-
-    /// Checks that `Default` gives the same hand as `new`
-    #[test]
-    fn default_with_no_args_matches_new() {
-        let new = Simulation::new();
-
-        let default = Simulation::default();
-
-        assert_eq!(
-            default.hand_position(),
-            new.hand_position(),
-            "position"
-        );
-        assert_eq!(read_target(&default), read_target(&new), "target");
-        assert_eq!(default.unsimulated, new.unsimulated, "unsimulated time");
     }
 
     /// Checks that the target is the point given, and that the hand does not move until the
@@ -279,28 +276,20 @@ mod tests {
         ];
 
         for (name, point) in cases {
-            let mut simulation = Simulation::new();
+            let mut simulation = Simulation::new(build_poses());
             let start = simulation.hand_position();
 
             simulation.set_hand_target(point);
 
-            assert_eq!(
-                read_target(&simulation),
-                point,
-                "target for {name}"
-            );
-            assert_eq!(
-                simulation.hand_position(),
-                start,
-                "position for {name}"
-            );
+            assert_eq!(read_target(&simulation), point, "target for {name}");
+            assert_eq!(simulation.hand_position(), start, "position for {name}");
         }
     }
 
     /// Checks that the position returned is the one stored on the hand
     #[test]
     fn find_hand_position_with_moved_hand_returns_stored_position() {
-        let mut simulation = Simulation::new();
+        let mut simulation = Simulation::new(build_poses());
         let moved = Vec3::new(2.0, 1.0, -3.0);
         simulation
             .world
@@ -325,7 +314,7 @@ mod tests {
         ];
 
         for (name, ground_point) in cases {
-            let mut simulation = Simulation::new();
+            let mut simulation = Simulation::new(build_poses());
             simulation.set_hand_target(ground_point);
             let start = simulation.hand_position();
 
@@ -344,7 +333,7 @@ mod tests {
     /// on it. The target lies 5 units away, which takes 15 steps at full speed
     #[test]
     fn advance_with_enough_steps_reaches_target_without_overshoot() {
-        let mut simulation = Simulation::new();
+        let mut simulation = Simulation::new(build_poses());
         simulation.set_hand_target(Vec3::new(3.0, Simulation::HOVER_HEIGHT, 4.0));
         let target = read_target(&simulation);
         let start = simulation.hand_position();

@@ -161,7 +161,7 @@ conventions sets out the format of an ADR, and how ADRs are numbered.
 | [0007](docs/adr/0007-archetype-component-storage.md)         | Archetype component storage     | The ECS stores each entity in a table for its exact set of components, one column per component       |
 | [0008](docs/adr/0008-miri-for-unsafe-code.md)                | Miri for unsafe code            | Tests for `unsafe` code also run under Miri, a nightly-only tool that detects undefined behaviour     |
 | [0009](docs/adr/0009-opt-in-component-trait.md)              | Opt-in component trait          | Each component type must implement `Component` by hand, and the compiler rejects every other type     |
-| [0010](docs/adr/0010-hand-written-gltf-reader.md)            | Hand-written glTF reader        | The developer writes the glTF reader, and `serde_json` turns its JSON text into Rust structs          |
+| [0010](docs/adr/0010-gltf-crate.md)                          | The gltf crate for reading glTF | `hermes` reads glTF files through the `gltf` crate, and returns Sarx's own types for the rest of Sarx |
 | [0011](docs/adr/0011-glam-for-vector-maths.md)               | glam for vector maths           | Vectors, matrices and quaternions come from glam, and the developer builds each matrix that Sarx uses |
 | [0012](docs/adr/0012-bytemuck-for-gpu-bytes.md)              | bytemuck for GPU bytes          | Each type that the GPU reads derives `Pod`, and bytemuck casts it to bytes without copying it         |
 | [0013](docs/adr/0013-change-detection.md)                    | Change detection                | `enki` does not track changes, and a system reports sparse changes as events                          |

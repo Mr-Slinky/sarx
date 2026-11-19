@@ -5,7 +5,7 @@
 //! that those indices pick out.
 
 use bytemuck::{Pod, Zeroable};
-use hermes::MeshData;
+use hermes::{MeshData, SkinData};
 use std::mem::offset_of;
 use wgpu::{BufferAddress, VertexAttribute, VertexBufferLayout, VertexFormat, VertexStepMode};
 
@@ -19,6 +19,15 @@ pub(crate) trait GpuVertex: Pod {
 pub(crate) struct Vertex {
     position: [f32; 3], // the corner's position, in the model's own space
     normal: [f32; 3],   // the direction that the surface faces at this corner
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+pub(crate) struct SkinnedVertex {
+    position: [f32; 3], // the vertex's position at rest, in the model's own space
+    normal: [f32; 3],   // the direction that the surface faces at this vertex, at rest
+    joints: [u16; 4],   // the four bones that move this vertex
+    weights: [f32; 4],  // how strongly each of those bones pulls, adding up to 1
 }
 
 impl GpuVertex for Vertex {
@@ -44,6 +53,43 @@ impl GpuVertex for Vertex {
                 format: VertexFormat::Float32x3,
                 offset: offset_of!(Vertex, normal) as BufferAddress,
                 shader_location: 1,
+            },
+        ],
+    };
+}
+
+
+impl GpuVertex for SkinnedVertex {
+    const LAYOUT: VertexBufferLayout<'static> = VertexBufferLayout {
+        // Steps 48 bytes from one vertex to the next
+        array_stride: size_of::<SkinnedVertex>() as BufferAddress,
+        // Moves to the next vertex for each vertex that the draw reads
+        step_mode: VertexStepMode::Vertex,
+        // Describes the four attributes inside each vertex
+        attributes: &[
+            // Hands the position to the shader at location 0
+            VertexAttribute {
+                format: VertexFormat::Float32x3,
+                offset: offset_of!(SkinnedVertex, position) as BufferAddress,
+                shader_location: 0,
+            },
+            // Hands the normal to the shader at location 1
+            VertexAttribute {
+                format: VertexFormat::Float32x3,
+                offset: offset_of!(SkinnedVertex, normal) as BufferAddress,
+                shader_location: 1,
+            },
+            // Hands the four bone numbers to the shader at location 2, as unsigned integers
+            VertexAttribute {
+                format: VertexFormat::Uint16x4,
+                offset: offset_of!(SkinnedVertex, joints) as BufferAddress,
+                shader_location: 2,
+            },
+            // Hands the four weights to the shader at location 3
+            VertexAttribute {
+                format: VertexFormat::Float32x4,
+                offset: offset_of!(SkinnedVertex, weights) as BufferAddress,
+                shader_location: 3,
             },
         ],
     };
@@ -137,6 +183,30 @@ impl Mesh<Vertex> {
         Self::from_mesh_data(data)
     }
 
+}
+
+impl Mesh<SkinnedVertex> {
+    pub(crate) fn from_skinned_data(data: &MeshData, skin: &SkinData) -> Self {
+        // Creates an empty list with room for every vertex
+        let mut vertices = Vec::with_capacity(data.positions.len());
+        // Builds each vertex in turn
+        for (index, &position) in data.positions.iter().enumerate() {
+            // Builds the vertex from the four values at the same index
+            let vertex = SkinnedVertex {
+                position,
+                normal: data.normals[index],
+                joints: skin.joints[index],
+                weights: skin.weights[index],
+            };
+            // Adds the finished vertex
+            vertices.push(vertex);
+        }
+        // Copies the triangle list, since `data` is only borrowed
+        Self {
+            vertices,
+            indices: data.indices.clone(),
+        }
+    }
 }
 
 #[cfg(test)]

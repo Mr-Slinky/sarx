@@ -1,6 +1,8 @@
 use crate::GltfError;
 use gltf::buffer::Source;
 use gltf::{Buffer, Gltf, Primitive};
+use crate::pose::{read_poses, PoseData};
+use crate::skin::{read_skin, SkinData};
 
 pub struct MeshData {
     pub positions: Vec<[f32; 3]>,
@@ -8,15 +10,27 @@ pub struct MeshData {
     pub indices: Vec<u32>,
 }
 
+pub struct Model {
+    pub mesh: MeshData,
+    pub skin: SkinData,
+    pub poses: Vec<PoseData>, // every one-keyframe animation in the file
+}
+
 pub fn read_mesh(file: &[u8]) -> Result<MeshData, GltfError> {
-    // Splits the file into its chunks, parses the JSON text, and checks every index in that text
     let gltf = Gltf::from_slice(file)?;
-    // Finds the binary chunk, which stores the numbers that the accessors point into
     let binary = find_binary(&gltf)?;
-    // Finds the first primitive of the first mesh, which stores the hand
     let primitive = find_primitive(&gltf)?;
-    // Reads the positions, normals and indices of that primitive
     read_mesh_from(&primitive, binary)
+}
+
+pub fn read_model(file: &[u8]) -> Result<Model, GltfError> {
+    let gltf = Gltf::from_slice(file)?;
+    let binary = find_binary(&gltf)?;
+    let primitive = find_primitive(&gltf)?;
+    let mesh = read_mesh_from(&primitive, binary)?;
+    let skin = read_skin(&gltf, &primitive, binary, mesh.positions.len())?;
+    let poses = read_poses(&gltf, binary)?;
+    Ok(Model { mesh, skin, poses })
 }
 
 pub(crate) fn find_buffer<'a>(buffer: Buffer<'_>, binary: &'a [u8]) -> Option<&'a [u8]> {

@@ -19,7 +19,7 @@ use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use wgpu::{
     BindGroup, Buffer, Color, CommandEncoderDescriptor, CurrentSurfaceTexture,
-    DisplayAndWindowHandle, IndexFormat, LoadOp, Operations, RenderPassColorAttachment,
+    DisplayAndWindowHandle, LoadOp, Operations, RenderPassColorAttachment,
     RenderPassDepthStencilAttachment, RenderPassDescriptor, RenderPipeline, StoreOp,
     TextureViewDescriptor,
 };

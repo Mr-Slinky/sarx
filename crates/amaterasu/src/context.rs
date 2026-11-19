@@ -54,7 +54,7 @@ use wgpu::{
 };
 
 use crate::RendererError;
-use crate::mesh::{GpuVertex, Mesh, Vertex};
+use crate::mesh::{GpuVertex, Mesh};
 use crate::object::RenderObject;
 use crate::renderer::RenderWindow;
 use crate::uniform::ObjectUniforms;

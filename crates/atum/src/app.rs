@@ -186,8 +186,11 @@ impl App {
         let hand_transform =
             Mat4::from_translation(hand_position) * Mat4::from_translation(-Self::PALM_CENTRE);
 
+        // Borrows the rotation of every bone after those steps
+        let bone_rotations = self.simulation.find_bone_rotations();
+
         // Draws the frame, and ends the program IF the renderer cannot carry on
-        if let Err(error) = renderer.render(&self.camera, hand_transform) {
+        if let Err(error) = renderer.render(&self.camera, hand_transform, bone_rotations) {
             Self::print_error(&error);
             event_loop.exit();
             return;
@@ -220,9 +223,8 @@ impl App {
 impl ApplicationHandler for App {
     /// Creates the window and the renderer on the first call.
     ///
-    /// Every later call gives the renderer a new surface for the window. Where the hand model
-    /// cannot be read, the renderer cannot be set up, or the renderer cannot take its new surface,
-    /// `resumed` prints the error and ends the program.
+    /// Every later call gives the renderer a new surface for the window. Where the renderer cannot
+    /// be set up, or cannot take its new surface, `resumed` prints the error and ends the program.
     ///
     /// # Panics
     ///
@@ -256,20 +258,17 @@ impl ApplicationHandler for App {
             // window.set_cursor_visible(false);
             let window = Arc::new(window);
 
-            // Reads the hand's mesh, or ends the program where the hand model cannot be read
-            let hand_mesh = match hermes::read_mesh(Self::HAND_MODEL) {
-                Ok(hand) => hand,
-                Err(error) => {
-                    Self::print_error(&error);
-                    event_loop.exit();
-                    return;
-                }
-            };
-
-            // Creates the renderer for the window, or ends the program where the setup fails
+            // Creates the renderer for the window from the hand's mesh and skin, which `App`
+            // already stores, or ends the program where the setup fails
             let size = window.inner_size();
-            let renderer_setup =
-                Renderer::new(Arc::clone(&window), size.width, size.height, hand_mesh);
+            let hand = &self.hand_model;
+            let renderer_setup = Renderer::new(
+                Arc::clone(&window),
+                size.width,
+                size.height,
+                &hand.mesh,
+                &hand.skin,
+            );
             match block_on(renderer_setup) {
                 Ok(renderer) => self.renderer = Some(renderer),
                 Err(error) => {

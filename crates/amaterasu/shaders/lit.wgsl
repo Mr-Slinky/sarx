@@ -17,6 +17,8 @@ struct Scene {
 @group(0) @binding(0) var<uniform> scene: Scene;
 // Reads the object uniforms from binding 0 of bind group 1
 @group(1) @binding(0) var<uniform> object: Object;
+// Reads the hand's joint matrices from binding 0 of bind group 2, as many as the buffer stores
+@group(2) @binding(0) var<storage, read> joint_matrices: array<mat4x4<f32>>;
 
 // How much darker the dark squares of the ground are than the light ones
 const CHECKER_SHADE: f32 = 0.85;
@@ -25,6 +27,14 @@ const CHECKER_SHADE: f32 = 0.85;
 struct StaticInput {
     @location(0) position: vec3<f32>,
     @location(1) normal: vec3<f32>,
+}
+
+// Receives the four attributes that `SkinnedVertex::LAYOUT` describes
+struct SkinnedInput {
+    @location(0) position: vec3<f32>,
+    @location(1) normal: vec3<f32>,
+    @location(2) joints: vec4<u32>,
+    @location(3) weights: vec4<f32>,
 }
 
 // Hands the clip-space position to the GPU, and the normal and world position on to the
@@ -53,6 +63,17 @@ fn place_vertex(transform: mat4x4<f32>, position: vec3<f32>, normal: vec3<f32>) 
 fn vs_static(input: StaticInput) -> VertexOutput {
     // Places the vertex through the object's model matrix alone
     return place_vertex(object.model, input.position, input.normal);
+}
+
+@vertex
+fn vs_skinned(input: SkinnedInput) -> VertexOutput {
+    // Blends the vertex's four joint matrices, each scaled by its weight
+    let blended = joint_matrices[input.joints.x] * input.weights.x
+        + joint_matrices[input.joints.y] * input.weights.y
+        + joint_matrices[input.joints.z] * input.weights.z
+        + joint_matrices[input.joints.w] * input.weights.w;
+    // Moves the vertex with its bones first, then places the hand in the world
+    return place_vertex(object.model * blended, input.position, input.normal);
 }
 
 // Returns how brightly the light falls on a surface facing along `surface_normal`

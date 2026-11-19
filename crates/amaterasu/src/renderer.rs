@@ -12,8 +12,8 @@
 //! Both are defined in the `context` module. This module defines the renderer, which draws each
 //! frame with them.
 
-use glam::{Mat4, Vec4};
-use hermes::MeshData;
+use glam::{Mat4, Quat, Vec4};
+use hermes::{MeshData, SkinData};
 use std::fmt::Debug;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
@@ -27,8 +27,9 @@ use wgpu::{
 use crate::Camera;
 use crate::RendererError;
 use crate::context::GpuContext;
-use crate::mesh::{Mesh, Vertex};
+use crate::mesh::{Mesh, SkinnedVertex, Vertex};
 use crate::object::RenderObject;
+use crate::skeleton::Skeleton;
 use crate::uniform::{ObjectUniforms, SceneUniforms};
 
 /// A window that a [`Renderer`] can draw into.
@@ -89,6 +90,9 @@ impl<W> RenderWindow for W where W: DisplayAndWindowHandle + Debug + 'static {}
 pub struct Renderer {
     gpu: GpuContext,
     hand: RenderObject,
+    skeleton: Skeleton,          // builds the hand's joint matrices from its bone rotations
+    joint_buffer: Buffer,        // the hand's joint matrices, in GPU memory
+    joint_bind_group: BindGroup, // hands `joint_buffer` to the shader, at group 2
     scene_buffer: Buffer,        // the camera's matrix and the light's direction
     scene_bind_group: BindGroup, // hands `scene_buffer` to the shader, at group 0
     ground_pipeline: RenderPipeline, // draws the ground, with the checker
@@ -151,21 +155,31 @@ impl Renderer {
         window: Arc<W>,
         width: u32,
         height: u32,
-        hand: MeshData,
+        hand_mesh: &MeshData,
+        hand_skin: &SkinData,
     ) -> Result<Self, RendererError>
     where
         W: RenderWindow,
     {
         // Connects to the GPU, and creates the window's surface
         let gpu = GpuContext::new(window, width, height).await?;
-        // Interleaves the hand's positions and normals into vertices
-        let hand_mesh = Mesh::from_mesh_data(hand);
+        // Builds the hand's skinned vertices from its mesh and its skin
+        let hand_mesh = Mesh::from_skinned_data(hand_mesh, hand_skin);
 
         let scene_buffer = gpu.create_uniform_buffer("Scene uniforms", size_of::<SceneUniforms>());
         let scene_layout = gpu.create_uniform_layout("Scene layout");
         let object_layout = gpu.create_uniform_layout("Object layout");
 
         let hand = gpu.create_render_object("Hand", &hand_mesh, &object_layout);
+        // Converts the bones once, for every frame to come
+        let skeleton = Skeleton::from_bones(&hand_skin.bones);
+        // Creates a storage buffer with room for one matrix per bone, and hands it to the shader
+        // at group 2
+        let joint_size = skeleton.count_bones() * size_of::<Mat4>();
+        let joint_buffer = gpu.create_storage_buffer("Joint matrices", joint_size);
+        let joint_layout = gpu.create_storage_layout("Joint layout");
+        let joint_bind_group =
+            gpu.create_bind_group("Joint bind group", &joint_layout, &joint_buffer);
         // Builds the square of ground, and creates its buffers and bind group
         let ground_mesh = Mesh::build_ground(Self::GROUND_HALF_SIZE);
         let ground = gpu.create_render_object("Ground", &ground_mesh, &object_layout);
@@ -180,17 +194,20 @@ impl Renderer {
             ("vs_static", "fs_ground"),
             &[&scene_layout, &object_layout],
         );
-        // Builds the hand's pipeline: plain vertices, one colour, and groups 0 and 1
-        let hand_pipeline = gpu.create_pipeline::<Vertex>(
+        // Builds the hand's pipeline: skinned vertices, one colour, and groups 0, 1 and 2
+        let hand_pipeline = gpu.create_pipeline::<SkinnedVertex>(
             "Hand pipeline",
             &shader,
-            ("vs_static", "fs_lit"),
-            &[&scene_layout, &object_layout],
+            ("vs_skinned", "fs_lit"),
+            &[&scene_layout, &object_layout, &joint_layout],
         );
         Ok(Self {
             gpu,
             scene_buffer,
             hand,
+            skeleton,
+            joint_buffer,
+            joint_bind_group,
             scene_bind_group,
             ground_pipeline,
             hand_pipeline,
@@ -309,7 +326,12 @@ impl Renderer {
     ///     event_loop.exit();
     /// }
     /// ```
-    pub fn render(&mut self, camera: &Camera, hand_transform: Mat4) -> Result<(), RendererError> {
+    pub fn render(
+        &mut self,
+        camera: &Camera,
+        hand_transform: Mat4,
+        bone_rotations: &[Quat],
+    ) -> Result<(), RendererError> {
         // Returns at once while the app is suspended, since no surface exists then
         let Some(surface_context) = &self.gpu.surface_context else {
             return Ok(());
@@ -356,6 +378,12 @@ impl Renderer {
 
         // Copies the hand's matrix and colour into its buffer
         self.hand.write_uniforms(&self.gpu.queue, &hand_uniforms);
+        // Builds one joint matrix per bone from this frame's rotations, and copies them into the
+        // joint buffer
+        let joint_matrices = self.skeleton.build_joint_matrices(bone_rotations);
+        self.gpu
+            .queue
+            .write_buffer(&self.joint_buffer, 0, bytemuck::cast_slice(&joint_matrices));
 
         // Leaves the ground where its mesh puts it, and gives it the ground colour
         let ground_uniforms = ObjectUniforms {
@@ -409,8 +437,9 @@ impl Renderer {
         // Draws the ground through the checker
         render_pass.set_pipeline(&self.ground_pipeline);
         self.ground.draw(&mut render_pass);
-        // Draws the hand in its own colour
+        // Draws the hand in its own colour, bent by its bones through the joint matrices at group 2
         render_pass.set_pipeline(&self.hand_pipeline);
+        render_pass.set_bind_group(2, &self.joint_bind_group, &[]);
         self.hand.draw(&mut render_pass);
         drop(render_pass);
 

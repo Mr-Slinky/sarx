@@ -414,6 +414,39 @@ impl GpuContext {
         self.device.create_bind_group_layout(&descriptor)
     }
 
+    pub(crate) fn create_storage_buffer(&self, label: &str, size: usize) -> Buffer {
+        // Describes an empty storage buffer of `size` bytes, which `write_buffer` can copy into
+        let descriptor = BufferDescriptor {
+            label: Some(label),
+            size: size as BufferAddress,
+            usage: BufferUsages::STORAGE | BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        };
+        // Creates the buffer
+        self.device.create_buffer(&descriptor)
+    }
+
+    pub(crate) fn create_storage_layout(&self, label: &str) -> BindGroupLayout {
+        // Describes binding 0 as one storage buffer, which only the vertex shader reads, and never writes
+        let entry = BindGroupLayoutEntry {
+            binding: 0,
+            visibility: ShaderStages::VERTEX,
+            ty: BindingType::Buffer {
+                ty: BufferBindingType::Storage { read_only: true },
+                has_dynamic_offset: false,
+                min_binding_size: None,
+            },
+            count: None,
+        };
+        // Describes a layout with that one binding
+        let descriptor = BindGroupLayoutDescriptor {
+            label: Some(label),
+            entries: &[entry],
+        };
+        // Creates the layout
+        self.device.create_bind_group_layout(&descriptor)
+    }
+
     /// Copies `mesh` into GPU memory, and returns a [`RenderObject`] that a render pass can draw.
     ///
     /// The object takes a vertex buffer and an index buffer for the mesh, and a uniform buffer

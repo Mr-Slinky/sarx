@@ -19,9 +19,9 @@ use std::error::Error;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use winit::application::ApplicationHandler;
-use winit::event::WindowEvent;
+use winit::event::{ElementState, KeyEvent, WindowEvent};
 use winit::event_loop::ActiveEventLoop;
-use winit::keyboard::KeyCode;
+use winit::keyboard::{KeyCode, PhysicalKey};
 use winit::window::{Fullscreen, Window, WindowId};
 use zurvan::{HandPoses, Pose, Simulation};
 
@@ -49,6 +49,7 @@ pub(crate) struct App {
     cursor: Option<Vec2>, // the cursor's last position in pixels, or `None` before it first moves over the window
     last_frame: Option<Instant>, // when the last frame started, or `None` before the first frame
     hand_model: Model, // the hand's mesh, skin and poses, which the renderer reads once it exists
+    held_key: Option<KeyCode>, // the key whose pose the hand holds, or `None` while it idles
 }
 
 impl App {
@@ -96,6 +97,7 @@ impl App {
             simulation: Simulation::new(poses),
             camera,
             hand_model,
+            held_key: None,
         })
     }
 
@@ -151,6 +153,39 @@ impl App {
             rotations.push(Quat::from_array(array));
         }
         Ok(Pose(rotations))
+    }
+
+    fn handle_key(&mut self, event: &KeyEvent) {
+        // Ignores a key that winit cannot name, such as a vendor's media key
+        let PhysicalKey::Code(key) = event.physical_key else {
+            return;
+        };
+        // Finds the action pose for the key, and ignores every key without one
+        let Some(action) = Self::ACTION_KEYS
+            .iter()
+            .position(|&(action_key, _)| action_key == key)
+        else {
+            return;
+        };
+        // Holds or releases the pose, depending on whether the key went down or came up
+        match event.state {
+            // Holds the key's pose on the first press, and ignores the repeats
+            ElementState::Pressed if !event.repeat => {
+                // Sets the hand's goal to the key's action pose
+                self.simulation.hold_pose(action);
+                // Records the key that holds the pose
+                self.held_key = Some(key);
+            }
+            // Returns to idling once the key that holds the pose comes up
+            ElementState::Released if self.held_key == Some(key) => {
+                // Returns the hand to idling
+                self.simulation.release_pose();
+                // Records that no key holds a pose
+                self.held_key = None;
+            }
+            // Ignores a repeat, and the release of a key that no longer holds the pose
+            _ => {}
+        }
     }
 
     /// Advances the simulation by the time since the last frame, draws the frame, and asks winit
@@ -289,6 +324,7 @@ impl ApplicationHandler for App {
     /// Where `render` returns an error, such as a lost connection to the GPU or a surface that the
     /// renderer cannot replace, `window_event` prints the error and ends the program too.
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _: WindowId, event: WindowEvent) {
+        // Responds to each kind of window event
         match event {
             WindowEvent::CloseRequested => event_loop.exit(),
             WindowEvent::Resized(size) => {
@@ -302,10 +338,10 @@ impl ApplicationHandler for App {
             WindowEvent::CursorMoved { position, .. } => {
                 self.cursor = Some(Vec2::new(position.x as f32, position.y as f32));
             }
-            other => println!("{other:?}"),
-            // TODO: the match must pass each `KeyboardInput` to the input system, as in
-            //  `WindowEvent::KeyboardInput { event, .. } => input.record_key(event)`, and must
-            //  ignore every other event with `_ => {}` in place of the `other` arm
+            // Holds or releases an action pose
+            WindowEvent::KeyboardInput { event, .. } => self.handle_key(&event),
+            // Ignores every other event
+            _ => {}
         }
     }
 

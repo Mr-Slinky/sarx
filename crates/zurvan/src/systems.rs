@@ -1,5 +1,11 @@
-use crate::components::{Position, Speed, Target, Velocity};
+use crate::components::{Bones, Idle, PoseGoal, Position, Speed, Target, Velocity};
 use enki::World;
+use crate::Pose;
+
+// The fraction of the remaining turn that each bone makes on every step
+const POSE_FRACTION: f32 = 0.1;
+// The angle, in radians, below which a bone snaps onto its goal
+const SNAP_ANGLE: f32 = 0.5_f32.to_radians();
 
 pub(crate) fn movement(world: &mut World, step_seconds: f32) {
     for (position, velocity) in world.query_mut::<(&mut Position, &Velocity)>() {
@@ -16,6 +22,42 @@ pub(crate) fn steering(world: &mut World, step_seconds: f32) {
     {
         let offset = target.0 - position.0;
         velocity.0 = (offset / step_seconds).clamp_length_max(speed.0);
+    }
+}
+
+// Directs a hand model to a given pose
+pub(crate) fn posing(world: &mut World) {
+    for (bones, goal) in world.query_mut::<(&mut Bones, &PoseGoal)>() {
+        // Pairs each bone with its goal rotation
+        for (bone, &goal_rotation) in bones.0.iter_mut().zip(&goal.0) {
+            let turned = bone.slerp(goal_rotation, POSE_FRACTION);
+            let remaining = turned.angle_between(goal_rotation);
+            // Snaps the bone onto its goal once the bone is close
+            *bone = if remaining < SNAP_ANGLE {
+                goal_rotation
+            } else {
+                turned
+            };
+        }
+    }
+}
+
+// Moves a hand model through a set of idle poses
+pub(crate) fn idling(world: &mut World, idle_poses: &[Pose]) {
+    for (idle, goal, bones) in world.query_mut::<(&mut Idle, &mut PoseGoal, &Bones)>() {
+        // Skips an entity whose idle cycle is paused by a held key
+        let Some(current) = idle.0 else {
+            continue;
+        };
+        // Skips an entity whose bones have not all snapped onto the goal yet
+        if bones.0 != goal.0 {
+            continue;
+        }
+
+        let next = (current + 1) % idle_poses.len();
+        idle.0 = Some(next);
+        // Copies the next pose into the goal, reusing the goal's allocation
+        goal.0.clone_from(&idle_poses[next].0);
     }
 }
 

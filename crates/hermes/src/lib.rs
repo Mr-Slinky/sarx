@@ -1,5 +1,7 @@
 mod error;
 mod model;
+pub mod pose;
+pub mod skin;
 #[cfg(test)]
 mod test_support;
 

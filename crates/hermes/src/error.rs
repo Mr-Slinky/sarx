@@ -4,39 +4,19 @@ use std::fmt::{Display, Formatter};
 
 #[derive(Debug)]
 pub enum GltfError {
-    /// The file does not start with the four bytes `glTF`
-    NotGlb,
-    /// The header states a glTF version other than 2
-    UnsupportedVersion(u32),
-    /// The header states a total length that differs from the length of the file
-    LengthMismatch { stated: u32, actual: usize },
-    /// A read ran past the end of the file, of its binary chunk, or of the buffer view that the
-    /// accessor belongs to
-    Truncated,
-    /// A chunk has a different type from the one that its place in the file calls for
-    UnexpectedChunk { expected: u32, found: u32 },
-    /// The JSON text is malformed, or its fields do not match the types that it is parsed into
-    Json(serde_json::Error),
+    // Wraps the gltf crate's own error: the file is not glTF, is malformed, or its JSON text
+    // points at something that does not exist
+    Gltf(gltf::Error),
+    // The file has no binary chunk, which stores the numbers that the accessors point into
+    MissingBinary,
     /// The file contains no mesh, or its first mesh has no primitive
     MissingMesh,
+    // The first primitive has no `POSITION` attribute, or its positions cannot be read
+    MissingPositions,
     /// The primitive that `read_mesh` reads has no `indices`
     MissingIndices,
     /// The primitive that `read_mesh` reads has no `NORMAL` attribute
     MissingNormals,
-    /// An index points past the end of the accessor list
-    MissingAccessor(usize),
-    /// An index points past the end of the buffer view list
-    MissingBufferView(usize),
-    /// A buffer view states a `byteStride` that glTF forbids: one outside 4 to 252, one that is
-    /// not a multiple of 4, one smaller than an element, or any stride on a view of indices
-    InvalidStride(usize),
-    /// An accessor has a form that the reader does not support
-    ///
-    /// An accessor states its number type in `componentType`, and whether each element is a
-    /// scalar, vector or matrix in `type`. Either one can take a value that the reader does not
-    /// support. The reader also returns this error for an accessor without a `bufferView`, which
-    /// glTF leaves out where every element is zero.
-    UnsupportedAccessor(usize),
     /// The primitive that `read_mesh` reads has a different number of normals from its number of
     /// positions, where glTF requires one normal for each position
     ///
@@ -52,46 +32,56 @@ pub enum GltfError {
     /// 3 vertices, indices [0, 1, 3]  ->  IndexOutOfRange { index: 3, vertex_count: 3 }
     /// ```
     IndexOutOfRange { index: u32, vertex_count: usize },
+    // The file has no skin, or the first primitive has no `JOINTS_0` or `WEIGHTS_0` that can be read
+    MissingSkin,
+    // A list in the skin has a different length from the list that it must match
+    SkinCountMismatch { expected: usize, found: usize },
+    // A vertex names a bone number past the last bone of the skin
+    JointOutOfRange { joint: u16, bone_count: usize },
+    // A bone comes before its parent in the skin's list of bones
+    ParentAfterChild(usize),
+    // An animation turns a node that is not a bone, or its rotations cannot be read
+    InvalidPose(usize),
 }
 
 impl Display for GltfError {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         // Writes one line for each variant, starting in lower case
         match self {
-            Self::NotGlb => write!(f, "the file is not a binary glTF file"),
-            Self::UnsupportedVersion(version) => {
-                write!(f, "expected glTF version 2, found version {version}")
-            }
-            Self::LengthMismatch { stated, actual } => {
-                write!(f, "the header states a length of {stated} bytes, but the file has {actual}")
-            }
-            Self::Truncated => {
-                write!(f, "the file, its binary chunk or a buffer view ends before the data that it describes")
-            }
-            // States both chunk types, in hexadecimal, as the glTF specification lists them
-            Self::UnexpectedChunk { expected, found } => {
-                write!(f, "expected a chunk of type {expected:#010x}, found {found:#010x}")
-            }
-            // States that the JSON text is the problem; `source` returns the details
-            Self::Json(_) => {
-                write!(f, "the JSON text is malformed, or its fields have unexpected types")
-            }
+            // States that the gltf crate rejected the file; `source` returns the details
+            Self::Gltf(_) => write!(f, "the gltf crate could not read the file"),
+            // States that the numbers are missing
+            Self::MissingBinary => write!(f, "the file has no binary chunk"),
             Self::MissingMesh => {
                 write!(f, "the file contains no mesh, or its first mesh has no primitive")
             }
+            // States that the primitive has no positions
+            Self::MissingPositions => write!(f, "the first primitive has no positions"),
             Self::MissingIndices => write!(f, "the first primitive has no indices"),
             Self::MissingNormals => write!(f, "the first primitive has no normals"),
-            Self::MissingAccessor(index) => write!(f, "accessor {index} does not exist"),
-            Self::MissingBufferView(index) => write!(f, "buffer view {index} does not exist"),
-            Self::InvalidStride(index) => write!(f, "buffer view {index} has a stride that glTF forbids"),
-            Self::UnsupportedAccessor(index) => {
-                write!(f, "accessor {index} has an unsupported component type or element type, or no buffer view")
-            }
             Self::NormalCountMismatch { positions, normals } => {
                 write!(f, "the first primitive has {positions} positions, but {normals} normals")
             }
             Self::IndexOutOfRange { index, vertex_count } => {
                 write!(f, "index {index} points past the last of {vertex_count} vertices")
+            }
+            // States that the skin, or the vertex data that ties the mesh to it, is missing
+            Self::MissingSkin => {
+                write!(f, "the file has no skin, or the first primitive has no joints or weights")
+            }
+            // States both lengths, so that the message shows how far apart they are
+            Self::SkinCountMismatch { expected, found } => {
+                write!(f, "the skin has {found} entries in a list that needs {expected}")
+            }
+            // States the bone number and how many bones exist
+            Self::JointOutOfRange { joint, bone_count } => {
+                write!(f, "joint {joint} points past the last of {bone_count} bones")
+            }
+            // States which bone comes too early
+            Self::ParentAfterChild(bone) => write!(f, "bone {bone} comes before its parent"),
+            // States which animation could not become a pose
+            Self::InvalidPose(animation) => {
+                write!(f, "animation {animation} turns a node that is not a bone, or has unreadable rotations")
             }
         }
     }
@@ -100,17 +90,18 @@ impl Display for GltfError {
 impl Error for GltfError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
-            // Returns the serde_json error, which states the line and column of the problem
-            Self::Json(error) => Some(error),
+            // Returns the gltf crate's own error, which states what it found wrong with the file
+            Self::Gltf(error) => Some(error),
             // Returns `None`, since every other variant has no underlying error
             _ => None,
         }
     }
 }
 
-impl From<serde_json::Error> for GltfError {
-    fn from(error: serde_json::Error) -> Self {
-        Self::Json(error)
+impl From<gltf::Error> for GltfError {
+    fn from(error: gltf::Error) -> Self {
+        // Wraps the crate's error, which lets `?` turn a `gltf::Error` into a `GltfError`
+        Self::Gltf(error)
     }
 }
 
@@ -118,9 +109,10 @@ impl From<serde_json::Error> for GltfError {
 mod tests {
     use super::*;
 
-    /// Returns the serde_json error that parsing the unfinished JSON text `{` raises
-    fn build_json_error() -> serde_json::Error {
-        serde_json::from_str::<serde_json::Value>("{").unwrap_err()
+    // Returns the error that the gltf crate raises for the unfinished JSON text `{`
+    fn build_gltf_error() -> gltf::Error {
+        // Parses `{`, which the crate rejects, and keeps the error
+        gltf::Gltf::from_slice(b"{").err().unwrap()
     }
 
     /// Returns the name of the variant that `error` is
@@ -130,46 +122,31 @@ mod tests {
     /// `build_every_variant` as well.
     fn name_variant(error: &GltfError) -> &'static str {
         match error {
-            GltfError::NotGlb => "NotGlb",
-            GltfError::UnsupportedVersion(_) => "UnsupportedVersion",
-            GltfError::LengthMismatch { .. } => "LengthMismatch",
-            GltfError::Truncated => "Truncated",
-            GltfError::UnexpectedChunk { .. } => "UnexpectedChunk",
-            GltfError::Json(_) => "Json",
+            GltfError::Gltf(_) => "Gltf",
+            GltfError::MissingBinary => "MissingBinary",
             GltfError::MissingMesh => "MissingMesh",
+            GltfError::MissingPositions => "MissingPositions",
             GltfError::MissingIndices => "MissingIndices",
             GltfError::MissingNormals => "MissingNormals",
-            GltfError::MissingAccessor(_) => "MissingAccessor",
-            GltfError::MissingBufferView(_) => "MissingBufferView",
-            GltfError::InvalidStride(_) => "InvalidStride",
-            GltfError::UnsupportedAccessor(_) => "UnsupportedAccessor",
             GltfError::NormalCountMismatch { .. } => "NormalCountMismatch",
             GltfError::IndexOutOfRange { .. } => "IndexOutOfRange",
+            GltfError::MissingSkin => "MissingSkin",
+            GltfError::SkinCountMismatch { .. } => "SkinCountMismatch",
+            GltfError::JointOutOfRange { .. } => "JointOutOfRange",
+            GltfError::ParentAfterChild(_) => "ParentAfterChild",
+            GltfError::InvalidPose(_) => "InvalidPose",
         }
     }
 
     /// Returns one instance of every variant, each beside the name that `name_variant` returns for it
     fn build_every_variant() -> Vec<(&'static str, GltfError)> {
         let variants = vec![
-            GltfError::NotGlb,
-            GltfError::UnsupportedVersion(3),
-            GltfError::LengthMismatch {
-                stated: 120,
-                actual: 96,
-            },
-            GltfError::Truncated,
-            GltfError::UnexpectedChunk {
-                expected: 0x4E4F_534A,
-                found: 0x004E_4942,
-            },
-            GltfError::Json(build_json_error()),
+            GltfError::Gltf(build_gltf_error()),
+            GltfError::MissingBinary,
             GltfError::MissingMesh,
+            GltfError::MissingPositions,
             GltfError::MissingIndices,
             GltfError::MissingNormals,
-            GltfError::MissingAccessor(7),
-            GltfError::MissingBufferView(7),
-            GltfError::InvalidStride(7),
-            GltfError::UnsupportedAccessor(7),
             GltfError::NormalCountMismatch {
                 positions: 3,
                 normals: 2,
@@ -178,6 +155,17 @@ mod tests {
                 index: 3,
                 vertex_count: 3,
             },
+            GltfError::MissingSkin,
+            GltfError::SkinCountMismatch {
+                expected: 22,
+                found: 21,
+            },
+            GltfError::JointOutOfRange {
+                joint: 22,
+                bone_count: 22,
+            },
+            GltfError::ParentAfterChild(7),
+            GltfError::InvalidPose(7),
         ];
 
         variants
@@ -221,12 +209,6 @@ mod tests {
         is_decimal || is_hexadecimal
     }
 
-    /// Returns the result of parsing `text` as JSON, with `?` converting any serde_json error
-    fn parse_with_question_mark(text: &str) -> Result<serde_json::Value, GltfError> {
-        let value = serde_json::from_str::<serde_json::Value>(text)?;
-        Ok(value)
-    }
-
     /// Checks that every variant writes a message that is not empty
     #[test]
     fn fmt_with_every_variant_writes_non_empty_message() {
@@ -266,37 +248,7 @@ mod tests {
     fn fmt_with_standard_and_extreme_values_includes_values() {
         let largest_usize = usize::MAX as u128;
         let largest_u32 = u128::from(u32::MAX);
-        let cases: [(&str, GltfError, Vec<u128>); 22] = [
-            ("UnsupportedVersion 0", GltfError::UnsupportedVersion(0), vec![0]),
-            ("UnsupportedVersion 3", GltfError::UnsupportedVersion(3), vec![3]),
-            ("UnsupportedVersion u32::MAX", GltfError::UnsupportedVersion(u32::MAX), vec![largest_u32]),
-            ("LengthMismatch 120 and 96", GltfError::LengthMismatch { stated: 120, actual: 96 }, vec![120, 96]),
-            (
-                "LengthMismatch u32::MAX and usize::MAX",
-                GltfError::LengthMismatch { stated: u32::MAX, actual: usize::MAX },
-                vec![largest_u32, largest_usize],
-            ),
-            (
-                "UnexpectedChunk JSON and BIN",
-                GltfError::UnexpectedChunk { expected: 0x4E4F_534A, found: 0x004E_4942 },
-                vec![0x4E4F_534A, 0x004E_4942],
-            ),
-            (
-                "UnexpectedChunk 1 and u32::MAX",
-                GltfError::UnexpectedChunk { expected: 1, found: u32::MAX },
-                vec![1, largest_u32],
-            ),
-            ("MissingAccessor 0", GltfError::MissingAccessor(0), vec![0]),
-            ("MissingAccessor 7", GltfError::MissingAccessor(7), vec![7]),
-            ("MissingAccessor usize::MAX", GltfError::MissingAccessor(usize::MAX), vec![largest_usize]),
-            ("MissingBufferView 0", GltfError::MissingBufferView(0), vec![0]),
-            ("MissingBufferView 7", GltfError::MissingBufferView(7), vec![7]),
-            ("MissingBufferView usize::MAX", GltfError::MissingBufferView(usize::MAX), vec![largest_usize]),
-            ("InvalidStride 7", GltfError::InvalidStride(7), vec![7]),
-            ("InvalidStride usize::MAX", GltfError::InvalidStride(usize::MAX), vec![largest_usize]),
-            ("UnsupportedAccessor 0", GltfError::UnsupportedAccessor(0), vec![0]),
-            ("UnsupportedAccessor 7", GltfError::UnsupportedAccessor(7), vec![7]),
-            ("UnsupportedAccessor usize::MAX", GltfError::UnsupportedAccessor(usize::MAX), vec![largest_usize]),
+        let cases: [(&str, GltfError, Vec<u128>); 4] = [
             (
                 "NormalCountMismatch 3 and 2",
                 GltfError::NormalCountMismatch { positions: 3, normals: 2 },
@@ -327,36 +279,12 @@ mod tests {
         }
     }
 
-    /// Checks that `source` returns the wrapped serde_json error, with its line and column intact
-    #[test]
-    fn source_with_json_returns_wrapped_error() {
-        let original = build_json_error();
-        let line = original.line();
-        let column = original.column();
-        let error = GltfError::Json(original);
-
-        let source = error.source();
-        let wrapped = source.and_then(|source| source.downcast_ref::<serde_json::Error>());
-
-        assert!(wrapped.is_some(), "source downcast to a serde_json error");
-        assert_eq!(
-            wrapped.map(serde_json::Error::line),
-            Some(line),
-            "line of the wrapped error"
-        );
-        assert_eq!(
-            wrapped.map(serde_json::Error::column),
-            Some(column),
-            "column of the wrapped error"
-        );
-    }
-
-    /// Checks that `source` returns `None` for every variant other than `Json`
+    /// Checks that `source` returns `None` for every variant other than `Gltf`
     #[test]
     fn source_with_every_other_variant_returns_none() {
         let variants: Vec<(&str, GltfError)> = build_every_variant()
             .into_iter()
-            .filter(|(_, error)| !matches!(error, GltfError::Json(_)))
+            .filter(|(_, error)| !matches!(error, GltfError::Gltf(_)))
             .collect();
 
         let sources: Vec<(&str, bool)> = variants
@@ -367,33 +295,5 @@ mod tests {
         for (name, is_none) in sources {
             assert!(is_none, "source for {name}");
         }
-    }
-
-    /// Checks that `from` wraps a serde_json error in the `Json` variant, unchanged
-    #[test]
-    fn from_with_json_error_returns_json_variant() {
-        let original = build_json_error();
-        let line = original.line();
-        let column = original.column();
-
-        let error = GltfError::from(original);
-
-        assert!(
-            matches!(&error, GltfError::Json(inner) if inner.line() == line && inner.column() == column),
-            "converted error: {error:?}"
-        );
-    }
-
-    /// Checks that `?` converts a serde_json error into the `Json` variant
-    #[test]
-    fn from_with_question_mark_on_malformed_json_returns_json_variant() {
-        let text = "{";
-
-        let result = parse_with_question_mark(text);
-
-        assert!(
-            matches!(result, Err(GltfError::Json(_))),
-            "result: {result:?}"
-        );
     }
 }

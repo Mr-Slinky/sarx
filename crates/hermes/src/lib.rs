@@ -1,8 +1,4 @@
-mod accessor;
 mod error;
-mod bytes;
-mod glb;
-mod document;
 mod model;
 #[cfg(test)]
 mod test_support;

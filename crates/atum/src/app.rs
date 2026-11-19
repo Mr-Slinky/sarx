@@ -10,15 +10,17 @@
 use crate::executor::block_on;
 use crate::input;
 use amaterasu::{Camera, Renderer};
-use glam::{Mat4, Vec2, Vec3};
+use glam::{Mat4, Quat, Vec2, Vec3};
+use hermes::Model;
 use std::error::Error;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use winit::application::ApplicationHandler;
 use winit::event::WindowEvent;
 use winit::event_loop::ActiveEventLoop;
+use winit::keyboard::KeyCode;
 use winit::window::{Fullscreen, Window, WindowId};
-use zurvan::Simulation;
+use zurvan::{HandPoses, Pose, Simulation};
 
 /// Owns the window and the renderer, and defines the methods that winit calls for each event.
 ///
@@ -43,6 +45,7 @@ pub(crate) struct App {
     camera: Camera,              // where the view is drawn from
     cursor: Option<Vec2>, // the cursor's last position in pixels, or `None` before it first moves over the window
     last_frame: Option<Instant>, // when the last frame started, or `None` before the first frame
+    hand_model: Model, // the hand's mesh, skin and poses, which the renderer reads once it exists
 }
 
 impl App {
@@ -58,17 +61,69 @@ impl App {
     const CAMERA_EYE: Vec3 = Vec3::new(-0.3, 4.0, 3.0);
     // The point the camera looks at, tuned to the middle of the hand
     const CAMERA_TARGET: Vec3 = Vec3::new(-0.3, 0.0, -2.0);
+    // The idle poses, in the order that the hand cycles through them
+    const IDLE_POSES: [&str; 4] = ["idle_1", "idle_2", "idle_3", "idle_4"];
+    // Each action pose, beside the key that holds it. The order here sets each pose's number in
+    // `HandPoses::actions`
+    const ACTION_KEYS: [(KeyCode, &str); 4] = [
+        (KeyCode::Digit1, "fist"),
+        (KeyCode::Digit2, "point"),
+        (KeyCode::Digit3, "ok"),
+        (KeyCode::Digit4, "thumbs_up"),
+    ];
 
-    pub(crate) fn new() -> Self {
+    pub(crate) fn new() -> Result<Self, Box<dyn Error>> {
+        let hand_model = hermes::read_model(Self::HAND_MODEL)?;
+        let poses = Self::build_hand_poses(&hand_model)?;
         let camera = Camera::new(Self::CAMERA_EYE, Self::CAMERA_TARGET);
-        Self {
+        Ok(Self {
             window: None,
             renderer: None,
             cursor: None,
             last_frame: None,
-            simulation: Simulation::new(),
+            simulation: Simulation::new(poses),
             camera,
+            hand_model,
+        })
+    }
+
+    fn build_hand_poses(model: &Model) -> Result<HandPoses, String> {
+        // Converts each bone's rest rotation into a glam quaternion
+        let rest_rotations = model.skin.bones
+            .iter()
+            .map(|bone| Quat::from_array(bone.rotation))
+            .collect();
+        let mut idle = Vec::with_capacity(Self::IDLE_POSES.len());
+        for name in Self::IDLE_POSES {
+            // Adds the pose, or fails if the file has no pose of that name
+            idle.push(Self::find_pose(model, name)?);
         }
+        let mut actions = Vec::with_capacity(Self::ACTION_KEYS.len());
+        for (_, name) in Self::ACTION_KEYS {
+            // Adds the pose, or fails if the file has no pose of that name
+            actions.push(Self::find_pose(model, name)?);
+        }
+
+        // Returns the rest pose, the idle poses and the action poses together
+        Ok(HandPoses {
+            rest: Pose(rest_rotations),
+            idle,
+            actions,
+        })
+    }
+
+    fn find_pose(model: &Model, name: &str) -> Result<Pose, String> {
+        let Some(pose) = model.poses.iter().find(|pose| pose.name == name) else {
+            return Err(format!("the hand model has no pose named '{name}'"));
+        };
+        let mut rotations = Vec::with_capacity(pose.rotations.len());
+        // Pairs each rotation in the pose with its bone
+        for (rotation, bone) in pose.rotations.iter().zip(&model.skin.bones) {
+            // Takes the pose's rotation for the bone, or the bone's rest rotation if the pose has none
+            let array = rotation.unwrap_or(bone.rotation);
+            rotations.push(Quat::from_array(array));
+        }
+        Ok(Pose(rotations))
     }
 
     fn draw_frame(&mut self, event_loop: &ActiveEventLoop) {
@@ -87,8 +142,7 @@ impl App {
         let window_size = Vec2::new(size.width as f32, size.height as f32);
         // Aims the hand at the point under the cursor at the hover height, or keeps the last aim
         // if there is no such point
-        if let Some(hover_point) = input::find_hand_target(self.cursor, window_size, &self.camera)
-        {
+        if let Some(hover_point) = input::find_hand_target(self.cursor, window_size, &self.camera) {
             self.simulation.set_hand_target(hover_point);
         }
 

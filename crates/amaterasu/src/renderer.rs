@@ -50,9 +50,9 @@ use crate::uniform::{ObjectUniforms, SceneUniforms};
 /// // Creates a renderer at 1280 by 720 pixels, for any window that meets the three bounds
 /// async fn create_renderer<W: RenderWindow>(
 ///     window: Arc<W>,
-///     hand: MeshData,
+///     hand: &Model,
 /// ) -> Result<Renderer, RendererError> {
-///     Renderer::new(window, 1280, 720, hand).await
+///     Renderer::new(window, 1280, 720, &hand.mesh, &hand.skin).await
 /// }
 /// ```
 pub trait RenderWindow: DisplayAndWindowHandle + Debug + 'static {}
@@ -74,16 +74,20 @@ impl<W> RenderWindow for W where W: DisplayAndWindowHandle + Debug + 'static {}
 /// The example creates a renderer, then hands it the two window events that concern it.
 ///
 /// ```ignore
-/// // Creates the renderer once the window exists
+/// // Creates the renderer once the window exists, from the hand's mesh and skin
 /// let size = window.inner_size();
-/// let renderer_setup = Renderer::new(Arc::clone(&window), size.width, size.height, hand);
+/// let renderer_setup =
+///     Renderer::new(Arc::clone(&window), size.width, size.height, &hand.mesh, &hand.skin);
 /// let mut renderer = block_on(renderer_setup)?;
 ///
-/// // Passes each new window size to `resize`, and calls `render` each time the window needs
-/// // redrawing
+/// // Passes each new window size to `resize`, and calls `render` with the bones' rotations each
+/// // time the window needs redrawing
 /// match event {
 ///     WindowEvent::Resized(size) => renderer.resize(size.width, size.height),
-///     WindowEvent::RedrawRequested => renderer.render(&camera, hand_transform)?,
+///     WindowEvent::RedrawRequested => {
+///         let bone_rotations = simulation.find_bone_rotations();
+///         renderer.render(&camera, hand_transform, bone_rotations)?
+///     }
 ///     _ => {}
 /// }
 /// ```
@@ -118,15 +122,18 @@ impl Renderer {
     // How far the ground reaches from the origin in each direction along x and z
     const GROUND_HALF_SIZE: f32 = 50.0;
 
-    /// Creates a renderer that draws `hand` into `window`, at `width` by `height` pixels.
+    /// Creates a renderer that draws the hand into `window`, at `width` by `height` pixels.
     ///
+    /// `hand_mesh` and `hand_skin` are the hand's shape and its skin, as `hermes` reads them.
     /// `new` first connects to a GPU that can draw to the window. It then builds a square of
-    /// ground, copies its mesh and the hand's mesh into GPU memory, creates the buffers that the
-    /// shader reads the camera and the light from, and compiles the shader.
+    /// ground, copies its mesh and the hand's skinned mesh into GPU memory, creates the buffers
+    /// that the shader reads the camera and the light from, and compiles the shader. It also
+    /// builds the hand's skeleton, and a buffer for the joint matrices that `render` fills each
+    /// frame.
     ///
     /// Last, it builds two pipelines. A pipeline is the set of settings that the GPU follows to
     /// draw a mesh. The ground's pipeline draws the ground with a checker of light and dark
-    /// squares, and the hand's pipeline draws the hand in one colour.
+    /// squares. The hand's pipeline bends the hand by its bones, and draws it in one colour.
     ///
     /// # Errors
     ///
@@ -144,9 +151,10 @@ impl Renderer {
     /// The example creates a renderer for a winit window, at the window's current size.
     ///
     /// ```ignore
-    /// // Creates a renderer that draws the hand's mesh into the window at its current size
+    /// // Creates a renderer that draws the hand into the window at its current size
     /// let size = window.inner_size();
-    /// let renderer_setup = Renderer::new(Arc::clone(&window), size.width, size.height, hand);
+    /// let renderer_setup =
+    ///     Renderer::new(Arc::clone(&window), size.width, size.height, &hand.mesh, &hand.skin);
     ///
     /// // Waits for the setup to finish, since `new` returns a future
     /// let renderer = block_on(renderer_setup)?;
@@ -245,7 +253,7 @@ impl Renderer {
     /// renderer.suspend();
     ///
     /// // Skips the frame and returns `Ok(())`
-    /// renderer.render(&camera, hand_transform)?;
+    /// renderer.render(&camera, hand_transform, bone_rotations)?;
     /// ```
     pub fn suspend(&mut self) {
         self.gpu.suspend();
@@ -290,6 +298,14 @@ impl Renderer {
 
     /// Draws one frame and shows it in the window.
     ///
+    /// `camera` sets the view, and `hand_transform` places the hand in the world.
+    /// `bone_rotations` gives each bone of the hand its rotation for this frame, in bone order, and
+    /// MUST hold one rotation for each bone.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `bone_rotations` does not hold exactly one rotation for each bone.
+    ///
     /// Some calls skip the frame. While the app is suspended, no surface exists, and `render`
     /// returns at once.
     ///
@@ -319,7 +335,7 @@ impl Renderer {
     ///
     /// ```ignore
     /// // Draws one frame and shows it in the window
-    /// if let Err(error) = renderer.render(&camera, hand_transform) {
+    /// if let Err(error) = renderer.render(&camera, hand_transform, bone_rotations) {
     ///     // Ends the program, since each error points to a dead connection, a lost surface that
     ///     // could not be replaced, or a bug
     ///     eprintln!("Error: {error}");

@@ -77,6 +77,47 @@ The game has a handful of component types so far, far below 64.
 
 The change is worth revisiting once the game has about 40 component types.
 
+### Compaction threshold for list columns
+
+#### Today
+
+The list column has not been built yet. Its design stores the values of every row in one buffer,
+and gives each row its own start and length. Removing a row, moving it to another table, or
+changing its length leaves a run of dead slots in the buffer. The column counts those slots, and
+will compact once they reach half of the buffer. Compacting rewrites every live row in row order
+and closes the gaps.
+
+The developer chose half as an educated guess, since no system yet produces dead slots at a rate
+that can be measured.
+
+#### The change
+
+The threshold would come from measurement. A lower threshold keeps the column smaller and its
+passes faster, at the price of compacting more often. A rough estimate for the largest expected
+column, villager parts, puts the trade as follows:
+
+- 50,000 villagers with about 6 parts of 32 bytes each come to about 9.6 MB of live values.
+- At half dead, the column takes about 19 MB. That sits at the top of the L3 cache of a mid-level
+  laptop, which ADR 0021 puts at 8 to 24 MB, and a full pass then starts reading from main memory.
+- One compaction copies the live values once, which takes about 0.5 to 1 ms of a 16.7 ms step.
+
+A threshold of a quarter would cap that column at about 12.8 MB. The threshold could also differ
+from column to column, since a column that only the hand uses never builds up many dead slots.
+
+The same review would settle how the column compacts. Compacting into a new buffer restores row
+order, but holds the old and new buffers at once. Compacting in place does not allocate, but leaves
+the rows in their scrambled memory order.
+
+#### Why it waits
+
+The rate at which dead slots build up depends on systems that do not exist yet: deaths, dismember,
+and how often villagers move between tables. Any threshold chosen before then would be a guess.
+
+#### When to revisit
+
+The change is worth revisiting once the benchmark that ADR 0021 requires runs with real villagers,
+or once a timing of a simulation step shows a list column taking a measurable share of it.
+
 ## hermes
 
 ### More GLB files as test data

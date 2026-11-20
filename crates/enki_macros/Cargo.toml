@@ -1,0 +1,13 @@
+[package]
+name = "enki_macros"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+license-file.workspace = true
+
+[lib]
+proc-macro = true
+
+[dependencies]
+quote = "1.0.47"
+syn = "3.0.10"

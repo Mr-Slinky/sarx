@@ -1,6 +1,6 @@
 ---
 status: accepted
-date: 2026-11-08
+date: 2026-11-20
 decision-makers: Kheagen Haskins
 ---
 
@@ -66,8 +66,12 @@ How does `enki` decide which types are components?
 
 ## Decision Outcome
 
-Chosen option: "A `Component` trait that each type implements by hand", because the compiler then
-rejects both mistakes above, and the trait does not need a library.
+Chosen option: "A `Component` trait that each type implements through a derive macro", because the
+compiler then rejects both mistakes above, and the mark sits on the type beside its other derives.
+
+The decision first chose the option of an `impl` written by hand, which needs no library. The
+developer later took on `syn` and `quote` for the sake of the derive, and the derive became the
+chosen option. An `impl` written by hand still works, since the derive writes the same line.
 
 `enki` defines the trait in `component.rs`, with the bound as its supertraits, and with no
 blanket implementation:
@@ -76,13 +80,17 @@ blanket implementation:
 pub trait Component: Send + Sync + 'static {}
 ```
 
-The game implements it once for each component type:
+The game marks each component type with the derive:
 
 ```rust
-struct Health(i32);
+use enki::Component;
 
-impl Component for Health {}
+#[derive(Debug, Component)]
+struct Health(i32);
 ```
+
+The derive writes `impl ::enki::Component for Health {}`, and carries over any generic parameters,
+their bounds and any `where` clause.
 
 `World::add_component` and the tuple implementations of `ComponentSet` take `T: Component`. So do
 the private helpers that they call. Only the types that the game marks implement `Component`. As a
@@ -99,10 +107,19 @@ The `ComponentSet` trait also spells out `Send + Sync + 'static`, as supertraits
 component set is a tuple of components, and every component already meets the bound. The supertraits
 state the same bound for the tuple as a whole.
 
-A derive macro would generate the `impl` line for each type, and remains open as a later addition.
-Rust requires such a macro to be defined in a crate of its own, called a proc-macro crate, which
-generates code at compile time. Almost every derive macro is written with two libraries, `syn` and
-`quote`. The developer must discuss those libraries before Sarx takes on the macro.
+Rust requires a derive macro to be defined in a crate of its own, called a proc-macro crate, which
+the compiler runs while it compiles the crates that use the macro. The crate `enki_macros` defines
+the derive, and `enki` re-exports it under the name `Component`. Rust keeps traits and macros in
+separate namespaces, so `use enki::Component` brings in both the trait and the derive.
+
+`enki_macros` uses two libraries. `syn` parses the source of the type into a structure, and its
+`split_for_impl` returns the generic parameters in the three forms that an `impl` line needs.
+`quote` turns the finished `impl` line back into source. Both run only while the compiler runs, and
+neither reaches the game's code or its design. A derive written without them would need its own
+parser for generic parameters and their bounds.
+
+The derive writes the path `::enki::Component`. `enki` declares `extern crate self as enki`, which
+lets that path resolve inside `enki` as well as in the crates that depend on it.
 
 ### Consequences
 
@@ -112,8 +129,10 @@ generates code at compile time. Almost every derive macro is written with two li
   not marked as a component. The error message identifies the type.
 - Good, because each component type has an `impl` of its own. That `impl` can later declare
   constants for the type, such as how the world stores it.
-- Good, because each component type states in the code that it is a component.
-- Bad, because each component type needs one more line.
+- Good, because each component type states in the code that it is a component, in an attribute
+  beside its other derives.
+- Bad, because the derive needs a proc-macro crate of its own, `enki_macros`, and two libraries,
+  `syn` and `quote`. Both add a few seconds to a clean build.
 - Bad, because the game cannot implement `Component` for a type from another crate, such as
   `String`. Rust's orphan rule lets a crate implement a trait for a type only where the crate
   defines the trait or the type. The game must wrap such a value in a struct of its own, such as
@@ -123,13 +142,14 @@ generates code at compile time. Almost every derive macro is written with two li
 
 ### Confirmation
 
-A reader confirms this decision in `enki` with three checks:
+A reader confirms this decision in `enki` with four checks:
 
 - `component.rs` defines `Component` with `Send + Sync + 'static` as its supertraits, and with no
   blanket implementation.
 - `World::add_component` and the tuple implementations of `ComponentSet` take `T: Component`.
   `ComponentInfo::of` and the supertraits of `ComponentSet` are the two other places that spell out
   the bound.
+- `enki` re-exports the derive `Component` from `enki_macros`, beside the trait of the same name.
 - A call to `add_component` with a tuple fails to compile. The `compile_fail` example on
   `Component` in `crates/enki/src/component.rs` makes that call.
 
@@ -161,7 +181,7 @@ impl<T: Send + Sync + 'static> Component for T {}
 
 ### A `Component` Trait That Each Type Implements by Hand
 
-The Decision Outcome sets out this option.
+The game would write `impl Component for Health {}` below each component type.
 
 - Good, because the compiler rejects every type that the game has not marked as a component.
 - Good, because it does not need a library.
@@ -171,10 +191,10 @@ The Decision Outcome sets out this option.
 ### A `Component` Trait That Each Type Implements Through a Derive Macro
 
 Each component type would be marked with `#[derive(Component)]`, and the macro would generate the
-`impl`. Bevy appears to work this way.
+`impl`. Bevy appears to work this way. The Decision Outcome sets out this option.
 
 - Good, because the compiler rejects every type that the game has not marked as a component.
 - Good, because the attribute appears on the type, beside its other derives.
 - Bad, because the macro needs a proc-macro crate of its own.
-- Bad, because a derive macro is almost always written with `syn` and `quote`. Both libraries still
-  await a discussion with the developer.
+- Bad, because a derive macro is almost always written with `syn` and `quote`, two libraries that
+  run while the compiler runs.

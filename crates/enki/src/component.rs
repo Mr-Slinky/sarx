@@ -197,8 +197,8 @@ use std::{mem, ptr, slice};
 
 /// Marks a type as a component, which a [`World`](crate::World) can store on an entity.
 ///
-/// The game makes a type a component by implementing this trait for it, with one empty `impl`.
-/// Every other type stays outside the world. As a result, a tuple passed to
+/// The game makes a type a component with `#[derive(Component)]`, or by implementing this trait for
+/// it with one empty `impl`. Every other type stays outside the world. As a result, a tuple passed to
 /// `World::add_component` by mistake fails to compile, as ADR 0009 sets out.
 ///
 /// The trait requires three other traits of every component type:
@@ -248,6 +248,27 @@ use std::{mem, ptr, slice};
 /// world.add_component(player, (Position(0.0, 0.0), Health(100)));
 /// ```
 pub trait Component: Send + Sync + 'static {}
+
+/// Marks a type as an element of a list component, a list that a [`World`](crate::World) can store
+/// on an entity, with its own length for each entity.
+///
+/// The game marks a type with `#[derive(ListComponent)]`, or with one empty `impl`. The trait
+/// requires `Send + Sync + 'static` for the same reasons as [`Component`].
+///
+/// # Examples
+///
+/// The example marks `Bone` as the element of a list.
+///
+/// ```
+/// use enki::ListComponent;
+///
+/// #[derive(Clone, Copy, Debug, PartialEq, ListComponent)]
+/// struct Bone {
+///     rotation: [f32; 4],
+///     goal: [f32; 4],
+/// }
+/// ```
+pub trait ListComponent: Send + Sync + 'static {}
 
 /// Stores components of one type as raw bytes, in one block of memory that grows as the vector
 /// fills.

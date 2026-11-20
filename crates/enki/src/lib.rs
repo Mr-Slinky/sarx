@@ -101,7 +101,11 @@ mod registry;
 mod set;
 mod world;
 
-pub use component::Component;
+// Lets `::enki::Component`, the path that each derive writes, resolve inside enki too
+extern crate self as enki;
+
+pub use component::{Component, ListComponent};
+pub use enki_macros::{Component, ListComponent};
 pub use entity::Entity;
 pub use query::{Query, ReadOnlyQuery};
 pub use set::ComponentSet;

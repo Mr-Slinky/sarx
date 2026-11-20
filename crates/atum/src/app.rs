@@ -19,10 +19,11 @@ use std::error::Error;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use winit::application::ApplicationHandler;
+use winit::dpi::PhysicalSize;
 use winit::event::{ElementState, KeyEvent, WindowEvent};
 use winit::event_loop::ActiveEventLoop;
 use winit::keyboard::{KeyCode, PhysicalKey};
-use winit::window::{Fullscreen, Window, WindowId};
+use winit::window::{Window, WindowId};
 use zurvan::{HandPoses, Pose, Simulation};
 
 /// Owns the window and the renderer, and defines the methods that winit calls for each event.
@@ -283,10 +284,12 @@ impl ApplicationHandler for App {
 
         // Creates the window and the renderer on the first call, when no window exists yet
         if self.window.is_none() {
-            let fullscreen = Fullscreen::Borderless(None);
+            // let fullscreen = Fullscreen::Borderless(None);
+            let size = PhysicalSize::new(1200, 900);
             let attributes = Window::default_attributes()
                 .with_title("Sarx")
-                .with_fullscreen(Some(fullscreen));
+                // .with_fullscreen(fullscreen)
+                .with_inner_size(size);
             let window = event_loop // <-- First window instance is created here
                 .create_window(attributes)
                 .expect("Failed to create the window");

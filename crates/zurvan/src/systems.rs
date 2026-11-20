@@ -5,8 +5,6 @@ use crate::components::{Bones, Idle, PoseGoal, Position, Speed, Target, Velocity
 use enki::World;
 use crate::Pose;
 
-// The fraction of the remaining turn that each bone makes on every step
-const POSE_FRACTION: f32 = 0.1;
 // The angle, in radians, below which a bone snaps onto its goal
 const SNAP_ANGLE: f32 = 0.5_f32.to_radians();
 
@@ -41,11 +39,11 @@ pub(crate) fn steering(world: &mut World, step_seconds: f32) {
 /// Turns each bone in `Bones` by `POSE_FRACTION` of the way towards its rotation in `PoseGoal`, and
 /// sets the bone to that rotation once it lies within `SNAP_ANGLE` of it.
 // Directs a hand model to a given pose
-pub(crate) fn posing(world: &mut World) {
+pub(crate) fn posing(world: &mut World, fraction: f32) {
     for (bones, goal) in world.query_mut::<(&mut Bones, &PoseGoal)>() {
         // Pairs each bone with its goal rotation
         for (bone, &goal_rotation) in bones.0.iter_mut().zip(&goal.0) {
-            let turned = bone.slerp(goal_rotation, POSE_FRACTION);
+            let turned = bone.slerp(goal_rotation, fraction);
             let remaining = turned.angle_between(goal_rotation);
             // Snaps the bone onto its goal once the bone is close
             *bone = if remaining < SNAP_ANGLE {

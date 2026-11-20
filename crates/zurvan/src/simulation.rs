@@ -60,11 +60,8 @@ use std::time::Duration;
 /// ```
 pub struct Simulation {
     world: World,
-    hand: Entity,
-    // Stores the time that has passed and that no step has used yet. Between calls to `advance`,
-    // it stays below `STEP`.
     unsimulated: Duration,
-    poses: HandPoses,
+    hand: HandState,
     random: Random,
 }
 
@@ -78,6 +75,8 @@ impl Simulation {
     /// Defines the hand's top speed, in world units per second.
     const HAND_SPEED: f32 = 50.0;
     const RANDOM_SEED: u32 = 0x9E37_79B9;
+    const POSE_FRACTION: f32 = 0.25;
+    const IDLE_FRACTION: f32 = 0.01;
 
     /// Returns a simulation with the hand still, at [`HOVER_HEIGHT`](Self::HOVER_HEIGHT) above the
     /// origin, and no time left over.
@@ -107,7 +106,7 @@ impl Simulation {
         );
 
         let mut world = World::new();
-        let hand = world.spawn_empty();
+        let hand_id = world.spawn_empty();
         let start = Vec3::new(0.0, Self::HOVER_HEIGHT, 0.0);
         let components = (
             Position(start),
@@ -120,15 +119,14 @@ impl Simulation {
         );
 
         world
-            .add_components(hand, components)
+            .add_components(hand_id, components)
             .expect("the hand should exist");
-        // Returns the simulation, with no time left over
+        
         Self {
             world,
-            hand,
             unsimulated: Duration::ZERO,
-            poses,
             random: Random::new(Self::RANDOM_SEED),
+            hand: HandState { id: hand_id, poses}
         }
     }
 
@@ -142,15 +140,15 @@ impl Simulation {
     ///
     /// Panics if `action` is not below the number of action poses.
     pub fn hold_pose(&mut self, action: usize) {
-        let pose = &self.poses.actions[action];
+        let pose = &self.hand.poses.actions[action];
         let goal = self
             .world
-            .get_mut::<PoseGoal>(self.hand)
+            .get_mut::<PoseGoal>(self.hand.id)
             .expect("the hand always has a pose goal");
         goal.0.clone_from(&pose.0);
         let idle = self
             .world
-            .get_mut::<Idle>(self.hand)
+            .get_mut::<Idle>(self.hand.id)
             .expect("the hand always has an idle cycle");
         // Pauses the idle cycle, which makes `idling` leave the goal alone
         idle.0 = None;
@@ -162,16 +160,16 @@ impl Simulation {
     /// The simulation seeds its picks with a fixed number. Every run therefore picks the same
     /// sequence of idle poses. The example on [`Simulation`] shows a call.
     pub fn release_pose(&mut self) {
-        let next = self.random.pick_below(self.poses.idle.len());
-        let pose = &self.poses.idle[next];
+        let next = self.random.pick_below(self.hand.poses.idle.len());
+        let pose = &self.hand.poses.idle[next];
         let goal = self
             .world
-            .get_mut::<PoseGoal>(self.hand)
+            .get_mut::<PoseGoal>(self.hand.id)
             .expect("the hand always has a pose goal");
         goal.0.clone_from(&pose.0);
         let idle = self
             .world
-            .get_mut::<Idle>(self.hand)
+            .get_mut::<Idle>(self.hand.id)
             .expect("the hand always has an idle cycle");
         // Resumes the idle cycle from that pose
         idle.0 = Some(next);
@@ -182,7 +180,7 @@ impl Simulation {
     pub fn find_bone_rotations(&self) -> &[Quat] {
         let bones = self
             .world
-            .get::<Bones>(self.hand)
+            .get::<Bones>(self.hand.id)
             .expect("the hand always has bones");
         &bones.0
     }
@@ -194,7 +192,7 @@ impl Simulation {
     pub fn set_hand_target(&mut self, point: Vec3) {
         let target = self
             .world
-            .get_mut::<Target>(self.hand)
+            .get_mut::<Target>(self.hand.id)
             .expect("the hand always has a target");
         target.0 = point;
     }
@@ -203,7 +201,7 @@ impl Simulation {
     pub fn hand_position(&self) -> Vec3 {
         let position = self
             .world
-            .get::<Position>(self.hand)
+            .get::<Position>(self.hand.id)
             .expect("the hand always has a position");
         position.0
     }
@@ -230,9 +228,29 @@ impl Simulation {
         steering(&mut self.world, step_seconds);
         movement(&mut self.world, step_seconds);
         // Runs before `idling`, which then sees on the same step whether the bones have arrived
-        posing(&mut self.world);
-        idling(&mut self.world, &self.poses.idle);
+        let idle = self
+            .world
+            .get_mut::<Idle>(self.hand.id)
+            .expect("the hand always has an idle cycle");
+
+        let frac = if idle.0.is_some() {
+            Self::IDLE_FRACTION
+        } else {
+            Self::POSE_FRACTION
+
+        };
+
+        posing(&mut self.world, frac);
+        idling(&mut self.world, &self.hand.poses.idle);
     }
+}
+
+// ========================================================================================== \\
+//                                          Helpers                                           \\
+// ========================================================================================== \\
+struct HandState {
+    id: Entity,
+    poses: HandPoses,
 }
 
 // ========================================================================================== \\
@@ -261,7 +279,7 @@ mod tests {
 
     /// Returns the target of the hand
     fn read_target(simulation: &Simulation) -> Vec3 {
-        let target = simulation.world.get::<Target>(simulation.hand);
+        let target = simulation.world.get::<Target>(simulation.hand.id);
         target.expect("the hand has a target").0
     }
 
@@ -349,9 +367,9 @@ mod tests {
         let start = Vec3::new(0.0, Simulation::HOVER_HEIGHT, 0.0);
         let world = &simulation.world;
         let velocity = world
-            .get::<Velocity>(simulation.hand)
+            .get::<Velocity>(simulation.hand.id)
             .map(|velocity| velocity.0);
-        let speed = world.get::<Speed>(simulation.hand).map(|speed| speed.0);
+        let speed = world.get::<Speed>(simulation.hand.id).map(|speed| speed.0);
         assert_eq!(simulation.hand_position(), start, "position");
         assert_eq!(velocity, Some(Vec3::ZERO), "velocity");
         assert_eq!(read_target(&simulation), start, "target");
@@ -389,7 +407,7 @@ mod tests {
         let moved = Vec3::new(2.0, 1.0, -3.0);
         simulation
             .world
-            .get_mut::<Position>(simulation.hand)
+            .get_mut::<Position>(simulation.hand.id)
             .expect("the hand has a position")
             .0 = moved;
 

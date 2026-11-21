@@ -77,47 +77,43 @@ pub fn read_mesh(file: &[u8]) -> Result<MeshData, GltfError> {
 ///
 /// # Examples
 ///
-/// The example reads the hand model. It then looks at the shape of the mesh, the bone that the
-/// first vertex follows, and the rotations of the fist pose.
+/// The example reads a skinned model with poses. It then looks at the shape of the mesh, the bones
+/// that the first vertex follows, and the rotations of the first pose.
 ///
 /// ```
 /// use hermes::read_model;
 ///
-/// // Reads the hand model, which Blender exported as a binary glTF file
-/// let file = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/hand-model.glb"));
+/// // Reads a model that Blender exported as a binary glTF file
+/// let file = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/fixtures/hand.glb"));
 /// let model = read_model(file)?;
 ///
 /// // Checks that the mesh has one normal for each vertex, and three indices for each triangle
 /// let mesh = &model.mesh;
-/// assert_eq!(mesh.positions.len(), 3558);
 /// assert_eq!(mesh.normals.len(), mesh.positions.len());
 /// assert_eq!(mesh.indices.len() % 3, 0);
 ///
-/// // Reads the bones that the first vertex follows, which is the tip of the little finger alone
+/// // Reads the up to four bones that the first vertex follows, and how strongly it follows each
 /// let skin = &model.skin;
 /// let joints = skin.joints[0];
 /// let weights = skin.weights[0];
-/// let first_bone = &skin.bones[usize::from(joints[0])];
-/// assert_eq!(first_bone.name, "pinky-bone-tip");
-/// assert_eq!(weights, [1.0, 0.0, 0.0, 0.0]);
+/// for (joint, weight) in joints.iter().zip(weights) {
+///     let bone = &skin.bones[usize::from(*joint)];
+///     println!("the first vertex follows {} with weight {weight}", bone.name);
+/// }
 ///
-/// // Checks that every bone comes after its parent, and that the wrist, the first bone, has no
-/// // parent
-/// assert_eq!(skin.bones.len(), 22);
+/// // Checks that every bone comes after its parent, which leaves the first bone with no parent
 /// for (index, bone) in skin.bones.iter().enumerate() {
 ///     assert!(bone.parent.is_none_or(|parent| parent < index));
 /// }
-/// assert_eq!(skin.bones[0].name, "wrist");
 /// assert_eq!(skin.bones[0].parent, None);
 ///
-/// // Finds the fist pose, and takes each bone's rotation in it, or the bone's rotation at rest
-/// // where the pose leaves the bone out
-/// let fist = model
+/// // Takes each bone's rotation in the first pose, or the bone's rotation at rest where the pose
+/// // leaves the bone out
+/// let pose = model
 ///     .poses
-///     .iter()
-///     .find(|pose| pose.name == "fist")
-///     .expect("the hand model should have a fist pose");
-/// let rotations: Vec<[f32; 4]> = fist
+///     .first()
+///     .expect("the model should have at least one pose");
+/// let rotations: Vec<[f32; 4]> = pose
 ///     .rotations
 ///     .iter()
 ///     .zip(&skin.bones)

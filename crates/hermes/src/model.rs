@@ -232,81 +232,131 @@ fn read_mesh_from(primitive: &Primitive, binary: &[u8]) -> Result<MeshData, Gltf
     })
 }
 
-// ========================================================================================== \\
-//                                           Tests                                            \\
-// ========================================================================================== \\
+// ========================================================================================== \
+//                                           Tests                                            \
+// ========================================================================================== \
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::HAND_MODEL;
+    use crate::test_support::{
+        CUBE_MODEL, HAND_MODEL, INDEX_PAST_LAST_VERTEX, TOO_FEW_NORMALS, TRIANGLE_MODEL,
+        WITHOUT_BINARY, WITHOUT_INDICES, WITHOUT_MESH, WITHOUT_NORMALS,
+    };
 
-    /// Checks that the hand model gives one normal per position, and whole triangles of indices
+    /// Checks that the triangle gives back the positions, normals and `u16` indices it stores, in
+    /// the order it stores them
     #[test]
-    fn read_mesh_with_hand_model_returns_expected_counts() {
-        let mesh = read_mesh(HAND_MODEL).unwrap();
+    fn read_mesh_with_triangle_returns_stored_values() {
+        let expected_positions = [[1.0, 2.0, 3.0], [4.0, 6.0, 5.0], [9.0, 7.0, 8.0]];
+        let expected_normals = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+        let expected_indices = [0, 1, 2];
 
-        assert_eq!(mesh.positions.len(), 3558, "number of positions");
-        assert_eq!(mesh.normals.len(), 3558, "number of normals");
-        assert_eq!(mesh.indices.len(), 19788, "number of indices");
-        assert_eq!(
-            mesh.indices.len() % 3,
-            0,
-            "indices left over after the last whole triangle"
-        );
+        let mesh = read_mesh(TRIANGLE_MODEL).unwrap();
+
+        assert_eq!(mesh.positions, expected_positions, "positions");
+        assert_eq!(mesh.normals, expected_normals, "normals");
+        assert_eq!(mesh.indices, expected_indices, "indices");
     }
 
-    /// Checks that the indices of the hand model reach its last vertex, and never point past it
+    /// Checks that the cube gives back the positions, normals and `u32` indices of its six faces,
+    /// in the order it stores them
     #[test]
-    fn read_mesh_with_hand_model_returns_indices_within_vertices() {
-        let mesh = read_mesh(HAND_MODEL).unwrap();
-
-        let vertex_count = mesh.positions.len();
-        let out_of_range = mesh
-            .indices
+    fn read_mesh_with_cube_returns_stored_values() {
+        let expected_positions = [
+            // +X
+            [1.0, -1.0, -1.0], [1.0, 1.0, -1.0], [1.0, 1.0, 1.0], [1.0, -1.0, 1.0],
+            // -X
+            [-1.0, -1.0, -1.0], [-1.0, -1.0, 1.0], [-1.0, 1.0, 1.0], [-1.0, 1.0, -1.0],
+            // +Y
+            [-1.0, 1.0, -1.0], [-1.0, 1.0, 1.0], [1.0, 1.0, 1.0], [1.0, 1.0, -1.0],
+            // -Y
+            [-1.0, -1.0, -1.0], [1.0, -1.0, -1.0], [1.0, -1.0, 1.0], [-1.0, -1.0, 1.0],
+            // +Z
+            [-1.0, -1.0, 1.0], [1.0, -1.0, 1.0], [1.0, 1.0, 1.0], [-1.0, 1.0, 1.0],
+            // -Z
+            [-1.0, -1.0, -1.0], [-1.0, 1.0, -1.0], [1.0, 1.0, -1.0], [1.0, -1.0, -1.0],
+        ];
+        let face_normals = [
+            [1.0, 0.0, 0.0],
+            [-1.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [0.0, -1.0, 0.0],
+            [0.0, 0.0, 1.0],
+            [0.0, 0.0, -1.0],
+        ];
+        let expected_normals: Vec<[f32; 3]> = face_normals
             .iter()
-            .filter(|&&index| index as usize >= vertex_count)
-            .count();
-        let largest = mesh.indices.iter().max();
+            .flat_map(|&normal| [normal; 4])
+            .collect();
+        let expected_indices: Vec<u32> = (0..6)
+            .flat_map(|face| {
+                let first = 4 * face;
+                [first, first + 1, first + 2, first, first + 2, first + 3]
+            })
+            .collect();
 
-        assert_eq!(
-            out_of_range, 0,
-            "indices past the last of {vertex_count} vertices"
-        );
-        assert_eq!(largest, Some(&3557), "largest index");
+        let mesh = read_mesh(CUBE_MODEL).unwrap();
+
+        assert_eq!(mesh.positions, expected_positions, "positions");
+        assert_eq!(mesh.normals, expected_normals, "normals");
+        assert_eq!(mesh.indices, expected_indices, "indices");
     }
 
-    /// Checks that every normal of the hand model has a length of 1, within a small tolerance
+    /// Checks that the frozen hand, a large file that Blender wrote, gives back every vertex and
+    /// index it stores
     #[test]
-    fn read_mesh_with_hand_model_returns_unit_normals() {
-        let tolerance = 1e-5;
-
+    fn read_mesh_with_hand_model_returns_every_vertex_and_index() {
         let mesh = read_mesh(HAND_MODEL).unwrap();
 
-        let not_unit = mesh
-            .normals
-            .iter()
-            .filter(|[x, y, z]| ((x * x + y * y + z * z).sqrt() - 1.0).abs() > tolerance)
-            .count();
-
-        assert_eq!(not_unit, 0, "normals whose length is not 1");
+        assert_eq!(mesh.positions.len(), 3558, "positions");
+        assert_eq!(mesh.normals.len(), 3558, "normals");
+        assert_eq!(mesh.indices.len(), 19788, "indices");
     }
 
-    /// Checks that the hand model gives the first position, normal and triangle that the file stores
+    /// Checks that each broken file gives back the error for the one rule it breaks
     #[test]
-    fn read_mesh_with_hand_model_returns_first_vertex_and_triangle() {
-        let mesh = read_mesh(HAND_MODEL).unwrap();
+    fn read_mesh_with_broken_files_returns_matching_error() {
+        let cases: [(&str, &[u8], fn(&GltfError) -> bool); 6] = [
+            ("without binary", WITHOUT_BINARY, |error| {
+                matches!(error, GltfError::MissingBinary)
+            }),
+            ("without mesh", WITHOUT_MESH, |error| {
+                matches!(error, GltfError::MissingMesh)
+            }),
+            ("without normals", WITHOUT_NORMALS, |error| {
+                matches!(error, GltfError::MissingNormals)
+            }),
+            ("without indices", WITHOUT_INDICES, |error| {
+                matches!(error, GltfError::MissingIndices)
+            }),
+            ("too few normals", TOO_FEW_NORMALS, |error| {
+                matches!(
+                    error,
+                    GltfError::NormalCountMismatch {
+                        positions: 3,
+                        normals: 2
+                    }
+                )
+            }),
+            ("index past last vertex", INDEX_PAST_LAST_VERTEX, |error| {
+                matches!(
+                    error,
+                    GltfError::IndexOutOfRange {
+                        index: 3,
+                        vertex_count: 3
+                    }
+                )
+            }),
+        ];
 
-        assert_eq!(
-            mesh.positions[0],
-            [-0.76153266, 0.15828243, -3.4236743],
-            "first position"
-        );
-        assert_eq!(
-            mesh.normals[0],
-            [-0.882713, -0.46630687, -0.058100857],
-            "first normal"
-        );
-        assert_eq!(mesh.indices[..3], [0, 960, 2738], "first triangle");
+        let results: Vec<(&str, Option<GltfError>, fn(&GltfError) -> bool)> = cases
+            .into_iter()
+            .map(|(name, file, is_expected)| (name, read_mesh(file).err(), is_expected))
+            .collect();
+
+        for (name, error, is_expected) in results {
+            assert!(error.as_ref().is_some_and(is_expected), "error for {name}: {error:?}");
+        }
     }
 }

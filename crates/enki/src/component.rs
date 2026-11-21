@@ -287,10 +287,14 @@ pub trait ListComponent: Send + Sync + 'static {}
 /// `as_mut_slice_with_changed_value_updates_only_that_component` changes one component through
 /// `as_mut_slice`.
 pub(crate) struct ComponentVec {
-    info: ComponentInfo, // describes the component type that the vector stores
-    data: NonNull<u8>,   // points at the start of the block
-    len: usize,          // counts the components in the vector
-    capacity: usize,     // counts the components that the block has room for
+    /// describes the component type that the vector stores
+    info: ComponentInfo,
+    /// points at the start of the block
+    data: NonNull<u8>,
+    /// counts the components in the vector
+    len: usize,
+    /// counts the number of components that the block has room for
+    capacity: usize,
 }
 
 impl ComponentVec {
@@ -663,6 +667,31 @@ impl ComponentVec {
         self.increase_capacity(required.max(doubled));
     }
 
+    pub(crate) unsafe fn extend_from_ptr(&mut self, source: *const u8, count: usize) {
+        self.reserve(count);
+        let end = self.ptr_at(self.len);
+        let bytes = count * self.info.layout.size();
+        // TODO: add safety comment
+        unsafe { ptr::copy_nonoverlapping(source, end, bytes) }
+        self.len += count;
+    }
+
+    pub(crate) unsafe fn drop_range(&mut self, start: usize, count: usize) {
+        if let Some(drop_value) = self.info.drop {
+            for index in start..(start + count) {
+                unsafe {
+                    // TODO: add safety comment
+                    drop_value(self.ptr_at(index));
+                }
+            }
+        }
+    }
+
+    /// Puts every value out of reach, which stops `Drop` from running their clean-up code
+    pub(crate) fn forget_all(&mut self) {
+        self.len = 0;
+    }
+
     // ========================================================================================== \\
     //                                       Helper Methods                                       \\
     // ========================================================================================== \\
@@ -909,30 +938,12 @@ unsafe impl Sync for ComponentVec {}
 /// types.
 #[derive(Clone, Copy, Debug)]
 pub struct ComponentInfo {
-    /// Identifies the component type.
-    ///
-    /// For the `ComponentInfo` in the [`ComponentInfo`] example, the field equals
-    /// `TypeId::of::<f32>()`.
     type_id: TypeId,
-    /// Stores the name of the component type, which a panic message reports.
-    ///
-    /// For the `ComponentInfo` in the [`ComponentInfo`] example, the field equals `"f32"`.
     type_name: &'static str,
-    /// Defines the size and alignment of one component.
-    ///
-    /// For the `ComponentInfo` in the [`ComponentInfo`] example, the field has a size of 4 bytes and
-    /// an alignment of 4.
     layout: Layout,
-    /// Stores the function that runs the clean-up code of the component at the given address. The
-    /// field is `None` where the type has no clean-up code.
-    ///
-    /// The field is `Some` for `String`, which frees its text, and `None` for `f32`.
     drop: Option<unsafe fn(*mut u8)>,
-    /// Stores the mask with the one bit that stands for the component type, within one world.
-    ///
-    /// For the `ComponentInfo` in the [`ComponentInfo`] example, the field equals
-    /// `ComponentMask::single(0)`.
     bit: ComponentMask,
+    list: bool,
 }
 
 impl ComponentInfo {
@@ -963,7 +974,26 @@ impl ComponentInfo {
             layout: Layout::new::<T>(),
             drop,
             bit,
+            list: false,
         }
+    }
+
+    pub(crate) fn of_list<T: Send + Sync + 'static>(bit: ComponentMask) -> Self {
+        let element = Self::of::<T>(bit);
+        Self {
+            type_id: TypeId::of::<[T]>(),
+            type_name: any::type_name::<[T]>(),
+            list: true,
+            ..element
+        }
+    }
+
+    pub(crate) fn is_list(&self) -> bool {
+        self.list
+    }
+
+    pub(crate) fn type_name(&self) -> &'static str {
+        self.type_name
     }
 
     /// Returns the [`TypeId`] that identifies the component type.

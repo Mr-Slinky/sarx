@@ -120,7 +120,7 @@ impl ListVec {
         }
         drop(ManuallyDrop::into_inner(new_values));
         self.spans[row] = Span::new(start, count);
-        self.compact_if_frac_dead(Self::COMPACT_THRESHOLD);
+        self.compact_if_crossed_threshold();
 
         old
     }
@@ -132,10 +132,39 @@ impl ListVec {
         let taken = self.read_row::<T>(span);
 
         self.dead += span.len();
-        self.compact_if_frac_dead(Self::COMPACT_THRESHOLD);
+        self.compact_if_crossed_threshold();
 
         taken
     }
+
+    pub(crate) fn swap_remove_row(&mut self, row: usize) {
+        let span = self.spans.swap_remove(row);
+        self.dead += span.len();
+        unsafe { self.values.drop_range(span.start(), span.len()) };
+        self.compact_if_crossed_threshold();
+    }
+
+    pub(crate) fn move_row(&mut self, row: usize, target: &mut ListVec) {
+        // Panics before anything changes, if the two columns store different element types
+        assert_eq!(
+            self.info().type_id(),
+            target.info().type_id(),
+            "both list columns must store the same element type"
+        );
+        let span = self.spans.swap_remove(row);
+        let target_start = target.values.len();
+        let source = self.values.ptr_at(span.start());
+        unsafe { target.values.extend_from_ptr(source, span.len()) };
+        target.spans.push(Span::new(target_start, span.len()));
+        self.dead += span.len();
+        self.compact_if_crossed_threshold();
+    }
+
+    /// Only reserves space in for more spans, since the list values are of unknown dimension
+    pub(crate) fn reserve_rows(&mut self, additional: usize) {
+        self.spans.reserve(additional);
+    }
+
     // Helpers__________________
 
     #[track_caller]
@@ -160,10 +189,10 @@ impl ListVec {
         values
     }
 
-    /// Compacts if the `frac`tion amount of the components is "dead". So if frac = 2, the compaction
-    /// happens at half dead values. When frac = 4, the compaction happens at a quarter dead values.
-    fn compact_if_frac_dead(&mut self, frac: usize) {
-        if self.dead > 0 && (self.dead * frac >= self.values.len()) {
+    /// Compacts if the [`Self::COMPACT_THRESHOLD`] amount of the components is "dead". So if frac = 2,
+    /// the compaction happens at half dead values. When frac = 4, the compaction happens at a quarter dead values.
+    fn compact_if_crossed_threshold(&mut self) {
+        if self.dead > 0 && (self.dead * Self::COMPACT_THRESHOLD >= self.values.len()) {
             self.compact();
         }
     }
@@ -182,5 +211,16 @@ impl ListVec {
         self.values.forget_all();
         self.values = compacted;
         self.dead = 0;
+    }
+}
+
+impl Drop for ListVec {
+    fn drop(&mut self) {
+        self.values.forget_all();
+        for span in &self.spans {
+            // SAFETY: `drop_range` requires live values that nothing uses afterwards. Every span
+            // covers live values, and the column is being dropped
+            unsafe { self.values.drop_range(span.start(), span.len()) };
+        }
     }
 }

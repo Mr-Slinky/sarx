@@ -100,6 +100,7 @@ mod query;
 mod registry;
 mod set;
 mod world;
+mod list;
 
 // Lets `::enki::Component`, the path that each derive writes, resolve inside enki too
 extern crate self as enki;

@@ -237,7 +237,6 @@ impl Simulation {
             Self::IDLE_FRACTION
         } else {
             Self::POSE_FRACTION
-
         };
 
         posing(&mut self.world, frac);
